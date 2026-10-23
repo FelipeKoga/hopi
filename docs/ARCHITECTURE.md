@@ -282,6 +282,9 @@ With `logSink = Summary`, every completed or failed transaction emits one NDJSON
 
 A failed transaction has `"code":null` and adds `"error":"…"` (at most 512 chars, cut at a code
 point boundary) after `state`.
+Not every line is a transaction: notice lines carry `"notice"` and no `"id"`, e.g.
+`{"hopi":1,"notice":"…","dropped":N}` when the store had to drop terminal writes (N is the
+running total). Agents must skip lines without `id`.
 Occurrences of the request URL inside `error` are replaced with the redacted URL, here and on the
 bridge.
 
@@ -318,24 +321,49 @@ The app runs a bridge server; the host CLI connects to it.
   from the OS CSPRNG, never logged.
 - **Physical iOS devices:** no bridge in v1 (no sane host↔app channel without a network listener).
   The os_log stream works.
-- **JVM:** the bridge is a no-op.
+- **JVM:** same as the iOS simulator (`127.0.0.1` port 0 plus token), with `bridge.json` written to
+  a directory given by the system property `hopi.bridgeDir` (default
+  `<java.io.tmpdir>/hopi/<pid>`, mode 0700, file 0600). It exists so the CLI's integration tests
+  drive the real server in-process with no device, and it is a legitimate desktop target.
+
+**Android socket name.** Core has no `Context` and never auto-starts (no ContentProvider, no
+initializer), so the name comes from the process: `Application.getProcessName()` on API 28+, else
+`/proc/self/cmdline` up to the first NUL. For the main process that is the applicationId; an app
+that runs Ktor in an `android:process` process gets that process name. The CLI requires `--app`; it
+may additionally list bridges from `/proc/net/unix` (`@hopi.` entries) only if the shell can
+read it on the target API level, which must be verified on an emulator, not assumed.
+
+**Layering.** The protocol handler is transport-agnostic `commonMain` code: a line source, a line
+sink and the store. It enforces the 4096-char cap before parsing and the token check before sending
+any byte. Transports are thin platform layers: `LocalServerSocket` (Android), POSIX `AF_INET` bound
+to `127.0.0.1` (iOS), `java.net.ServerSocket` bound to `InetAddress.getLoopbackAddress()` (JVM).
+Never `INADDR_ANY` / `0.0.0.0`. Tokens are 128+ bits from `SecRandomCopyBytes` (iOS) or
+`SecureRandom` (JVM), compared in constant time, never logged.
+
+**Slow clients.** Each client has its own bounded send queue. When it overflows the client is
+disconnected with a final `{"type":"error","code":"SLOW_CLIENT"}` line if it fits. A client never
+suspends the store's consumer or another client.
+
+**Holes in the timeline.** `hello` includes `"dropped":N` (the store's `droppedTerminalWrites`), and
+`tail` sends `{"type":"notice","dropped":N}` whenever the count grows.
 
 The bridge starts only when `agentBridge = true`, on a background thread, and costs nothing until a
-client connects: events are encoded to JSON only while at least one client is subscribed.
+client connects: the accept thread blocks in `accept()` (no polling, no timer), and events are
+encoded to JSON only while at least one client is subscribed.
 
 #### Wire protocol (NDJSON, one JSON object per line, both directions)
 
 Client to app:
 
 ```json
-{"cmd":"hello"}                       // → {"type":"hello","protocol":1,"app":"<id>","platform":"android|ios","count":N}
+{"cmd":"hello"}                       // → {"type":"hello","protocol":1,"app":"<id>","platform":"android|ios|jvm","count":N,"dropped":N}
 {"cmd":"list","since":0,"limit":100}  // → {"type":"transaction",...summary...}* then {"type":"end"}
 {"cmd":"get","id":42}                 // → {"type":"transaction",...full detail, bodies as text or base64...}
 {"cmd":"tail","since":0}              // → summaries since `since`, then live events until disconnect
 {"cmd":"clear"}                       // → {"type":"ok"}
 ```
 
-Errors: `{"type":"error","code":"NOT_FOUND|BAD_REQUEST|UNAUTHORIZED","message":"…"}`.
+Errors: `{"type":"error","code":"NOT_FOUND|BAD_REQUEST|UNAUTHORIZED|SLOW_CLIENT","message":"…"}`.
 
 Full detail encodes bodies as `{"encoding":"utf8","text":"…"}` when decodable as UTF-8 text,
 otherwise `{"encoding":"base64","data":"…"}`, plus `truncated`, `totalBytes`, `contentType`,
@@ -365,6 +393,12 @@ columns. Exit codes: 0 ok, 1 usage, 2 not reachable (app not running, bridge off
 Platform is inferred when only one of adb/simctl has a target. Adb is found at `$ANDROID_HOME`,
 `~/Library/Android/sdk/platform-tools/adb`, or `PATH`. Subprocesses are spawned with argument
 arrays, never through a shell.
+
+The CLI depends on `hopi-core`'s JVM artifact for the cURL export and the JSON model; it does
+not reimplement them. On Android it runs `adb forward tcp:0 localabstract:hopi.<app>`, reads
+the port from stdout, and always removes that forward on exit, including on SIGINT during `tail`.
+`--platform jvm --bridge-file <path>` targets a JVM bridge (tests). `./gradlew :hopi-cli:installDist`
+produces a runnable `bin/hopi`.
 
 ## UI (`hopi-ui`)
 
