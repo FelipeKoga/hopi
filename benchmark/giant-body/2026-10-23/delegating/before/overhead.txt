@@ -1,0 +1,4 @@
+Hopi overhead, 1017 B JSON body, 20000 requests per arm after 10000 warm-up
+[Content-Length] baseline median 31.2 µs, p95 38.4 µs | plugin median 38.2 µs, p95 49.2 µs | delta median 7.0 µs, p95 10.8 µs
+[chunked] baseline median 22.5 µs, p95 26.0 µs | plugin median 28.9 µs, p95 38.3 µs | delta median 6.4 µs, p95 12.3 µs
+

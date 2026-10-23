@@ -1,0 +1,20 @@
+== old 1
+Hopi overhead, 1017 B JSON body, 20000 requests per arm after 10000 warm-up
+[Content-Length] baseline median 21.1 µs, p95 28.6 µs | plugin median 23.7 µs, p95 47.6 µs | delta median 2.6 µs, p95 19.0 µs
+[chunked] baseline median 21.0 µs, p95 24.2 µs | plugin median 25.5 µs, p95 30.3 µs | delta median 4.5 µs, p95 6.1 µs
+
+== new 1
+Hopi overhead, 1017 B JSON body, 20000 requests per arm after 10000 warm-up
+[Content-Length] baseline median 16.7 µs, p95 41.5 µs | plugin median 21.2 µs, p95 37.7 µs | delta median 4.5 µs, p95 -3.8 µs
+[chunked] baseline median 15.0 µs, p95 26.3 µs | plugin median 20.8 µs, p95 30.0 µs | delta median 5.8 µs, p95 3.6 µs
+
+== old 2
+Hopi overhead, 1017 B JSON body, 20000 requests per arm after 10000 warm-up
+[Content-Length] baseline median 29.0 µs, p95 36.5 µs | plugin median 35.7 µs, p95 47.9 µs | delta median 6.6 µs, p95 11.4 µs
+[chunked] baseline median 22.2 µs, p95 26.3 µs | plugin median 28.5 µs, p95 37.4 µs | delta median 6.3 µs, p95 11.0 µs
+
+== new 2
+Hopi overhead, 1017 B JSON body, 20000 requests per arm after 10000 warm-up
+[Content-Length] baseline median 30.1 µs, p95 37.4 µs | plugin median 38.3 µs, p95 50.2 µs | delta median 8.2 µs, p95 12.7 µs
+[chunked] baseline median 22.3 µs, p95 26.0 µs | plugin median 24.9 µs, p95 33.3 µs | delta median 2.5 µs, p95 7.2 µs
+

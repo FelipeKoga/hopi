@@ -245,14 +245,15 @@ truncated body drops an incomplete trailing sequence before decoding. Everything
 
 Built with `createClientPlugin`. Body observation starts from Ktor's own `Logging` plugin
 (`.reference/ktor-3.5.2/ktor-client-logging`): the same pipeline phases and `replaceResponse`, with
-Hopi's own pass-through channels in place of `split` (reasons below):
+Hopi's own pass-through (request) and delegating (response) channels in place of `split`
+(reasons below):
 
 - Request bodies: `ByteArrayContent`/`TextContent` are read directly; `ReadChannelContent` and
   `WriteChannelContent` are teed (copy to both the wire and a bounded capture) through a
   pass-through `WriteChannelContent` rather than `split`. `MultiPartFormDataContent`
   and `ProtocolUpgrade` are recorded with `skippedReason`, not captured.
 - Response bodies: tee the raw content with `replaceResponse`, as `Logging` does, but through a
-  pass-through channel of Hopi's own rather than `split` (details below), except a body whose
+  delegating channel of Hopi's own rather than `split` (details below), except a body whose
   `Content-Length` fits `maxBodyBytes`, which is read from the saved copy after `SaveBody`. A body
   with a `Content-Encoding` is captured as the app receives it, after any decoder.
   The capture keeps at most `maxBodyBytes` and counts the rest without holding back the app side.
@@ -297,17 +298,53 @@ How the plugin implements this (Ktor 3.5.2):
     inserted before `HttpReceivePipeline.Before`, that is, before `SaveBody` reads it. Reading a saved
     body afterwards would copy all of it (`SavedHttpResponse.rawContent` builds a new buffer over the
     whole array).
-  - The tee is one coroutine in the client's scope that moves the source to the app's channel in the
-    chunks the source makes available (as `copyTo` does, so the app's reader sees the same chunking
-    and the same flush points), keeping the first `maxBodyBytes` and counting the rest, so
-    `totalBytes` is always the exact count. A source failure reaches the app with the source's own
-    cause (not wrapped once more). An app that cancels the body before its end (leaving
-    `execute {}`) while the body is still arriving cancels the source too, so the engine can release
-    the connection, and the transaction fails with `"cancelled"`. The transaction completes once the
-    source ended and the app's reader reached the end, or the app cancelled after the whole body
-    had arrived.
+  - The tee is a delegating `ByteReadChannel` (`TeedBody`) handed to the app in place of the raw
+    one, with no coroutine and no second channel of its own: the app's reader (`SaveBody`,
+    `BodyProgress`, `bodyAsChannel`'s copy, or the app itself) reads the source directly, so a chunk
+    takes no extra coroutine hop. When the reader asks for more, what the source holds moves into
+    the tee's read buffer (a segment move, no byte copy, as Ktor's `CountedByteReadChannel` does).
+    While the capture is below `maxBodyBytes`, each move also copies its new bytes into the capture;
+    past the cap a move only adds its size to `totalBytes`, which is always the exact count. The
+    capture grows in blocks (the `Content-Length` when it is known, else 8 KB, then blocks of up to
+    64 KB), so growing never copies what it kept, and at the end the blocks are joined into one
+    array once: on the reader when that join is at most 64 KB (cheaper than a dispatch), else in
+    one coroutine on `Dispatchers.Default`, with the transaction's duration taken at the end
+    itself. **The app's reader pays at most one bounded copy of `maxBodyBytes`, never a hop per
+    chunk, nothing beyond the cap**, plus at most a 64 KB join (a body whose `Content-Length` is
+    right needs none: its one block is the array). Simpleperf on a debuggable build on the
+    emulator, measured with the earlier doubling buffer: about 0.2 ms of CPU per request for the
+    default 256 KB, at most 0.5 ms for all the moves of a 1 MB body, counting the source's own
+    read-buffer handoff that the reader pays without the plugin too; acceptable even when that
+    reader is the main thread. That buffer grew by doubling and trimmed at the end, all on the
+    reader, so an unsized body cost the reader two to three times the cap; blocks remove both. The copy reads the tee's buffer in place
+    (`UnsafeBufferOperations.iterate`), one array copy per segment from the first new byte; a peek
+    source with a skip cost about three times as much there. A wait that the source can answer at
+    once allocates nothing either.
+  - A source failure reaches the app unchanged: the tee rethrows the source's own exception. An
+    app that cancels the body before its end (leaving `execute {}`) while the body is still
+    arriving cancels the source, as without the plugin, so the engine can release the connection,
+    and the transaction fails with `"cancelled"`. The transaction completes once the source ended
+    and the reader took in everything it delivered, or the app cancelled after the whole body had
+    arrived. All of it happens on the reader's own calls (or the cancel), never by blocking,
+    suspending or posting per chunk; the only post is the one off-reader join above. A failure
+    looks to the reader exactly as the source's own channel shows it: the wait that a reset ends
+    returns false without moving anything (as `ByteChannel.awaitContent` does when the close comes
+    just before it suspends), a wait on an already failed source rethrows its close cause, and the
+    read buffer of a failed source throws even while bytes remain, so `readAvailable` sees the end,
+    `readRemaining` throws the close cause and `readFully` an `EOFException`, exactly as without
+    the plugin, and `BodyProgress`'s copy closes its channel with the source's failure. A body nobody reads and nobody cancels stays `Pending`, and
+    nothing notices a failure of its source either: inside `execute {}` that lasts until the block
+    returns, when Ktor cancels the body, which settles it (`Complete` if it had arrived whole).
+    Through `prepareGet().body<ByteReadChannel>()` Ktor's own copy reads the tee into its 1 MB
+    buffer, so a body that fits completes even if the app never reads it; a larger one, or one
+    still arriving, stays `Pending` until the app reads or cancels its channel. A cancel from another thread while a reader
+    runs (Ktor's `bodyAsChannel` copy forwards the app's cancel) reads only the source's state;
+    only a cancel before any read moves the arrived bytes in to capture them.
+  - Saved and decoded bodies keep their own paths, which never touch the app's reader: a saved body
+    whose `Content-Length` fits the cap is read once from memory on the call's coroutine, and a
+    saved decoded body is read from a fresh `rawContent` off the call's coroutine.
 - `durationMs` uses `TimeSource.Monotonic`. It runs from the send hook to the moment the app's reader
-  reaches a teed body's end, the off-path read of a decoded body ends, or the send pipeline returns
+  takes in a teed body's end, the off-path read of a decoded body ends, or the send pipeline returns
   (all other cases; a saved body has been fully read by then).
 - A failed transaction keeps the request but no response fields (`code` stays null).
   `error` is `"<ExceptionClass>: <message>"`, or `"cancelled"` for a `CancellationException`.
@@ -838,6 +875,11 @@ Measured with a JVM benchmark against `ktor-client-mock`, plugin installed vs no
 
 - Added latency per request on the caller path: < 50 µs median for a 1 KB JSON response.
 - No added allocation proportional to body size beyond `maxBodyBytes`.
+- The app's reader pays at most one bounded copy of `maxBodyBytes`, never a hop per chunk, nothing
+  beyond the cap, plus at most a 64 KB join at the end (`TeedBodyTest`: reading 8 MB past the cap
+  allocates the same bytes on the reader as without the plugin, and the capture copies nothing
+  more; from the first byte to the end of a chunked body, at 64 KB and 8 MB caps, the reader
+  allocates less than the kept bytes plus 128 KB over the run without the plugin).
 - A 10 MB response is received intact by the app while at most `maxBodyBytes` is retained.
 - With `enabled = false` the plugin installs no hooks at all.
 
@@ -907,10 +949,30 @@ main thread (a gap in framestats alone can be an idle one, since Compose draws o
 - **Android, the app's request + parse, warm runs (after the 5th), real vs noop:** 1 MB 79 vs
   66.5 ms (+19%; fetch 30 vs 21 ms), 5 MB 344 vs 307.5 ms (+12%), 20 MB within noise, 50 MB
   (large heap) 3,048 vs 3,049 ms. Compiled ahead of time (`cmd package compile -m speed`) the 1 MB
-  gap falls to 73 vs 70 ms. The tee's pump is about 1 ms of CPU per MB in a debuggable build; the
-  rest is the second coroutine hop per chunk (engine channel, pump, app channel) and the
-  debuggable runtime. Removing the hop would run the capture on the app's reader thread, which
-  can be the main thread, so the tee keeps it. With an 8 MB cap a body that fits is copied on the
+  gap falls to 73 vs 70 ms. The tee's pump was about 1 ms of CPU per MB in a debuggable build;
+  the rest was the second coroutine hop per chunk (engine channel, pump, app channel) and the
+  debuggable runtime. The pump is gone since: the tee is now a delegating channel read by the
+  app's own reader (see Ktor plugin), which pays at most one bounded copy of the cap. Measured
+  again on the same emulator (`build/evidence/inline-tee/android-ab5.*`, scripts in
+  `benchmark/device/scripts/`: `abn.sh` with `HOST_LOAD_MAX=3`, every block started at a host load
+  under 3 and a guest load under 2.5; 3 rounds of 15 runs per size, the runs after the 5th; each
+  arm's block median against the mean of a noop block before and after it, then the median of
+  the 3 rounds, `paired.py`). Fetch gap over noop, Content-Length / chunked: 1 MB pump (9c82848)
+  +5.3 / +9.3 ms, inline tee with capture blocks -0.3 / +4.0 ms; 5 MB pump +4.8 / +5.0 ms,
+  inline tee -6.0 / +3.0 ms. Request + parse: 1 MB pump +5.7% / +12.6%, inline tee +1.0% / +9.1%;
+  5 MB pump +4.0% / +4.9%, inline tee -1.6% / +0.5%. The noise is as large as most of these
+  differences: noop against noop is +3.5 / -1.5 ms fetch and +11% / -5% request + parse at 1 MB,
+  and up to 22 ms at 5 MB, and the same APK run twice in the same round (the tee arm and the
+  control below) differs by up to 23 ms at 5 MB. What holds round by round: the inline tee's
+  chunked 1 MB fetch gap is at most the pump's (+1.8 vs +9.3, +5.0 vs +10.5, +4.0 vs +4.0 ms),
+  and its Content-Length 1 MB gap is smaller in two rounds of three (-0.3 vs +7.8 and -1.3 vs
+  +5.3 ms; +6.3 vs +2.3 ms in the first); and the capture itself is not measurable at 1 MB: a control arm, the same build with
+  a 1-byte cap (the tee with only the count past the first byte), shows the same chunked 1 MB
+  fetch gap, +4.0 ms (+1.5 to +4.8). Whatever is left there comes from the tee's delegation and
+  the rest of the plugin (request side, store) on a debuggable runtime, not from the capture
+  copy, and it is within about twice the noop-to-noop spread. On a debuggable APK `cmd package compile -m speed` now leaves `status=verify`,
+  so no AOT figure was taken. On the iPhone 16 simulator the new tee and the pump are within
+  1.5 ms of each other at 1, 5 and 20 MB. With an 8 MB cap a body that fits is copied on the
   request coroutine: 5 MB fetch 88 vs 64.5 ms. At 20 MB with the 8 MB cap on the default 192 MB
   heap the app (179 MB after its own parse) still pays blocking GCs: median 138 ms with
   `Content-Length` and 90 ms chunked after the capture buffer fix (122 and 114 ms before, 5 runs

@@ -74,10 +74,32 @@ ViewModel receives, every UiState it emits, and every one-off event (navigation,
 - Open questions: time travel (replaying an old state into the UI) vs read-only in v1; how to
   capture states that are not data classes; privacy redaction of fields.
 
+### Desktop viewer
+Planned. A Compose Desktop app (macOS first) that shows the app's traffic on the developer's
+screen instead of inside the emulator. It talks to the app over the existing bridge protocol, so the
+app needs nothing new and pays no extra cost: the bridge already encodes only while a client is
+connected, and the in-app screen never has to be composed.
+- **Connection.** Reuses the CLI's target code (`hopi-cli` logic moves to a shared JVM module):
+  `adb forward` + proof check on Android, `bridge.json` + token on the iOS simulator, a device and
+  app picker, auto-reconnect when the app restarts or adb resets (event-driven: `adb track-devices`,
+  no polling loop).
+- **UI.** Reuses `hopi-ui`'s list/detail composables on the JVM target (already built and
+  tested there) with a desktop layout: list and detail side by side, keyboard navigation, multiple
+  windows/tabs per device, larger bodies shown comfortably.
+- **Desktop extras.** Save/export a session (HAR and NDJSON), open a body in an external editor,
+  copy as cURL, diff two transactions, filter by app when several are connected.
+- **Bodies.** Fetched on demand with `get` only for the selected transaction; the list streams
+  summaries via `tail`, so a giant body never crosses the bridge unless opened.
+- **Distribution.** A signed `.dmg` and a `jpackage` build for Linux/Windows later; not shipped as a
+  dependency of the app.
+- **Cost on the app.** Same as a connected CLI `tail` (measured: 0 CPU ticks for Hopi threads
+  while idle). Measured again on the sample app before shipping.
+- Open questions: whether the in-app screen becomes optional (noop-by-default UI artifact, with the
+  desktop as the main viewer); physical iOS devices (no bridge in v1).
+
 ### Later candidates (from DebugSwift's feature set)
 - Console / log capture (app logs alongside HTTP).
 - WebSocket and SSE inspection for Ktor.
 - Mock / edit-and-replay requests from the inspector or the CLI.
-- Desktop viewer (Compose Desktop) over the same bridge protocol.
 - App info: build, device, environment, feature flags.
 - Physical iOS device support for the CLI.

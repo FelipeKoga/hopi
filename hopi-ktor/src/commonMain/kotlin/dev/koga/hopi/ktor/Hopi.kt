@@ -26,23 +26,13 @@ import io.ktor.http.contentLength
 import io.ktor.util.date.getTimeMillis
 import io.ktor.util.pipeline.PipelineContext
 import io.ktor.util.pipeline.PipelinePhase
-import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ClosedByteChannelException
 import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.cancel
-import io.ktor.utils.io.core.remaining
-import kotlinx.io.IOException
-import kotlinx.io.Source
 import kotlin.concurrent.atomics.AtomicBoolean
-import kotlin.concurrent.atomics.AtomicInt
-import kotlin.concurrent.atomics.AtomicReference
-import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.TimeSource
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /**
@@ -206,9 +196,10 @@ private class Recorder(
     }
 
     /**
-     * Replaces the response's body with a channel fed from [source], keeping the first
-     * [maxBodyBytes] of it. A failure of [source] reaches the app with its original cause, and an
-     * app that stops reading before the end cancels [source] and fails the transaction.
+     * Replaces the response's body with a [TeedBody] over [source], which the app reads directly,
+     * keeping the first [maxBodyBytes] of it as the app consumes them. A failure of [source]
+     * reaches the app unchanged, and an app that stops reading before the end cancels [source] and
+     * fails the transaction.
      */
     @OptIn(InternalAPI::class)
     private fun tee(
@@ -218,63 +209,9 @@ private class Recorder(
         sizeHint: Long?,
         source: ByteReadChannel = response.rawContent,
     ): HttpResponse {
-        val appSide = TeedBody(ByteChannel(), source, exchange)
+        val body = TeedBody(source, exchange, BoundedBuffer(maxBodyBytes, sizeHint), contentType)
         exchange.teed()
-        val job = client.launch(start = CoroutineStart.UNDISPATCHED) {
-            val failure = pump(source, appSide, BoundedBuffer(maxBodyBytes, sizeHint), contentType)
-            if (failure != null) exchange.fail(failure)
-        }
-        job.invokeOnCompletion { cause ->
-            if (cause != null) {
-                source.cancel(cause)
-                appSide.channel.cancel(cause)
-                exchange.fail(cause)
-            }
-        }
-        return response.call.replaceResponse { appSide }.response
-    }
-
-    /**
-     * Moves [source] to [appSide] in the chunks the source makes available, as `copyTo` does, so
-     * the app's reader sees the same chunking as without the plugin. Returns the failure that
-     * ended the body early, or null.
-     */
-    @OptIn(InternalAPI::class)
-    private suspend fun pump(
-        source: ByteReadChannel,
-        appSide: TeedBody,
-        buffer: BoundedBuffer,
-        contentType: String?,
-    ): Throwable? {
-        val channel = appSide.channel
-        while (true) {
-            val chunk = try {
-                if (source.readBuffer.exhausted() && !source.awaitContent()) null else source.readBuffer
-            } catch (cause: Throwable) {
-                currentCoroutineContext().ensureActive()
-                return failSource(cause, channel)
-            } ?: break
-            val size = chunk.remaining
-            buffer.capture(chunk, size)
-            try {
-                chunk.readTo(channel.writeBuffer, size)
-                channel.flush()
-            } catch (cause: Throwable) {
-                currentCoroutineContext().ensureActive()
-                source.cancel(cause)
-                return cause
-            }
-        }
-        source.closedCause?.let { return failSource(it, channel) }
-        appSide.sourceEnded(buffer.body(contentType))
-        channel.flushAndClose()
-        return null
-    }
-
-    private fun failSource(cause: Throwable, channel: ByteChannel): Throwable {
-        val origin = channelFailureOrigin(cause)
-        channel.cancel(origin)
-        return origin
+        return response.call.replaceResponse { body }.response
     }
 
     private fun hasBody(method: String, status: HttpStatusCode): Boolean =
@@ -324,57 +261,6 @@ private object DecodedResponseHook : ClientHook<suspend ResponseContext.(HttpRes
     }
 }
 
-/**
- * What the app reads in place of a teed body: [channel], plus the two events that end the
- * transaction. It completes once the source ended and the app's reader reached the end (or
- * cancelled after the whole body arrived); an app that cancels while the body is still arriving
- * cancels [source] too, which releases the connection, and fails the transaction.
- */
-@OptIn(InternalAPI::class)
-private class TeedBody(
-    val channel: ByteChannel,
-    private val source: ByteReadChannel,
-    private val exchange: Exchange,
-) : ByteReadChannel {
-    private val outstanding = AtomicInt(2)
-    private val reachedEnd = AtomicBoolean(false)
-    private val captured = AtomicReference<CapturedBody?>(null)
-
-    override val closedCause: Throwable? get() = channel.closedCause
-
-    override val isClosedForRead: Boolean
-        get() = channel.isClosedForRead.also { closed -> if (closed) noteEnd() }
-
-    override val readBuffer: Source get() = channel.readBuffer
-
-    override suspend fun awaitContent(min: Int): Boolean =
-        channel.awaitContent(min).also { available -> if (!available && channel.isClosedForRead) noteEnd() }
-
-    override fun cancel(cause: Throwable?) {
-        // The whole body has arrived and waits in the channel: the exchange itself completed.
-        if (channel.isClosedForWrite) noteEnd()
-        if (!reachedEnd.load()) {
-            val reason = cause ?: IOException("Channel was cancelled")
-            source.cancel(reason)
-            exchange.fail(CancellationException("response body cancelled before its end", reason))
-        }
-        channel.cancel(cause)
-    }
-
-    fun sourceEnded(body: CapturedBody) {
-        captured.store(body)
-        countDown()
-    }
-
-    private fun noteEnd() {
-        if (channel.closedCause == null && reachedEnd.compareAndSet(false, true)) countDown()
-    }
-
-    private fun countDown() {
-        if (outstanding.decrementAndFetch() == 0) exchange.complete(captured.load())
-    }
-}
-
 private fun isEncoded(contentEncoding: String?): Boolean =
     contentEncoding != null && contentEncoding.split(',').any { coding ->
         val name = coding.trim()
@@ -382,14 +268,18 @@ private fun isEncoded(contentEncoding: String?): Boolean =
     }
 
 /**
- * The cause a channel was failed with: reads and [ByteReadChannel.closedCause] wrap a cause that
- * cannot be copied in one more exception, which would otherwise be wrapped again for the app.
+ * The cause a channel was failed with, for the transaction's error: reads and
+ * [ByteReadChannel.closedCause] wrap a cause that cannot be copied in one more exception, once per
+ * channel it crossed (a copy such as `bodyAsChannel`'s adds layers), so every such layer is removed.
  */
 internal fun channelFailureOrigin(cause: Throwable): Throwable {
-    val origin = cause.cause ?: return cause
-    return when {
-        cause is ClosedByteChannelException -> origin
-        cause is CancellationException && cause.message == origin.message -> origin
-        else -> cause
+    var current = cause
+    while (true) {
+        val origin = current.cause ?: return current
+        current = when {
+            current is ClosedByteChannelException -> origin
+            current is CancellationException && current.message == origin.message -> origin
+            else -> return current
+        }
     }
 }

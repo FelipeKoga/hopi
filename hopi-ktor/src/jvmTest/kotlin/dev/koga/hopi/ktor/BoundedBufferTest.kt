@@ -8,6 +8,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.io.Buffer
+import kotlinx.io.readByteArray
 
 class BoundedBufferTest {
     private val threads = ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
@@ -66,5 +68,55 @@ class BoundedBufferTest {
         assertContentEquals(body.copyOf(64 * 1024), captured.bytes)
         assertEquals(100_000L, captured.totalBytes)
         assertTrue(captured.truncated)
+    }
+
+    @Test
+    fun captureCopiesFromAnyOffsetAcrossSegmentsWithoutConsuming() {
+        // Uneven appends leave segments of many sizes; each capture starts where the last ended,
+        // inside a segment or on its boundary, as TeedBody's moves do, and spans several segments.
+        val body = ByteArray(300_000) { (it % 251).toByte() }
+        val limit = 200_000
+        val source = Buffer()
+        val buffer = BoundedBuffer(limit = limit, sizeHint = null)
+        var offset = 0
+        for (size in listOf(1, 8191, 8192, 3, 20_000, 65_536, 77, 100_000, 98_000 - 1, 1)) {
+            source.write(body, offset, offset + size)
+            buffer.capture(source, offset.toLong(), size.toLong())
+            offset += size
+        }
+        assertEquals(body.size, offset)
+        assertEquals(body.size.toLong(), source.size)
+        assertContentEquals(body, source.readByteArray())
+        val captured = buffer.body(null)
+        assertContentEquals(body.copyOf(limit), captured.bytes)
+        assertEquals(body.size.toLong(), captured.totalBytes)
+        assertTrue(captured.truncated)
+    }
+
+    @Test
+    fun anUnsizedCaptureGrowsInBlocksWithoutCopyingWhatItKept() {
+        val body = ByteArray(1_000_000) { (it % 251).toByte() }
+        fun capture(): Pair<BoundedBuffer, Long> {
+            val source = Buffer().apply { write(body) }
+            val buffer = BoundedBuffer(limit = 8 * 1024 * 1024, sizeHint = null)
+            val before = threads.getThreadAllocatedBytes(Thread.currentThread().id)
+            var offset = 0L
+            while (offset < body.size) {
+                val size = minOf(3_001L, body.size - offset)
+                buffer.capture(source, offset, size)
+                offset += size
+            }
+            return buffer to threads.getThreadAllocatedBytes(Thread.currentThread().id) - before
+        }
+        repeat(3) { capture() } // warm-up
+        val (buffer, allocated) = capture()
+        // The blocks hold the body plus at most one unfilled 64 KB block, and each call's few
+        // bytes of bookkeeping; growing by doubling allocated about twice the body.
+        assertTrue(allocated < body.size + 192 * 1024, "capturing allocated $allocated bytes for a ${body.size}-byte body")
+        assertEquals(body.size, buffer.joinSize)
+        val captured = buffer.body(null)
+        assertContentEquals(body, captured.bytes)
+        assertEquals(body.size.toLong(), captured.totalBytes)
+        assertFalse(captured.truncated)
     }
 }

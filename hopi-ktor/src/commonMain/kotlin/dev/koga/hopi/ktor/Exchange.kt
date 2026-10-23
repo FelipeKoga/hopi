@@ -8,6 +8,8 @@ import io.ktor.util.AttributeKey
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.TimeSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 internal val ExchangeKey = AttributeKey<Exchange>("HopiExchange")
 
@@ -82,9 +84,27 @@ internal class Exchange(
     }
 
     fun complete(body: CapturedBody?) {
+        complete(body, elapsedMs())
+    }
+
+    /** Completes with a body built later, off the caller's thread, timed as of now. */
+    fun completeLater(scope: CoroutineScope, body: () -> CapturedBody) {
+        val elapsed = elapsedMs()
+        scope.launch {
+            val built = try {
+                body()
+            } catch (cause: Throwable) {
+                fail(cause)
+                return@launch
+            }
+            complete(built, elapsed)
+        }
+    }
+
+    private fun complete(body: CapturedBody?, elapsedMs: Long) {
         if (!finished.compareAndSet(false, true)) return
         store.submit(
-            withRequestBody().completed(responseCode, responseHeaders, body, elapsedMs(), protocol),
+            withRequestBody().completed(responseCode, responseHeaders, body, elapsedMs, protocol),
         )
     }
 
