@@ -98,6 +98,52 @@ class HopiStoreTest {
     }
 
     @Test
+    fun oneEntryKeepsAtMostThreeQuartersOfTheStoreSoTheHistorySurvivesTheLargestCap() = runTest {
+        // The plugin's largest per-body cap is half the store: a POST with both bodies at that cap
+        // used to fill the store exactly and evict every other entry. One body at that cap with a
+        // small other body is kept whole.
+        val store = store(maxTotalBytes = 1600)
+        for (id in 1L..5L) store.submit(complete(id, responseBody = bytesBody(100)))
+        store.submit(complete(6, responseBody = bytesBody(800), requestBody = bytesBody(800)))
+        runCurrent()
+        assertEquals((1L..6L).toList(), store.ids())
+        val post = assertNotNull(store.get(6))
+        assertEquals(800, post.responseBody?.capturedBytes, "on a tie the response is kept")
+        assertEquals(HopiStore.SKIPPED_OVER_STORE_CAP, post.requestBody?.skippedReason)
+        assertEquals(800L, post.requestBody?.totalBytes)
+        store.submit(complete(7, responseBody = bytesBody(800)))
+        store.submit(complete(8, responseBody = bytesBody(800)))
+        runCurrent()
+        assertEquals(listOf(7L, 8L), store.ids(), "two entries at the cap fill the store, as the byte cap says")
+
+        val upload = store(maxTotalBytes = 1600)
+        upload.submit(complete(1, responseBody = bytesBody(10), requestBody = bytesBody(800)))
+        runCurrent()
+        assertEquals(800, upload.get(1)?.requestBody?.capturedBytes, "a body at the cap with a small other one is kept whole")
+        assertEquals(10, upload.get(1)?.responseBody?.capturedBytes)
+    }
+
+    @Test
+    fun anEntryThatCompletesLargeIsEvictedAfterTheOthersEvenWithTheLowestId() = runTest {
+        val store = store(maxTotalBytes = 1600)
+        store.submit(pending(1))
+        for (id in 2L..10L) store.submit(complete(id, responseBody = bytesBody(100)))
+        runCurrent()
+        store.submit(complete(1, responseBody = bytesBody(800)))
+        runCurrent()
+        assertEquals(800, store.get(1)?.responseBody?.capturedBytes, "the download just completed stays")
+        assertEquals(listOf(1L) + (3L..10L).toList(), store.ids())
+        assertTrue(store.transactions.value.sumOf { it.capturedBytes } <= 1600)
+        // Its pending snapshot arriving late is still stale, and the next write evicts by id again.
+        store.submit(pending(1))
+        runCurrent()
+        assertEquals(TransactionState.Complete, store.get(1)?.state)
+        store.submit(complete(11, responseBody = bytesBody(200)))
+        runCurrent()
+        assertEquals((3L..11L).toList(), store.ids())
+    }
+
+    @Test
     fun terminalWriteWithoutStartedIsInsertedInIdOrder() = runTest {
         val store = store()
         store.submit(pending(1))

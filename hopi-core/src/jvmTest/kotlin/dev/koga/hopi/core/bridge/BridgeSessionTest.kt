@@ -1,7 +1,9 @@
 package dev.koga.hopi.core.bridge
 
 import dev.koga.hopi.core.complete
+import dev.koga.hopi.core.json.TransactionJson
 import dev.koga.hopi.core.json.parseFlatJsonObject
+import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.pending
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.store.HopiStore
@@ -149,6 +151,24 @@ class BridgeSessionTest {
     }
 
     @Test
+    fun getOfALargeBodyArrivesWholeAsOneLineAmongOtherReplies() {
+        val store = store()
+        val id = store.nextId()
+        // Larger than many writer slices, with escapes and multi-byte chars across slice edges.
+        val text = buildString { while (length < 300_000) append("{\"k\":\"日本😀\\t\"},") }
+        val body = CapturedBody(text.encodeToByteArray(), null, false, "application/json", null)
+        val binary = CapturedBody(ByteArray(200_000) { (it % 13).toByte() }, null, false, "application/octet-stream", null)
+        val transaction = pending(id, body = binary).completed(200, emptyList(), body, 12, "HTTP/1.1")
+        store.submit(transaction)
+        store.awaitIds(id)
+        val client = serve(store)
+        client.send("{\"cmd\":\"get\",\"id\":$id}")
+        client.send("{\"cmd\":\"hello\"}")
+        assertEquals(TransactionJson.bridgeDetail(transaction, store.redactor), client.nextLine())
+        assertEquals("hello", fields(client.nextLine())["type"])
+    }
+
+    @Test
     fun clearAnswersOkAndLaterReadsNoLongerSeeTheTransactions() {
         val store = store()
         for (id in 1L..2L) store.submit(complete(store.nextId()))
@@ -266,8 +286,10 @@ class BridgeSessionTest {
             val producer = thread(name = "test-producer") {
                 for (n in 1..total) {
                     val id = store.nextId()
-                    assertTrue(store.submit(pending(id)))
-                    assertTrue(store.submit(complete(id)))
+                    // Headers and bodies, so the dedup compares body-free copies, not instances.
+                    val request = CapturedBody("{\"n\":$n}".encodeToByteArray(), null, false, "application/json", null)
+                    assertTrue(store.submit(pending(id, method = "POST", headers = listOf("Accept" to "*/*"), body = request)))
+                    assertTrue(store.submit(complete(id, responseBody = request, requestBody = request)))
                     if (n == total / 2) startTail.countDown()
                 }
             }
@@ -291,6 +313,22 @@ class BridgeSessionTest {
             client.endInput()
             client.awaitClosed()
         }
+    }
+
+    @Test
+    fun aQueuedLiveEventHoldsNoBodyBytesAndWritesTheSameSummary() {
+        val big = CapturedBody(ByteArray(1 shl 20) { 'a'.code.toByte() }, null, false, "application/json", null)
+        val cut = CapturedBody(ByteArray(1000), 5_000_000, true, "text/plain", null)
+        val transaction = pending(7, headers = listOf("Authorization" to "Bearer x", "Accept" to "*/*"), body = big)
+            .completed(200, listOf("Content-Type" to "application/json"), cut, 12, "HTTP/2")
+        val summary = with(BridgeSession) { transaction.liveSummary() }
+        assertEquals(0, summary.requestBody?.bytes?.size)
+        assertEquals(0, summary.responseBody?.bytes?.size)
+        assertTrue(summary.requestHeaders.isEmpty() && summary.responseHeaders.isEmpty())
+        assertEquals(TransactionJson.bridgeSummary(transaction, Redactor.Default), TransactionJson.bridgeSummary(summary, Redactor.Default))
+        assertEquals(summary, with(BridgeSession) { summary.liveSummary() })
+        val bare = complete(8)
+        assertTrue(with(BridgeSession) { bare.liveSummary() }.responseHeaders.isEmpty())
     }
 
     @Test

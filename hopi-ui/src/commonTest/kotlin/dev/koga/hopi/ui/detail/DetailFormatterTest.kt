@@ -4,6 +4,8 @@ import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.ui.complete
 import dev.koga.hopi.ui.pending
+import dev.koga.hopi.ui.platform.MAX_SHARE_CHARS
+import dev.koga.hopi.ui.platform.capForShare
 import dev.koga.hopi.ui.textBody
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -154,6 +156,44 @@ class DetailFormatterTest {
         assertEquals("183 ms", model.overview.single { it.label == "Duration" }.value)
         assertEquals("—", model.overview.single { it.label == "Request size" }.value)
     }
+
+    @Test
+    fun copyAndShareOfAGiantRequestBodyStayWithinTheLimitAndValidShell() = runTest {
+        val body = textBody("x".repeat(8 * 1024 * 1024), contentType = "text/plain")
+        val transaction = complete(1, method = "POST", requestBody = body)
+        val model = DetailFormatter().model(transaction, Redactor.Default)
+        val curl = curlOf(transaction, Redactor.Default)
+        assertTrue(curl.length <= MAX_SHARE_CHARS, "${curl.length}")
+        assertTrue(curlBodyWasCut(curl))
+        assertTrue(curl.endsWith("x'"), curl.takeLast(10))
+        val share = shareTextOf(model, Redactor.Default)
+        assertTrue(share.length <= MAX_SHARE_CHARS, "${share.length}")
+        assertEquals(share, capForShare(share), "the share sheet does not cut it again, inside the quote")
+        assertTrue(share.endsWith("x'"))
+        assertTrue(!curlBodyWasCut(curlOf(complete(2), Redactor.Default)))
+    }
+
+    @Test
+    fun giantHeaderAndUrlValuesAreCutForDisplayButCopiedWhole() = runTest {
+        val query = "q=" + "a".repeat(200_000)
+        val cookie = "s=" + "\uD83D\uDE00".repeat(40_000)
+        val transaction = pending(1, url = "https://api.example.com/search?$query", headers = listOf("X-Blob" to cookie, "Accept" to "*/*"))
+            .completed(200, listOf("X-Blob" to cookie), null, 5, null)
+        val model = DetailFormatter().model(transaction, Redactor.Default)
+        val shownUrl = model.overview.single { it.label == "URL" }.value
+        assertTrue(shownUrl.length < 4_200 && shownUrl.endsWith("more chars"), shownUrl.takeLast(40))
+        assertEquals("https://api.example.com/search?$query", model.url, "copy URL keeps it whole")
+        for ((name, value) in model.request.headers + model.response.headers) {
+            assertTrue(value.length < 4_200, "$name: ${value.length} chars")
+        }
+        val shownCookie = model.request.headers.first().second
+        assertTrue(!shownCookie.substringBefore('…').last().isHighSurrogate())
+        assertEquals("*/*", model.request.headers[1].second)
+        assertTrue(cookie in toCurlOfWhole(transaction))
+    }
+
+    private fun toCurlOfWhole(transaction: dev.koga.hopi.core.model.HttpTransaction) =
+        curlOf(transaction, Redactor.Default, maxChars = Int.MAX_VALUE)
 
     @Test
     fun curlAndShareTextComeFromCoreWithRedaction() = runTest {

@@ -1,5 +1,6 @@
 package dev.koga.hopi.ui.format
 
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -67,6 +68,71 @@ class TextTest {
             assertEquals(chunkText(text, maxChars = 4_096), pieces.pieces)
             assertEquals(text, pieces.join(), "round trip of a ${text.length}-char text")
             assertEquals(text.take(5_000), pieces.join(maxChars = 5_000))
+        }
+    }
+
+    @Test
+    fun piecesOfLongLinesAmongShortOnesRebuildTheText() {
+        // Long lines cut into several pieces between runs of short lines, a line of exactly one
+        // piece, and a text ending in a long line: the remembered next newline must stay right.
+        val text = buildString {
+            repeat(3) { round ->
+                append("y".repeat(9_000 + round)).append('\n')
+                repeat(70) { append("short ").append(it).append('\n') }
+                append("z".repeat(4_096)).append('\n')
+            }
+            append("w".repeat(12_345))
+        }
+        val pieces = splitText(text, maxChars = 4_096)
+        assertTrue(pieces.pieces.all { it.length <= 4_096 })
+        assertEquals(text, pieces.join())
+        assertEquals("y".repeat(4_096), pieces.pieces[0])
+        assertEquals("w".repeat(12_345 - 3 * 4_096), pieces.pieces.last())
+    }
+
+    @Test
+    fun aPieceWriterCutsExactlyLikeSplitTextHoweverTheTextArrives() {
+        val random = Random(42)
+        val alphabet = "ab \n\n\n{}\uD83D\uDE00\u4E2D"
+        val texts = buildList {
+            addAll(listOf("", "a", "\n", "a\n", "\n\n", "x".repeat(9), "x".repeat(8) + "\n", "\uD83D\uDE00".repeat(9)))
+            repeat(400) {
+                val length = random.nextInt(0, 120)
+                add(buildString { repeat(length) { append(alphabet[random.nextInt(alphabet.length)]) } })
+            }
+            repeat(40) {
+                // Long runs without a newline between short lines.
+                add(buildString { repeat(random.nextInt(1, 6)) { append("y".repeat(random.nextInt(0, 40))).append('\n') } })
+            }
+        }
+        for (text in texts) {
+            for ((maxLines, maxChars) in listOf(2 to 8, 3 to 5, 64 to 4_096, 1 to 1, 4 to 2)) {
+                val expected = splitText(text, maxLines, maxChars)
+                // Small batches, so pieces are cut off mid-stream at every kind of boundary.
+                val writer = PieceWriter(maxLines, maxChars, batchChars = random.nextInt(1, 40))
+                // Fed as the pretty-printer feeds it: single chars, whole strings and ranges.
+                var i = 0
+                while (i < text.length) {
+                    when (random.nextInt(3)) {
+                        0 -> writer.append(text[i++])
+                        1 -> {
+                            val end = minOf(text.length, i + random.nextInt(1, 12))
+                            writer.append(text.substring(i, end))
+                            i = end
+                        }
+                        else -> {
+                            val end = minOf(text.length, i + random.nextInt(1, 30))
+                            writer.append(text, i, end)
+                            i = end
+                        }
+                    }
+                }
+                val actual = writer.finish()
+                val case = "maxLines $maxLines, maxChars $maxChars, text ${text.replace("\n", "\\n")}"
+                assertEquals(expected.pieces, actual.pieces, case)
+                assertEquals(expected.join(), actual.join(), case)
+                assertEquals(text, actual.join(), case)
+            }
         }
     }
 

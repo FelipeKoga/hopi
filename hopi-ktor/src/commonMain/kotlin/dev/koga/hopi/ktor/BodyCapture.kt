@@ -40,7 +40,12 @@ internal class BoundedBuffer(private val limit: Int, sizeHint: Long?) {
     /** Reads [source] to its end, keeping at most [limit] bytes; rethrows the channel's failure. */
     suspend fun drain(source: ByteReadChannel) {
         while (count < limit) {
-            if (count == bytes.size) ensureCapacity(count + 1)
+            if (count == bytes.size) {
+                // A body of exactly the size hint (its Content-Length) ends here: growing the
+                // buffer only to find that out would copy it twice more (grow, then trim).
+                if (!source.awaitContent()) break
+                ensureCapacity(count + 1)
+            }
             val read = source.readAvailable(bytes, count, bytes.size - count)
             if (read < 0) break
             count += read
@@ -65,8 +70,17 @@ internal class BoundedBuffer(private val limit: Int, sizeHint: Long?) {
     private companion object {
         const val GROW_STEP = 8 * 1024
 
-        fun initialSize(limit: Int, sizeHint: Long?): Int =
-            if (sizeHint != null && sizeHint in 0..limit) sizeHint.toInt() else minOf(limit, GROW_STEP)
+        /**
+         * The hint when it fits; the cap itself when the hint exceeds it, since such a body fills
+         * the cap (growing there by doubling allocated about twice the cap and held 1.5x it during
+         * the last copy); else a small start. A hint that lies costs at most the cap: the buffer
+         * never exceeds [limit], and [body] trims what was not filled.
+         */
+        fun initialSize(limit: Int, sizeHint: Long?): Int = when {
+            sizeHint == null || sizeHint < 0 -> minOf(limit, GROW_STEP)
+            sizeHint > limit -> limit
+            else -> sizeHint.toInt()
+        }
     }
 }
 

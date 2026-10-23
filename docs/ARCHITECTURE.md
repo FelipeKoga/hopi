@@ -203,7 +203,9 @@ Body text decoding and pretty-printing are functions over `CapturedBody`, comput
 ### Store
 
 `HopiStore`: ring buffer of `HttpTransaction`, bounded by `maxEntries` and `maxTotalBytes`
-(oldest evicted first). Writes come from a single consumer coroutine on `Dispatchers.Default` fed by
+(oldest evicted first, except the entry just written, which is evicted last: a long download that
+started first and completes large is not evicted by its own completion while newer, smaller
+entries stay). Writes come from a single consumer coroutine on `Dispatchers.Default` fed by
 two bounded channels, so producers never suspend: pending snapshots go through one of capacity ~256
 with `BufferOverflow.DROP_OLDEST` (losing one is harmless, the terminal snapshot carries
 everything); terminal snapshots go through their own of capacity 4096 that never drops silently.
@@ -211,9 +213,12 @@ A terminal write that does not fit is rejected (`submit` returns false) and coun
 `droppedTerminalWrites: StateFlow<Long>`; the summary log sink turns every increase into a line
 `{"hopi":1,"notice":"…","dropped":N}` (N is the running total), so an agent knows
 transactions are missing. A pending snapshot that arrives after its transaction's terminal one (the
-two channels can reorder them) is ignored. An entry whose bodies together exceed `maxTotalBytes`
-is stored with its larger body (then, if still needed, the other) replaced by a skipped body with
-reason `"over store byte cap"`, so one entry never evicts the whole history. Exposes:
+two channels can reorder them) is ignored. An entry whose bodies together exceed three quarters
+of `maxTotalBytes` is stored with its larger body (the request's on a tie; then, if still needed,
+the other) replaced by a skipped body with reason `"over store byte cap"`, so one entry never
+evicts the whole history: at least a quarter of the store stays for older entries. The plugin's
+largest body cap (half the store) still fits whole with a small other body; a POST with both
+bodies at that cap keeps the response. Exposes:
 
 - `transactions: StateFlow<List<HttpTransaction>>` for the UI (newest last),
 - `events: SharedFlow<TransactionEvent>` (Started / Updated / Completed) for the bridge and log sink,
@@ -328,6 +333,15 @@ dropped. Redacted header values become `<redacted>`, and the URL is the redactor
 redacted query values masked).
 
 The command is one line; comment lines precede it. A method that is not a plain token is quoted.
+
+`toCurl(transaction, redaction, maxChars)` bounds the command for a clipboard or a share sheet
+(the UI passes 100 000): a text body that would not fit is cut at a code point, inside a closed
+quote, with a `# warning: request body cut to its first N characters (B of T bytes) to fit the
+copy; this command sends the cut body` line, so the copied command is still valid shell. A body
+more than 4 bytes per char of the budget is decoded only up to that, so copying the cURL of a
+16 MB upload costs 0.5 ms and 0.05x the body (was 9 to 25 ms and 4 to 9x, the whole command built
+to keep 100k chars). When the URL and headers alone fill the limit the body is left out, with a
+warning saying so.
 A binary body is written as `--data-binary '@body.bin'` preceded by
 `# note: binary request body (N bytes) is not inlined; save it as body.bin before running this command`.
 
@@ -462,9 +476,24 @@ accepts), `bridge.json` or the Android proof file is deleted, connected clients 
 sessions, and one notice `agent bridge stopped accepting (restart the app to restore it): …` is
 logged.
 
+**Large replies.** A `get` reply is queued as the snapshot itself and encoded by the writer thread
+as it sends, in slices of 32K body chars (escaped, UTF-8 encoded into one reused buffer, written,
+dropped), so a 16 MB body costs the decoded text plus one slice instead of the whole line built,
+copied and encoded at once (measured on the JVM for an ASCII body: 1.0x the body allocated per
+`get` instead of 7.9x, a transient of 18 MB instead of 80 to 130 MB; a CJK/emoji body still
+allocates 3.3x with a 55 MB transient, a base64 one 2.7x and 43 MB, since a non-ASCII char is
+escaped and encoded at up to 3 bytes). The 64 queued replies of a pipelining client therefore hold
+references to snapshots, never 64 encoded copies; a snapshot evicted meanwhile stays reachable
+until its reply is written, so a pipelining client can hold up to 64 snapshots outside
+`maxTotalBytes` (its own `get`s, which it reads back).
+
 **Slow clients.** Each tailing client has its own bounded live queue, filled by its store event
 listener with a non-suspending `trySend` and nothing else; encoding happens on the client's
-writer thread. The store hands a listener one consumer batch in a single synchronous burst (up to
+writer thread. A queued event is a body-free copy of the snapshot (no body bytes, no headers, each
+body's reported size and flags kept), so the summary line is the same and a client that stops
+reading pins a few hundred bytes per event, not the captured bodies: before, a paused
+`hopi tail | less` held up to about 2,400 completed bodies (600 MB at the default 256 KB cap)
+outside `maxTotalBytes` until `SLOW_CLIENT`. The backlog/live seam compares those copies by value. The store hands a listener one consumer batch in a single synchronous burst (up to
 `maxBatchSize` = 1 + 256 + 4096 events, far faster than any writer sends them), so the queue holds
 one full batch plus 512 (4865 events with the default store; the channel allocates slots only as
 they fill): a client that reads at full speed is never cut by a burst, only one that fell 512
@@ -667,7 +696,16 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   chunked response. Two more buttons serve the device checks: "Slow request (60 s)" (`GET /slow`,
   a transaction that stays pending for a minute) and "Create 500 items" (500 `POST /items`, 8 at a
   time), which fills the store to its default 500 entries and gives the app's own item list as
-  many rows, so scrolling the inspector and scrolling the app can be compared. The back gesture (ui-backhandler `BackHandler`) returns to the item list. iOS
+  many rows, so scrolling the inspector and scrolling the app can be compared. "Giant JSON
+  (1, 5, 20 MB)" and "Giant JSON (8 MB)" fetch `/giant` and parse each body into a `JsonElement`
+  with `body<JsonElement>()` on `Dispatchers.Default`, as an app would, logging one JSON line per
+  run (fetch and parse times, on Android ART's GC counters and heap, and the main thread's frame
+  gaps, which a frame ticker drawn on every vsync during the run exposes). A device run passes a
+  spec instead (`GiantSpec`: `mb=1,5,20;shape=minified|pretty|string|nested;chunked=0|1;runs=5;
+  hold=S;post=0|1;delay=S`): `--es giant <spec>` on Android, the launch argument `-giant <spec>`
+  on iOS; `--el maxBodyBytes N` / `-maxBodyBytes N` sets `SampleHttp.maxBodyBytes`, the plugin's
+  cap, before the client exists (force-stop the app first). The log goes to the `HopiSample`
+  tag on Android and stdout on iOS (`simctl launch --console-pty`). The back gesture (ui-backhandler `BackHandler`) returns to the item list. iOS
   gets `MainViewController()`, a `ComposeUIViewController`; the static framework is `Shared`.
 - **`sample/androidApp`** (`applicationId` `dev.koga.hopi.sample`) hosts the shared UI in one
   activity and depends on `sample/shared` only. It adds what only Android has, as a Diagnostics
@@ -681,7 +719,9 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   one forged transaction, to prove the CLI refuses a squatter. **Both need the real bridge, so the
   APKs for these checks are built with `-Phopi.enabled=true`**
   (`./gradlew :sample:androidApp:installDebug -Phopi.enabled=true`); a debug build without
-  the flag packages the noop like a release build does.
+  the flag packages the noop like a release build does. `-Psample.largeHeap=true` sets
+  `android:largeHeap` (512 MB instead of 192 MB on the API 35 emulator), so the giant-body runs
+  can see past the app's own heap limit.
 - **`sample/iosApp`**: a SwiftUI app (bundle id `dev.koga.hopi.sample`, iOS 16+) whose only
   view hosts `MainViewController()`. `project.yml` describes it and the checked-in
   `iosApp.xcodeproj` is generated from it with XcodeGen (2.46.0); no CocoaPods, no SwiftPM. A
@@ -700,7 +740,9 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
 `sample/devserver/devserver.py` (Python 3 standard library, bound to `127.0.0.1:8765`) serves those
 routes (`/slow?s=N` sends a chunked body over N seconds, one chunk every 5 s so no client read
 timeout fires; `/items` keeps created items in memory until it exits and answers 400 to a body that is not
-an item) and logs every request as one JSON line on stdout. The Android emulator reaches it with
+an item; `/giant?mb=N&shape=S&chunked=0|1` generates about N MiB of JSON while sending it, with
+a Content-Length computed in advance or chunked; `POST /sink` reads and drops a body of any size)
+and logs every request as one JSON line on stdout. The Android emulator reaches it with
 `adb reverse tcp:8765 tcp:8765`; the iOS simulator shares the host's loopback, so it needs nothing.
 The Android debug build's network security config allows cleartext to `127.0.0.1` only. Nothing
 reaches an external network.
@@ -722,12 +764,18 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   never shown, found by search or copied; only `unsafeDisableRedaction()` on every installation
   shows it. The row's host line drops the userinfo in any case.
 - **Detail:** Overview (URL, method, code, duration, sizes, protocol), Request (headers, body),
-  Response (headers, body). Headers redacted by the store's `redactor`. Body views (strict UTF-8
-  decode, core's `prettyPrintJson`, a hex preview of the first 512 bytes for binary bodies) are
-  computed on `Dispatchers.Default` and cached by body instance (at most 16 bodies and 4M
-  characters of formatted text, least recently used first; the view just formatted is kept even
-  when it alone is larger), then cut into pieces of at most 64 lines and 4096 chars, so a large
-  body is many lazy items and never one text layout. The pieces are the only copy of the text a
+  Response (headers, body). Headers redacted by the store's `redactor`; a header value or the URL
+  longer than 4096 chars is cut for display with "… N more chars" (copy keeps it whole). Body
+  views (strict UTF-8 decode, JSON pretty-printing, a hex preview of the first 512 bytes for
+  binary bodies) are computed on `Dispatchers.Default` and cached by body instance: at most 16
+  bodies and 4M characters of formatted text, least recently used first; the view just formatted
+  is kept even when it alone is larger. Each view is cut into pieces of at most 64 lines and 4096
+  chars, so a large body is many lazy items and never one text layout. JSON is pretty-printed
+  straight into those pieces (core's `prettyPrintJsonTo` into a `PieceWriter`, which takes the
+  output in 32K-char batches and cuts each with `splitText`'s own pass), so no whole pretty string,
+  nor a builder grown to hold it (2 bytes per char on ART and Kotlin/Native), is built next to the
+  text. A truncated body is printed only when it ends a container (`}` or `]`), else it is split
+  raw without a wasted attempt. The pieces are the only copy of the text a
   view keeps (with one flag per piece for the newline it dropped); copy rebuilds the text from
   them off the main thread. The cache lives only while the screen is composed. A detail is
   formatted again when its transaction's snapshot or the store's `redactor` changes (the redactor
@@ -792,6 +840,110 @@ Measured with a JVM benchmark against `ktor-client-mock`, plugin installed vs no
 - No added allocation proportional to body size beyond `maxBodyBytes`.
 - A 10 MB response is received intact by the app while at most `maxBodyBytes` is retained.
 - With `enabled = false` the plugin installs no hooks at all.
+
+### Giant bodies
+
+Opt-in JVM benchmarks (`./gradlew :hopi-ktor:jvmGiantBodyBenchmark`, and the same task in
+`:hopi-core` and `:hopi-ui`; `:hopi-cli:testGiantBodyBenchmark`), excluded from the
+normal test tasks, generate six JSON shapes in memory (minified and pretty records, nesting 128K+
+deep, one huge string, CJK/emoji with byte 262144 inside a sequence, a number array) at 256 KB,
+1, 5, 20 and 50 MB, and save their tables under each module's `build/giant-body/`. The tables of
+record are in `benchmark/giant-body/2026-10-23/` (`before/`, `after/`, and `after-fixes/` for the
+second round). Measured on JDK 17, Apple M2; every allocation figure below is allocation per
+call, not a peak, and JDK 17 builds Latin-1 strings and builders (1 byte per ASCII char) where ART
+and Kotlin/Native builders take 2, so device figures are measured separately below.
+
+- **The app's request:** beyond the cap the plugin's cost does not grow with the body. With the
+  default 256 KB cap a 50 MB response costs the app no measurable time (within noise on MockEngine
+  and a real local socket, `Content-Length` and chunked, saved and streamed) and 0.3 MB more
+  allocation, the same as for a 1 MB one (run-to-run noise on a 50 MB request is about ±5 ms).
+  With a raised cap the extra allocation is 1x the cap when the body has a `Content-Length` (the
+  capture buffer is allocated at the cap at once: socket, 50 MB, +7.1 MB at the 8 MB cap and
+  +15.1 MB at 16 MB, was +14.7 and +30.8 MB while it grew from 8 KB by doubling, which also held
+  1.5x the cap during its last copy) and still about 2x the cap without one (chunked: +15.2 MB at
+  8 MB, +31.2 MB at 16 MB: no size to start from). The 16 MB copy costs up to 9 to 13 ms at p50 on
+  MockEngine (none measurable on the socket). A request body is copied up to the cap on the
+  caller's coroutine: 0.02 ms at the default cap, 0.5 to 8 ms for 16 MB. A body whose
+  `Content-Length` fits the cap is copied once.
+- **Formatting, off the main thread:** linear in the body for every shape. `splitText` was
+  quadratic for a body with long lines: 1.6 s for 16 MB on one line, now 2 to 5 ms. A pure-ASCII
+  body is decoded with one byte allocated per byte (was three), 2.8x faster. The detail view
+  pretty-prints JSON straight into its pieces in 32K-char batches: 16 MB minified 60 ms with 4.4x
+  the body allocated (was 69 ms and 8.1x), pretty records 44 ms and 3.4x (52 ms, 4.6x), CJK/emoji
+  32 ms and 6.6x (10.3x); a 16 MB truncated body is no longer pretty-printed only to fail at its
+  end: 13 ms and 2.0x (was 57 ms and 5.8x). The view keeps 16 to 27M chars while it is shown (the
+  just-formatted view is kept above the 4M-char cache budget). Core's `prettyPrintJson`, which the
+  CLI uses, pre-sizes for 1.75x and caches each depth's newline and indent: 16 MB minified 32 ms
+  and 3.4x (was 43 ms and 5.4x; the 65 ms in `after/core-formatting.md` was a noisy run, two
+  reruns gave 33 and 32 ms). cURL for copy and share is built within the 100k-char limit:
+  0.4 to 1 ms and 0.05 to 0.15x for any 16 MB body (was 9 to 25 ms and 4 to 10x).
+- **The main thread:** composing the Response tab of a 1, 8 or 16 MB body (pretty, minified,
+  truncated to one line, one huge string) takes 6 to 12 ms headless and does not grow with the
+  body. Scroll frames, headless: median 0.4 to 0.7 ms, p95 3.7 to 6 ms, max 7 ms. No piece reaches
+  a text layout above 4096 chars, and neither does a header value or the URL (cut for display at
+  4096 chars with "… N more chars", rows at 1024; copy keeps the whole value).
+- **Memory, the real bound:** the store holds at most `maxTotalBytes` of bodies (on G1 an array of
+  1 MB or more is rounded up to whole regions, so the heap shows up to 2x for 1 MB bodies; ART
+  does not round), and one entry at most three quarters of it. Outside it, in normal running:
+  every capture in flight (1x the cap each with a `Content-Length`, up to 2x without), the
+  `events` buffer (up to 1,024 snapshots with their bodies, if the summary log sink lagged that
+  far), and up to 64 queued bridge `get` replies (each a snapshot, which may have been evicted).
+  So: `maxTotalBytes` + concurrent captures x cap (x2 when chunked) + those queued snapshots.
+  A tail client's live queue is no longer part of it (body-free events, see Agent access). While
+  the store's consumer is stalled, its terminal channel holds every queued body (up to 4096
+  snapshots; 256 MB for 32 queued 8 MB bodies in the benchmark), released as soon as it runs.
+- **CLI `get`:** linear, 59 to 152 ms for 16 MB, 4 to 20x the body allocated in the CLI's own
+  process (JSON tree, pretty-print, escaping); it never touches the app. The bridge reply that
+  feeds it costs the app 1.0x an ASCII body (3.3x CJK/emoji, 2.7x base64).
+
+Measured on device (2026-10-23, sample debug builds, API 35 emulator and an
+iPhone 16 simulator on iOS 18.2; raw data and scripts in `build/evidence/giant-json/` and, for the
+second round, `build/evidence/giant-json-fixes/`; the scripts are kept in `benchmark/device/scripts/`).
+Metrics are named as measured: *settle* is tap to the last frame drawn (gfxinfo framestats);
+*UI thread* is one frame's `Vsync` to `SyncQueued`; *frame gap* is the longest time between two
+frames while the sample's frame ticker draws every vsync, so only there does a gap mean a blocked
+main thread (a gap in framestats alone can be an idle one, since Compose draws only on change):
+
+- **Android, the app's request + parse, warm runs (after the 5th), real vs noop:** 1 MB 79 vs
+  66.5 ms (+19%; fetch 30 vs 21 ms), 5 MB 344 vs 307.5 ms (+12%), 20 MB within noise, 50 MB
+  (large heap) 3,048 vs 3,049 ms. Compiled ahead of time (`cmd package compile -m speed`) the 1 MB
+  gap falls to 73 vs 70 ms. The tee's pump is about 1 ms of CPU per MB in a debuggable build; the
+  rest is the second coroutine hop per chunk (engine channel, pump, app channel) and the
+  debuggable runtime. Removing the hop would run the capture on the app's reader thread, which
+  can be the main thread, so the tee keeps it. With an 8 MB cap a body that fits is copied on the
+  request coroutine: 5 MB fetch 88 vs 64.5 ms. At 20 MB with the 8 MB cap on the default 192 MB
+  heap the app (179 MB after its own parse) still pays blocking GCs: median 138 ms with
+  `Content-Length` and 90 ms chunked after the capture buffer fix (122 and 114 ms before, 5 runs
+  each: within run-to-run noise), and frame gaps up to 100 ms (167 ms before). The GCs come from
+  the app's own 20 MB parse near the heap limit plus what the raised cap keeps, not from the
+  capture's growth; with the large heap there were none. A cap must leave the app its own headroom.
+- **Android main thread and UI:** no ANR, no OOM. 50 MB bodies (every shape) and the 20 MB nested
+  body run out of the 192 MB heap in the noop build too (the app's own `JsonElement` tree). The
+  detail of an 8 MB minified body (8 MB cap, pretty-printed), the same emulator, old and new build
+  back to back, 5 opens each: settle 600 to 768 ms before and 569 to 771 ms after; the Java heap's
+  peak while it opens (dumpsys every 0.3 s) 68.7 MB before and 56.4 MB after, 38.9 MB for both
+  once collected. The heaviest frame's UI thread is 15 to 64 ms (the first open after launch 57 to 63 ms); with
+  the frame ticker on, the longest frame gap while the detail opens is 67 ms (none over 100 ms),
+  so the 330 to 480 ms without frames that framestats shows is the formatting running off the
+  main thread with the main thread idle. The Response tab then draws in one frame (UI thread 14
+  to 35 ms); scrolling the body has a UI thread of 1.5 ms at p50 and 8 ms at p95. With a 16 MB cap
+  (`maxTotalBytes` 32 MB) the 16 MB detail settles in 1.0 to 1.2 s, heaviest UI thread 18 to
+  66 ms, Java heap peak 84 MB and 58 MB once collected, on the default 192 MB heap. Copy cURL of
+  an 8 MB request body settles in 1.9 to 2.1 s in both builds (the confirmation's display time;
+  heaviest UI thread under 25 ms), and the command is now cut inside a closed quote with its
+  warning line; Share opens the system sheet in 17 to 58 ms with the text within 100k chars. The
+  open list after a giant run had a first frame of 127 to 164 ms of UI thread (one-off composition
+  of a new pane in a debug build). `hopi get --json` of the 8 MB body takes 0.9 to 1.0 s and
+  the app's frames meanwhile show no gap over 50 ms.
+- **iOS (Debug, real, vs Release, noop, so only fetch is comparable):** fetch within noise for
+  minified and pretty bodies, +5 to 10 ms for 20 and 50 MB of one string; no frame gap over
+  43 ms during any request run. The 8 MB detail (8 MB cap), driven by coordinate taps with the
+  frame ticker on, two runs: frame gaps at most 78 ms in one and one gap of 134 ms while the
+  detail opened in the other; Response tab, scrolling and reopening under 65 ms. The 16 MB detail
+  (16 MB cap, 32 MB store) at most 77 ms, footprint 190 MB after. The first round, driven with
+  accessibility queries (which block the main thread too), had shown gaps of 116 and 435 ms
+  during the detail and scrolling. `hopi get --json` of the 8 MB body takes 1.1 s with no
+  gap over 50 ms in the app.
 
 ### Idle cost is zero — rules learned from DebugSwift
 

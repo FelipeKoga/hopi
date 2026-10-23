@@ -32,7 +32,26 @@ public object TransactionJson {
 
     /** `{"type":"transaction",…}` with headers and bodies: the bridge `get` reply. */
     public fun bridgeDetail(transaction: HttpTransaction, redactor: Redactor): String {
-        val w = JsonWriter(StringBuilder(256 + transaction.capturedBytes.toInt() * 4 / 3))
+        val out = StringBuilder(256 + transaction.capturedBytes.toInt() * 4 / 3)
+        writeBridgeDetail(transaction, redactor, out, chunkChars = Int.MAX_VALUE) {}
+        return out.toString()
+    }
+
+    /**
+     * [bridgeDetail] written to [out] in slices: [flush] is called whenever [out] holds about
+     * [chunkChars] chars of a body (or the headers before it) and may empty it, so a giant body is
+     * encoded and sent piece by piece instead of as one string several times its size. The
+     * slices, concatenated, are exactly [bridgeDetail]; [flush] is not called for what is left in
+     * [out] at the end.
+     */
+    public fun writeBridgeDetail(
+        transaction: HttpTransaction,
+        redactor: Redactor,
+        out: StringBuilder,
+        chunkChars: Int,
+        flush: () -> Unit,
+    ) {
+        val w = JsonWriter(out)
         w.beginObject()
             .field("type", "transaction")
             .field("id", transaction.id)
@@ -45,11 +64,10 @@ public object TransactionJson {
             .field("protocol", transaction.protocol)
             .field("error", transaction.error?.let { redactor.textMentioning(it, transaction.url) })
         w.name("request")
-        writeExchange(w, transaction.requestHeaders, transaction.requestBody, redactor)
+        writeExchange(w, transaction.requestHeaders, transaction.requestBody, redactor, chunkChars, flush)
         w.name("response")
-        writeExchange(w, transaction.responseHeaders, transaction.responseBody, redactor)
+        writeExchange(w, transaction.responseHeaders, transaction.responseBody, redactor, chunkChars, flush)
         w.endObject()
-        return w.toString()
     }
 
     private fun summary(transaction: HttpTransaction, redactor: Redactor, bridge: Boolean, maxBytes: Int): String {
@@ -137,10 +155,13 @@ public object TransactionJson {
         headers: List<Pair<String, String>>,
         body: CapturedBody?,
         redactor: Redactor,
+        chunkChars: Int,
+        flush: () -> Unit,
     ) {
         w.beginObject().name("headers").beginArray()
         for ((name, value) in headers) {
             w.beginArray().value(name).value(redactor.headerValue(name, value)).endArray()
+            if (w.out.length >= chunkChars) flush()
         }
         w.endArray().name("body")
         if (body == null) {
@@ -149,9 +170,10 @@ public object TransactionJson {
             w.beginObject()
             val text = body.textOrNull()
             if (text != null) {
-                w.field("encoding", "utf8").field("text", text)
+                w.field("encoding", "utf8").name("text").chunkedValue(text, chunkChars, flush)
             } else {
-                w.field("encoding", "base64").name("data").base64Value(body.bytes)
+                // Base64 grows 3 bytes into 4 chars: slices of about chunkChars chars.
+                w.field("encoding", "base64").name("data").chunkedBase64Value(body.bytes, chunkChars / 4 * 3, flush)
             }
             w.field("truncated", body.truncated)
                 .field("capturedBytes", body.bytes.size)

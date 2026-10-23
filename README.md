@@ -122,6 +122,15 @@ Measured so far (the methods and caveats are in the architecture doc):
 | The same on the default headless renderer (SwiftShader), current build, 6 rounds | inspector 1–6.2 % janky, GPU p50 17 ms, UI thread p50 1.9–4.0 ms, p95 6–13 ms; the app's list 21–27 % janky, UI p95 15–18 ms. The app is no longer drawn under the open screen (overdraw 1x instead of 2x–4x) |
 | Opening the screen / a detail / the Response tab of a 256 KB JSON body (emulator) | 284–335 ms / 267–317 ms (both include the 200 ms transition) / 41–77 ms |
 | Scrolling a 300 KB JSON response body on the emulator | 92 frames, 8.7 % janky, 26 ms at p50, 89 ms at p99 (debug build without R8 on a headless emulator: a rough upper bound, not a device number) |
+| Giant bodies, JVM (`*GiantBodyBenchmark`, opt-in), app's request with the default 256 KB cap, 50 MB response, MockEngine and a real socket | no measurable added time, +0.3 MB allocated, the same as for 1 MB |
+| The same with an 8 or 16 MB cap | 1x the cap extra with a `Content-Length` (was 2x: the buffer grew by doubling), about 2x chunked; independent of the body |
+| Giant bodies, detail view formatting off the main thread, 16 MB, JVM | minified 60 ms, 4.4x allocated (was 69 ms, 8.1x); truncated 13 ms (was 57 ms); 16 MB on one line 2–5 ms to split (was 1.6 s, quadratic) |
+| Giant bodies, detail screen main thread, 1 / 8 / 16 MB body, headless | first frame 6–12 ms; scroll frames median 0.4–0.7 ms, p95 3.7–6 ms, max 7 ms, at every size |
+| Copy cURL / Share of a 16 MB request body, JVM | 0.4–1 ms, 0.05–0.15x the body (was 9–25 ms, 4–10x), cut inside a closed quote with a warning line |
+| Giant bodies, bridge `get` of a 16 MB body | 1.0x an ASCII body allocated in the app (was 7.9x), transient 18 MB (was 80–130 MB); CJK/emoji 3.3x, base64 2.7x |
+| 8 MB JSON detail on the emulator (8 MB cap, pretty-printed), old vs new build | settle 600–768 vs 569–771 ms; Java heap peak while opening 68.7 vs 56.4 MB; main-thread frame gap at most 67 ms (frame ticker on) |
+| 16 MB JSON detail, 16 MB cap and 32 MB store, default 192 MB heap | Android: settles in 1.0–1.2 s, Java heap peak 84 MB, no OOM; iOS simulator: frame gaps at most 77 ms |
+| A tail client that stops reading | holds body-free events only (was up to ~2,400 full snapshots, 600 MB at the default cap) |
 | Release APK of the sample built without the flag | 12 Hopi classes (the noop twins), 0 from `hopi-core`; 345 and 97 with `-Phopi.enabled=true` |
 
 The first idle and the 300 KB body figures were taken with the earlier, Android-only version of
@@ -153,3 +162,6 @@ xcodebuild -project sample/iosApp/iosApp.xcodeproj -scheme iosApp -configuration
 JDK 17, Gradle through `./gradlew` (9.7.1), Kotlin 2.4.20, Compose Multiplatform 1.12.0, Ktor
 3.5.2. `./gradlew check` runs the tests (including the iOS simulator tests), the ABI dump checks and
 the noop parity check (a real module and its twin must have exactly the same public API).
+The giant-body benchmarks are opt-in and slow (minutes): run one module at a time with
+`./gradlew :hopi-ktor:jvmGiantBodyBenchmark` (also `:hopi-core:` and `:hopi-ui:`)
+or `./gradlew :hopi-cli:testGiantBodyBenchmark`; tables land in `<module>/build/giant-body/`.

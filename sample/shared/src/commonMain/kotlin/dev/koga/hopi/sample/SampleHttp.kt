@@ -47,6 +47,20 @@ internal expect fun platformHttpClient(configure: HttpClientConfig<*>.() -> Unit
 public object SampleHttp {
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * Hopi's per-body capture cap for this process, or null for the plugin's default (256 KB).
+     * A debug setting for the giant-body measurements (`--el maxBodyBytes N` on Android, the
+     * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start].
+     */
+    public var maxBodyBytes: Long? = null
+
+    /**
+     * Hopi's store byte cap, or null for the default (16 MB), which clamps the body cap to half
+     * of it: a 16 MB body cap needs 32 MB here. A debug setting like [maxBodyBytes]
+     * (`--el maxTotalBytes N`, `-maxTotalBytes N`).
+     */
+    public var maxTotalBytes: Long? = null
+
     internal val client: HttpClient by lazy {
         platformHttpClient {
             expectSuccess = false
@@ -54,6 +68,8 @@ public object SampleHttp {
             install(Hopi) {
                 logSink = HopiLogSink.Summary
                 agentBridge = true
+                this@SampleHttp.maxBodyBytes?.let { maxBodyBytes = it }
+                this@SampleHttp.maxTotalBytes?.let { maxTotalBytes = it }
             }
         }
     }

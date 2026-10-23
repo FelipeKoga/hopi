@@ -10,12 +10,24 @@ import kotlin.math.roundToLong
  */
 @HopiInternalApi
 public fun decodeUtf8Strict(bytes: ByteArray, end: Int = bytes.size): String? {
+    // Pure ASCII (most JSON) is valid UTF-8 as it is, so the platform's lenient decoder builds the
+    // string directly: one byte per ASCII char on the JVM, where the strict decoder goes through a
+    // char buffer (three bytes allocated per byte) and takes almost three times as long (JDK 17).
+    var i = 0
+    while (i < end) {
+        val b = bytes[i]
+        if (b <= 0) break
+        i++
+    }
+    if (i == end) return bytes.decodeToString(0, end)
+    if (bytes[i] == 0.toByte()) return null
+    // Anything else, from the first non-ASCII byte on, is the strict decoder's to judge.
     val text = try {
         bytes.decodeToString(0, end, throwOnInvalidSequence = true)
     } catch (_: CharacterCodingException) {
         return null
     }
-    return if (text.indexOf('\u0000') >= 0) null else text
+    return if (text.indexOf('\u0000', startIndex = i) >= 0) null else text
 }
 
 /**
@@ -28,8 +40,16 @@ public fun CapturedBody.textOrNull(): String? {
     return decodeUtf8Strict(bytes, end)
 }
 
-private fun incompleteUtf8TailLength(bytes: ByteArray): Int {
-    val size = bytes.size
+/**
+ * The first [maxBytes] of [bytes] as text (an incomplete trailing sequence dropped), or null when
+ * they are binary: for a caller that shows only a prefix of a giant body and must not decode it all.
+ */
+internal fun decodeUtf8Prefix(bytes: ByteArray, maxBytes: Int): String? {
+    if (maxBytes >= bytes.size) return decodeUtf8Strict(bytes)
+    return decodeUtf8Strict(bytes, maxBytes - incompleteUtf8TailLength(bytes, maxBytes))
+}
+
+private fun incompleteUtf8TailLength(bytes: ByteArray, size: Int = bytes.size): Int {
     var back = 1
     while (back <= 3 && back <= size) {
         val b = bytes[size - back].toInt() and 0xFF
@@ -65,8 +85,21 @@ public fun isJson(contentType: String?, text: String?): Boolean {
 
 /** Pretty-prints JSON with [indent] per level. Invalid JSON is returned unchanged. */
 @HopiInternalApi
-public fun prettyPrintJson(text: String, indent: String = "  "): String =
-    JsonPrettyPrinter(text, indent).print() ?: text
+public fun prettyPrintJson(text: String, indent: String = "  "): String {
+    // Minified JSON grows about 1.6x (one line and an indent per value), already pretty JSON
+    // about 1x: 1.75x fits both without the grow-and-copy that 1.25x forced on minified input.
+    val out = StringBuilder(text.length + (text.length shr 1) + (text.length shr 2))
+    return if (prettyPrintJsonTo(text, out, indent)) out.toString() else text
+}
+
+/**
+ * Pretty-prints JSON into [out] as it parses, with [indent] per level, so a caller that keeps the
+ * output in pieces never builds it whole. Returns false when [text] is not valid JSON (or nests
+ * deeper than 256 levels); [out] then holds a partial print, to be discarded.
+ */
+@HopiInternalApi
+public fun prettyPrintJsonTo(text: String, out: Appendable, indent: String = "  "): Boolean =
+    JsonPrettyPrinter(text, indent, out).print()
 
 /** Human byte size: `512 B`, `1.5 KB`, `2.0 MB`, binary units. */
 @HopiInternalApi
@@ -83,15 +116,14 @@ public fun formatBytes(bytes: Long): String {
     return "${tenths / 10}.${tenths % 10} ${units[unit]}"
 }
 
-private class JsonPrettyPrinter(private val src: String, private val indent: String) {
+private class JsonPrettyPrinter(private val src: String, private val indent: String, private val out: Appendable) {
     private var pos = 0
-    private val out = StringBuilder(src.length + (src.length shr 2))
 
-    fun print(): String? {
+    fun print(): Boolean {
         skipWhitespace()
-        if (!value(0)) return null
+        if (!value(0)) return false
         skipWhitespace()
-        return if (pos == src.length) out.toString() else null
+        return pos == src.length
     }
 
     private fun value(depth: Int): Boolean {
@@ -213,9 +245,15 @@ private class JsonPrettyPrinter(private val src: String, private val indent: Str
         return true
     }
 
+    // A newline and its indent, built once per depth: one append per line instead of one per level.
+    private val newlines = arrayOfNulls<String>(MAX_DEPTH + 2)
+
     private fun newline(depth: Int) {
-        out.append('\n')
-        repeat(depth) { out.append(indent) }
+        val line = newlines[depth] ?: buildString(1 + depth * indent.length) {
+            append('\n')
+            repeat(depth) { append(indent) }
+        }.also { newlines[depth] = it }
+        out.append(line)
     }
 
     private fun skipWhitespace() {

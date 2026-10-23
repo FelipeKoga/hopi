@@ -23,6 +23,9 @@ distributions {
     }
 }
 
+// The giant-body fixtures and probes, shared by every module's benchmark.
+sourceSets.test { kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures")) }
+
 dependencies {
     // cURL export, JSON writer, body helpers and the bridge itself (tests); never reimplemented here.
     implementation(project(":hopi-core"))
@@ -43,3 +46,5 @@ tasks.test {
         layout.buildDirectory.dir("install/hopi-cli").get().asFile.absolutePath,
     )
 }
+
+apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))

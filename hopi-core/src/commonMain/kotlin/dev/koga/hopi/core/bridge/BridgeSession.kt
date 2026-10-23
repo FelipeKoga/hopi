@@ -3,6 +3,7 @@ package dev.koga.hopi.core.bridge
 import dev.koga.hopi.core.HopiInternalApi
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.json.TransactionJson
+import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
 import kotlin.concurrent.atomics.AtomicBoolean
@@ -161,13 +162,13 @@ public class BridgeSession(
                 }
                 is BridgeCommand.Get -> {
                     val transaction = store.get(command.id)
-                    reply(
-                        if (transaction == null) {
-                            error(BridgeError.NOT_FOUND, "no transaction ${command.id}")
-                        } else {
-                            TransactionJson.bridgeDetail(transaction, store.redactor)
-                        },
-                    )
+                    if (transaction == null) {
+                        reply(error(BridgeError.NOT_FOUND, "no transaction ${command.id}"))
+                    } else {
+                        // Encoded by the writer as it sends: a queued reply holds the snapshot, not
+                        // a string several times its body.
+                        replies.send(Outgoing.Detail(transaction))
+                    }
                 }
                 is BridgeCommand.Tail -> {
                     startTail(command.since)
@@ -192,7 +193,9 @@ public class BridgeSession(
         tailSince.store(since)
         tailing.store(true)
         // The store calls this on its consumer, losslessly; `events` would drop under a burst unnoticed.
-        val remove = store.addEventListener { offer(Live.Event(it.transaction)) }
+        // A queued event holds a body-free copy: a client that stops reading must not pin captured
+        // bodies (up to a whole queue of them, evicted ones included) outside the store's byte cap.
+        val remove = store.addEventListener { offer(Live.Event(it.transaction.liveSummary())) }
         tailJob.invokeOnCompletion { remove() }
         val droppedAtStart = store.droppedTerminalWrites.value
         // Holes made before this client connected: the stream says so first, and every later
@@ -212,7 +215,7 @@ public class BridgeSession(
         val redactor = store.redactor
         for (transaction in backlog) {
             reply(TransactionJson.bridgeSummary(transaction, redactor))
-            shown[transaction.id] = transaction
+            shown[transaction.id] = transaction.liveSummary()
         }
         replies.send(Outgoing.StartLive(since, shown))
     }
@@ -274,6 +277,7 @@ public class BridgeSession(
         for (item in replies) {
             when (item) {
                 is Outgoing.Line -> send(item.text)
+                is Outgoing.Detail -> sendDetail(item.transaction)
                 is Outgoing.StartLive -> {
                     streamLive(item.since, item.shown)
                     return
@@ -316,17 +320,17 @@ public class BridgeSession(
     }
 
     /**
-     * False for a live event the client already has: an id at or below `since`, the very snapshot
-     * the backlog sent (the store emits the instance it retains), or any snapshot of a transaction
-     * the backlog showed terminal (a `Started` queued before the backlog read, say). [shown] holds
-     * only backlog snapshots still pending, so it never outgrows the backlog and empties as they
-     * complete; ids first seen live need no entry, since the store never emits a pending snapshot
-     * after a terminal one.
+     * False for a live event the client already has: an id at or below `since`, a snapshot equal
+     * to the one the backlog sent (both sides are [liveSummary] copies, so equal means the same
+     * summary line), or any snapshot of a transaction the backlog showed terminal (a `Started`
+     * queued before the backlog read, say). [shown] holds only backlog snapshots still pending, so
+     * it never outgrows the backlog and empties as they complete; ids first seen live need no
+     * entry, since the store never emits a pending snapshot after a terminal one.
      */
     private fun isNew(transaction: HttpTransaction, since: Long, shown: HashMap<Long, HttpTransaction>): Boolean {
         if (transaction.id <= since) return false
         val previous = shown[transaction.id] ?: return true
-        if (previous === transaction || previous.state.isTerminal) return false
+        if (previous == transaction || previous.state.isTerminal) return false
         if (transaction.state.isTerminal) shown.remove(transaction.id) else shown[transaction.id] = transaction
         return true
     }
@@ -337,9 +341,35 @@ public class BridgeSession(
         if (!writerState.compareAndSet(WRITING, IDLE)) throw StopWriting
     }
 
-    private fun writeRaw(line: String) {
-        val bytes = (line + "\n").encodeToByteArray()
-        connection.write(bytes, bytes.size)
+    /**
+     * The `get` reply, encoded and written in slices of [DETAIL_CHUNK_CHARS], so a giant body costs
+     * its decoded text plus one slice, not the whole line built, copied and encoded at once. The
+     * line is one write state like any other: a `SLOW_CLIENT` decision waits for its end.
+     */
+    private fun sendDetail(transaction: HttpTransaction) {
+        if (!writerState.compareAndSet(IDLE, WRITING)) throw StopWriting
+        val out = StringBuilder(DETAIL_CHUNK_CHARS + 1024)
+        TransactionJson.writeBridgeDetail(transaction, store.redactor, out, DETAIL_CHUNK_CHARS) {
+            writeText(out, newline = false)
+            out.setLength(0)
+        }
+        writeText(out, newline = true)
+        if (!writerState.compareAndSet(WRITING, IDLE)) throw StopWriting
+    }
+
+    private fun writeRaw(line: String) = writeText(line, newline = true)
+
+    // Writer thread only: reused for every line, grown to the longest slice written.
+    private var encoded = ByteArray(0)
+
+    /** Writes [text] as UTF-8, plus `\n` when [newline], in one write and without an intermediate string. */
+    private fun writeText(text: CharSequence, newline: Boolean) {
+        val needed = text.length * 3 + 1
+        if (encoded.size < needed) encoded = ByteArray(maxOf(needed, minOf(encoded.size * 2, MAX_REUSED_BUFFER)))
+        var n = encodeUtf8(text, encoded)
+        if (newline) encoded[n++] = '\n'.code.toByte()
+        connection.write(encoded, n)
+        if (encoded.size > MAX_REUSED_BUFFER) encoded = ByteArray(0)
     }
 
     private suspend fun reply(line: String) {
@@ -364,11 +394,15 @@ public class BridgeSession(
     private sealed interface Outgoing {
         class Line(val text: String) : Outgoing
 
+        /** A `get` reply, encoded only when written. */
+        class Detail(val transaction: HttpTransaction) : Outgoing
+
         /** Everything before it was backlog; the writer switches to the live queue. */
         class StartLive(val since: Long, val shown: HashMap<Long, HttpTransaction>) : Outgoing
     }
 
     private sealed interface Live {
+        /** [transaction] is a [liveSummary] copy: no body bytes, no headers. */
         class Event(val transaction: HttpTransaction) : Live
 
         class Dropped(val total: Long) : Live
@@ -389,6 +423,73 @@ public class BridgeSession(
          * overflows. Bounded; the channel allocates its slots only as they fill.
          */
         public fun liveCapacityFor(store: HopiStore): Int = store.maxBatchSize + DEFAULT_LIVE_LAG
+
+        private val NO_BYTES = ByteArray(0)
+
+        /**
+         * What a live summary line needs of [this], and nothing it does not: headers dropped and
+         * each body reduced to its reported size and flags, so a queued event costs a few hundred
+         * bytes whatever the bodies weigh. [TransactionJson.bridgeSummary] writes the same line
+         * for it as for the original.
+         */
+        internal fun HttpTransaction.liveSummary(): HttpTransaction {
+            if (requestHeaders.isEmpty() && responseHeaders.isEmpty() && requestBody.isSizeOnly() && responseBody.isSizeOnly()) {
+                return this
+            }
+            return copy(
+                requestHeaders = emptyList(),
+                requestBody = requestBody?.sizeOnly(),
+                responseHeaders = emptyList(),
+                responseBody = responseBody?.sizeOnly(),
+            )
+        }
+
+        private fun CapturedBody?.isSizeOnly(): Boolean = this == null || (bytes.isEmpty() && totalBytes != null)
+
+        private fun CapturedBody.sizeOnly(): CapturedBody =
+            if (isSizeOnly()) this else CapturedBody(NO_BYTES, reportedBytes, truncated, contentType, skippedReason)
+
+        /** Chars of a body escaped, encoded and written at a time by a `get` reply. */
+        private const val DETAIL_CHUNK_CHARS = 32 * 1024
+
+        /** A larger encode buffer (a line that is not a sliced `get`) is dropped after its write. */
+        private const val MAX_REUSED_BUFFER = 1024 * 1024
+
+        /**
+         * Encodes [text] into [out] (at least 3 bytes per char) and returns the byte count. An
+         * unpaired surrogate becomes U+FFFD, as [String.encodeToByteArray] does.
+         */
+        private fun encodeUtf8(text: CharSequence, out: ByteArray): Int {
+            var n = 0
+            var i = 0
+            val length = text.length
+            while (i < length) {
+                val c = text[i].code
+                when {
+                    c < 0x80 -> out[n++] = c.toByte()
+                    c < 0x800 -> {
+                        out[n++] = (0xC0 or (c shr 6)).toByte()
+                        out[n++] = (0x80 or (c and 0x3F)).toByte()
+                    }
+                    c in 0xD800..0xDBFF && i + 1 < length && text[i + 1].code in 0xDC00..0xDFFF -> {
+                        val point = 0x10000 + ((c - 0xD800) shl 10) + (text[i + 1].code - 0xDC00)
+                        out[n++] = (0xF0 or (point shr 18)).toByte()
+                        out[n++] = (0x80 or ((point shr 12) and 0x3F)).toByte()
+                        out[n++] = (0x80 or ((point shr 6) and 0x3F)).toByte()
+                        out[n++] = (0x80 or (point and 0x3F)).toByte()
+                        i++
+                    }
+                    else -> {
+                        val unit = if (c in 0xD800..0xDFFF) 0xFFFD else c
+                        out[n++] = (0xE0 or (unit shr 12)).toByte()
+                        out[n++] = (0x80 or ((unit shr 6) and 0x3F)).toByte()
+                        out[n++] = (0x80 or (unit and 0x3F)).toByte()
+                    }
+                }
+                i++
+            }
+            return n
+        }
 
         private const val IDLE = 0
         private const val WRITING = 1

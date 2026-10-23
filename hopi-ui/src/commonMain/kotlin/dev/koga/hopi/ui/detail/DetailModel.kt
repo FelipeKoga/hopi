@@ -2,18 +2,22 @@ package dev.koga.hopi.ui.detail
 
 import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.body.isJson
-import dev.koga.hopi.core.body.prettyPrintJson
+import dev.koga.hopi.core.body.prettyPrintJsonTo
 import dev.koga.hopi.core.body.textOrNull
+import dev.koga.hopi.core.curl.CURL_BODY_CUT_WARNING
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.ui.format.PieceWriter
 import dev.koga.hopi.ui.format.TextPieces
+import dev.koga.hopi.ui.format.cutForDisplay
 import dev.koga.hopi.ui.format.formatDuration
 import dev.koga.hopi.ui.format.hexDump
 import dev.koga.hopi.ui.format.reasonPhrase
 import dev.koga.hopi.ui.format.splitText
+import dev.koga.hopi.ui.platform.MAX_SHARE_CHARS
 import dev.koga.hopi.ui.platform.formatTimeOfDay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -100,8 +104,8 @@ internal class DetailFormatter(private val capacity: Int = 16, private val maxCh
             url = url,
             title = "${transaction.method} ${statusText(transaction)}",
             overview = overview(transaction, url, redactor),
-            request = ExchangeView(redactor.headers(transaction.requestHeaders), requestBody),
-            response = ExchangeView(redactor.headers(transaction.responseHeaders), responseBody),
+            request = ExchangeView(shownHeaders(redactor.headers(transaction.requestHeaders)), requestBody),
+            response = ExchangeView(shownHeaders(redactor.headers(transaction.responseHeaders)), responseBody),
         )
     }
 
@@ -148,7 +152,7 @@ private fun statusText(transaction: HttpTransaction): String = when (transaction
 
 private fun overview(transaction: HttpTransaction, url: String, redactor: Redactor): List<OverviewField> {
     val fields = ArrayList<OverviewField>(10)
-    fields += OverviewField("URL", url)
+    fields += OverviewField("URL", cutForDisplay(url))
     fields += OverviewField("Method", transaction.method)
     fields += OverviewField(
         "Status",
@@ -161,7 +165,7 @@ private fun overview(transaction: HttpTransaction, url: String, redactor: Redact
             }
         },
     )
-    transaction.error?.let { fields += OverviewField("Error", redactor.textMentioning(it, transaction.url)) }
+    transaction.error?.let { fields += OverviewField("Error", cutForDisplay(redactor.textMentioning(it, transaction.url))) }
     fields += OverviewField("Started", formatTimeOfDay(transaction.startedAtEpochMs, withMillis = true))
     fields += OverviewField("Duration", transaction.durationMs?.let(::formatDuration) ?: "—")
     transaction.protocol?.let { fields += OverviewField("Protocol", it) }
@@ -171,6 +175,16 @@ private fun overview(transaction: HttpTransaction, url: String, redactor: Redact
     }
     return fields
 }
+
+/** Header values as shown: each one text layout, so a giant cookie or token is cut ([cutForDisplay]). */
+private fun shownHeaders(headers: List<Pair<String, String>>): List<Pair<String, String>> =
+    if (headers.none { it.second.length > MAX_SHOWN_VALUE_CHARS }) {
+        headers
+    } else {
+        headers.map { (name, value) -> name to cutForDisplay(value, MAX_SHOWN_VALUE_CHARS) }
+    }
+
+private const val MAX_SHOWN_VALUE_CHARS = 4_096
 
 private fun sizeText(body: CapturedBody?): String = when {
     body == null -> "—"
@@ -201,8 +215,26 @@ private fun formatBody(body: CapturedBody, side: String): BodyView {
         return BodyView.Binary(summary ?: "binary", notice, hexDump(body.bytes, preview), preview)
     }
     val json = isJson(body.contentType, text)
-    val shown = if (json) prettyPrintJson(text) else text
-    return BodyView.Text(summary ?: formatBytes(body.bytes.size.toLong()), notice, splitText(shown), json)
+    // Printed straight into its pieces: no whole pretty string, nor the builder that grows to hold
+    // it (2 bytes per char on ART and Kotlin/Native), is ever built next to the text. A truncated
+    // body is almost never valid JSON, so it is tried only when it could be (it ends a container).
+    val tryPretty = json && (!body.truncated || endsAContainer(text))
+    val pieces = (if (tryPretty) prettyPieces(text) else null) ?: splitText(text)
+    return BodyView.Text(summary ?: formatBytes(body.bytes.size.toLong()), notice, pieces, json)
+}
+
+private fun endsAContainer(text: String): Boolean {
+    for (i in text.indices.reversed()) {
+        val c = text[i]
+        if (c == ' ' || c == '\n' || c == '\r' || c == '\t') continue
+        return c == '}' || c == ']'
+    }
+    return false
+}
+
+private fun prettyPieces(text: String): TextPieces? {
+    val writer = PieceWriter()
+    return if (prettyPrintJsonTo(text, writer)) writer.finish() else null
 }
 
 /** Characters a cached view holds, for the cache's character budget. */
@@ -214,13 +246,25 @@ private fun BodyView.chars(): Int = when (this) {
 
 private const val HEX_PREVIEW_BYTES = 512
 
-/** The request as cURL with the store's redaction; core's export, unchanged. */
-internal fun curlOf(transaction: HttpTransaction, redactor: Redactor): String = toCurl(transaction, redactor)
+/**
+ * The request as cURL with the store's redaction (core's export), at most [maxChars] long: a body
+ * that does not fit is cut inside the command, with a warning line, so the command stays valid
+ * shell and a giant body is never quoted whole only to be cut afterwards.
+ */
+internal fun curlOf(transaction: HttpTransaction, redactor: Redactor, maxChars: Int = MAX_SHARE_CHARS): String =
+    toCurl(transaction, redactor, maxChars)
 
-/** What the share sheet receives: a summary line, the URL, then the cURL command. */
-internal fun shareTextOf(model: DetailModel, redactor: Redactor): String = buildString {
-    append(model.transaction.method).append(' ').append(model.url).append('\n')
-    model.overview.firstOrNull { it.label == "Status" }?.let { append("Status: ").append(it.value).append('\n') }
-    model.overview.firstOrNull { it.label == "Duration" }?.let { append("Duration: ").append(it.value).append('\n') }
-    append('\n').append(curlOf(model.transaction, redactor))
+/** True when [curlOf] had to cut the request body to fit. */
+internal fun curlBodyWasCut(curl: String): Boolean = curl.startsWith(CURL_BODY_CUT_WARNING) || "\n$CURL_BODY_CUT_WARNING" in curl
+
+/** What the share sheet receives, within [MAX_SHARE_CHARS]: a summary line, the URL, then the cURL command. */
+internal fun shareTextOf(model: DetailModel, redactor: Redactor): String {
+    val head = buildString {
+        append(model.transaction.method).append(' ').append(model.url).append('\n')
+        model.overview.firstOrNull { it.label == "Status" }?.let { append("Status: ").append(it.value).append('\n') }
+        model.overview.firstOrNull { it.label == "Duration" }?.let { append("Duration: ").append(it.value).append('\n') }
+        append('\n')
+    }
+    val curl = curlOf(model.transaction, redactor, maxChars = (MAX_SHARE_CHARS - head.length).coerceAtLeast(1))
+    return StringBuilder(head.length + curl.length).append(head).append(curl).toString()
 }

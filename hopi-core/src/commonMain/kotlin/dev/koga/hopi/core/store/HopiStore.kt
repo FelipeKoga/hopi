@@ -25,7 +25,8 @@ import kotlinx.coroutines.selects.select
 
 /**
  * Ring buffer of transactions, ordered by id, bounded by [maxEntries] and by [maxTotalBytes] of
- * captured body bytes (oldest evicted first, strictly within both caps).
+ * captured body bytes (oldest evicted first, strictly within both caps, except that the entry
+ * just written is evicted last). One entry keeps at most three quarters of [maxTotalBytes].
  *
  * Writers call [submit], which never suspends, and a single consumer coroutine in [scope] applies
  * the writes. Pending snapshots go through a bounded channel that drops the oldest under flood
@@ -59,6 +60,13 @@ public class HopiStore(
     private val batchLimit = channelCapacity
     private val terminalBatchLimit = terminalChannelCapacity
     private val lostTerminalWrites = AtomicLong(0)
+
+    /**
+     * The most body bytes one entry keeps: three quarters of [maxTotalBytes], so at least a
+     * quarter stays for older entries, while a body at the plugin's largest cap (half the store)
+     * keeps a request or response of its own. Read by the consumer, so declared before it starts.
+     */
+    private val maxEntryBytes: Long = maxOf(1L, maxTotalBytes - maxTotalBytes / 4)
 
     /**
      * The most events one consumer pass can publish at once (its first write plus a full drain of
@@ -129,6 +137,11 @@ public class HopiStore(
     private val buffer = ArrayDeque<HttpTransaction>()
     private var bufferBytes = 0L
     private var appliedClearedThrough = 0L
+    /**
+     * The highest id evicted so far. An id at or below it that is not in [buffer] was evicted (a
+     * stale pending write for it is ignored); one that is in [buffer] stays, since the entry just
+     * written is evicted last and can outlive newer ones.
+     */
     private var evictedThrough = 0L
 
     private val consumer: Job = scope.launch { consume() }
@@ -246,8 +259,13 @@ public class HopiStore(
             val insertAt = -(existing + 1)
             if (insertAt == buffer.size) buffer.addLast(transaction) else buffer.add(insertAt, transaction)
         }
+        // Oldest first, but never the entry just written while another is left: a long download
+        // that started first (lowest id) and completes large would otherwise be evicted the
+        // moment it completes, keeping the newer, smaller entries instead. It fits on its own
+        // (fitToByteCap), so the loop ends.
         while (buffer.size > maxEntries || (bufferBytes > maxTotalBytes && buffer.isNotEmpty())) {
-            val evicted = buffer.removeFirst()
+            val index = if (buffer.size > 1 && buffer.first().id == transaction.id) 1 else 0
+            val evicted = buffer.removeAt(index)
             bufferBytes -= evicted.capturedBytes
             if (evicted.id > evictedThrough) evictedThrough = evicted.id
         }
@@ -255,21 +273,24 @@ public class HopiStore(
     }
 
     /**
-     * [transaction] with its larger body, then if still needed the other, replaced by a skipped
-     * body when together they exceed [maxTotalBytes], so one entry never evicts the whole history.
+     * [transaction] with its larger body (the request's on a tie: the response is what is read
+     * most), then if still needed the other, replaced by a skipped body when together they exceed
+     * three quarters of [maxTotalBytes]. So one entry never evicts the whole history: at least a
+     * quarter of the store stays for older entries.
      */
     private fun fitToByteCap(transaction: HttpTransaction): HttpTransaction {
-        if (transaction.capturedBytes <= maxTotalBytes) return transaction
+        val entryCap = maxEntryBytes
+        if (transaction.capturedBytes <= entryCap) return transaction
         var request = transaction.requestBody
         var response = transaction.responseBody
         val requestSize = request?.capturedBytes ?: 0
         val responseSize = response?.capturedBytes ?: 0
-        if (responseSize >= requestSize) {
+        if (responseSize > requestSize) {
             response = response?.overByteCap()
-            if (requestSize > maxTotalBytes) request = request?.overByteCap()
+            if (requestSize > entryCap) request = request?.overByteCap()
         } else {
             request = request?.overByteCap()
-            if (responseSize > maxTotalBytes) response = response?.overByteCap()
+            if (responseSize > entryCap) response = response?.overByteCap()
         }
         return transaction.copy(requestBody = request, responseBody = response)
     }

@@ -5,6 +5,7 @@
 
     <application
         android:label="Hopi sample"
+        android:largeHeap="${largeHeap}"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"

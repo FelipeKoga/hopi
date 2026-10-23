@@ -82,6 +82,23 @@ class JsonWriterTest {
     }
 
     @Test
+    fun chunkedValuesEqualTheWholeValueWhateverTheSliceSize() {
+        // Escapes, pairs that a naive cut would split, and unpaired surrogates at slice edges.
+        val text = "a\"b\\c\n😀😀x\uD83Dy\uDE00z\u0001é中" + "😀".repeat(5) + "q"
+        val bytes = ByteArray(100) { (it * 37).toByte() }
+        for (chunk in 2..text.length + 1) {
+            val pieces = StringBuilder()
+            val w = JsonWriter()
+            w.beginArray()
+                .chunkedValue(text, chunk) { pieces.append(w.out); w.out.setLength(0) }
+                .chunkedBase64Value(bytes, chunk) { pieces.append(w.out); w.out.setLength(0) }
+                .endArray()
+            pieces.append(w.out)
+            assertEquals(JsonWriter().beginArray().value(text).base64Value(bytes).endArray().toString(), pieces.toString(), "slices of $chunk")
+        }
+    }
+
+    @Test
     fun misuseThrows() {
         assertFailsWith<IllegalStateException> { JsonWriter().beginObject().value(1) }
         assertFailsWith<IllegalStateException> { JsonWriter().beginArray().endObject() }

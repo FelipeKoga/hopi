@@ -329,12 +329,21 @@ private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: Mu
                 results.clear()
                 scope.launch { results.add(createItems(SampleHttp.api, count = 500)) }
             })
+            SampleButton("Giant JSON (1, 5, 20 MB)", primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
+                results.clear()
+                scope.launch { results.add(runGiant(SampleHttp.client, GiantSpec.parse("mb=1,5,20;runs=1"))) }
+            })
+            SampleButton("Giant JSON (8 MB)", primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
+                results.clear()
+                scope.launch { results.add(runGiant(SampleHttp.client, GiantSpec.parse("mb=8;runs=1"))) }
+            })
             platformActions.forEach { action ->
                 SampleButton(action.label, primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
                     results.clear()
                     scope.launch { results.add(action.run()) }
                 })
             }
+            FrameTicker()
             results.forEach { Body(it) }
         }
     }

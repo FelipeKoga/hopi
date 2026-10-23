@@ -50,6 +50,7 @@ import dev.koga.hopi.ui.detail.DetailFormatter
 import dev.koga.hopi.ui.detail.DetailModel
 import dev.koga.hopi.ui.detail.DetailTab
 import dev.koga.hopi.ui.detail.TransactionDetailPane
+import dev.koga.hopi.ui.detail.curlBodyWasCut
 import dev.koga.hopi.ui.detail.curlOf
 import dev.koga.hopi.ui.detail.shareTextOf
 import dev.koga.hopi.ui.list.ListModel
@@ -148,12 +149,18 @@ internal fun HopiScreen(
         val actions = remember(model, clipboard, shareSheet) {
             // The clip crosses a binder transaction on Android: it is cut like the share text, and a
             // clipboard that still refuses it shows a toast instead of crashing the app.
-            fun copy(label: String, text: suspend () -> String) {
+            fun copy(label: String, cutInside: (String) -> Boolean = { false }, text: suspend () -> String) {
                 scope.launch {
                     val (full, clip) = withContext(formatDispatcher) { text().let { it to cutAt(it) } }
                     toast = try {
                         clipboard.setText(AnnotatedString(clip))
-                        Toast(if (clip === full) "$label copied" else "$label copied (first ${MAX_SHARE_CHARS / 1_000}k characters)")
+                        Toast(
+                            when {
+                                clip !== full -> "$label copied (first ${MAX_SHARE_CHARS / 1_000}k characters)"
+                                cutInside(full) -> "$label copied (request body cut to fit ${MAX_SHARE_CHARS / 1_000}k characters)"
+                                else -> "$label copied"
+                            },
+                        )
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: RuntimeException) {
@@ -162,7 +169,7 @@ internal fun HopiScreen(
                 }
             }
             DetailActions(
-                copyCurl = { model?.let { m -> copy("cURL") { curlOf(m.transaction, store.redactor) } } },
+                copyCurl = { model?.let { m -> copy("cURL", ::curlBodyWasCut) { curlOf(m.transaction, store.redactor) } } },
                 copyUrl = { model?.let { m -> copy("URL") { m.url } } },
                 copyBody = {
                     (model?.response?.body as? BodyView.Text)?.let { body ->

@@ -37,8 +37,12 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
+        // The giant-body fixtures and probes, shared by every module's benchmark.
+        jvmTest { kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures")) }
     }
 }
+
+apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))
 
 // `-Phopi.simulator=<udid>` runs the iOS tests on that already booted simulator instead of a
 // standalone one, so its unified log can be read afterwards with `simctl spawn booted log show`.

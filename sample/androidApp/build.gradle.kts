@@ -22,6 +22,9 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
+        // `-Psample.largeHeap=true` gives the app ART's large heap (512 MB instead of 192 MB on the
+        // API 35 emulator), so the giant-body measurements can see past the app's own limit.
+        manifestPlaceholders["largeHeap"] = providers.gradleProperty("sample.largeHeap").orNull ?: "false"
     }
 
     buildTypes {

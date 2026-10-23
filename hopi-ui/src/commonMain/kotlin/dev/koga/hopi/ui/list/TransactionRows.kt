@@ -4,6 +4,7 @@ import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.ui.format.cutForDisplay
 import dev.koga.hopi.ui.format.formatDuration
 import dev.koga.hopi.ui.format.splitUrl
 import dev.koga.hopi.ui.platform.formatTimeOfDay
@@ -81,18 +82,22 @@ internal fun buildRow(transaction: HttpTransaction, redactor: Redactor): Transac
             else -> transaction.responseCode.toString()
         },
         method = transaction.method,
-        path = parts.path,
-        host = parts.host,
+        // One line each, but a text layout still measures the whole string: a 200 KB query is cut.
+        path = cutForDisplay(parts.path, MAX_ROW_TEXT_CHARS),
+        host = cutForDisplay(parts.host, MAX_ROW_TEXT_CHARS),
         time = formatTimeOfDay(transaction.startedAtEpochMs, withMillis = false),
         duration = when (transaction.state) {
             TransactionState.Pending -> "pending"
             else -> transaction.durationMs?.let(::formatDuration) ?: ""
         },
         size = transaction.responseBody?.let { formatBytes(it.reportedBytes) } ?: "",
-        error = transaction.error?.let { redactor.textMentioning(it, transaction.url).substringBefore('\n') },
+        error = transaction.error?.let { cutForDisplay(redactor.textMentioning(it, transaction.url).substringBefore('\n'), MAX_ROW_TEXT_CHARS) },
         searchKey = url.lowercase(),
     )
 }
+
+/** Far more than a row's one line shows. */
+private const val MAX_ROW_TEXT_CHARS = 1_024
 
 internal fun statusOf(transaction: HttpTransaction): StatusClass = when (transaction.state) {
     TransactionState.Pending -> StatusClass.Pending

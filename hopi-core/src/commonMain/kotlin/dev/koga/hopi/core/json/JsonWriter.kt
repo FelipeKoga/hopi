@@ -86,6 +86,44 @@ public class JsonWriter(public val out: StringBuilder = StringBuilder()) {
         return this
     }
 
+    /**
+     * Writes [value] as a JSON string like [value], escaping about [chunkChars] chars at a time and
+     * calling [flush] after each slice, which may empty [out]: a giant string is never escaped
+     * into one buffer. Slices never split a surrogate pair.
+     */
+    public fun chunkedValue(value: String, chunkChars: Int, flush: () -> Unit): JsonWriter {
+        require(chunkChars >= 2) { "chunkChars must be at least 2" }
+        beforeValue()
+        out.append('"')
+        var start = 0
+        while (start < value.length) {
+            var end = if (value.length - start <= chunkChars) value.length else start + chunkChars
+            if (end < value.length && value[end - 1].isHighSurrogate() && value[end].isLowSurrogate()) end--
+            appendEscaped(out, value, start, end)
+            flush()
+            start = end
+        }
+        out.append('"')
+        return this
+    }
+
+    /** [base64Value], encoding about [chunkBytes] bytes at a time and calling [flush] after each, as [chunkedValue] does. */
+    public fun chunkedBase64Value(bytes: ByteArray, chunkBytes: Int, flush: () -> Unit): JsonWriter {
+        // A multiple of 3 bytes encodes without padding, so the slices join into one base64 string.
+        val step = maxOf(3, chunkBytes / 3 * 3)
+        beforeValue()
+        out.append('"')
+        var start = 0
+        while (start < bytes.size) {
+            val end = if (bytes.size - start <= step) bytes.size else start + step
+            Base64.encodeToAppendable(bytes, out, start, end)
+            flush()
+            start = end
+        }
+        out.append('"')
+        return this
+    }
+
     public fun field(name: String, value: String?): JsonWriter = name(name).value(value)
 
     public fun field(name: String, value: Long?): JsonWriter = name(name).value(value)
@@ -143,8 +181,18 @@ public class JsonWriter(public val out: StringBuilder = StringBuilder()) {
          */
         public fun appendQuoted(out: StringBuilder, value: String) {
             out.append('"')
-            var runStart = 0
-            for (i in value.indices) {
+            appendEscaped(out, value, 0, value.length)
+            out.append('"')
+        }
+
+        /**
+         * Appends `value[start, end)` escaped as inside a JSON string literal, without quotes. A
+         * surrogate is judged against its neighbours in the whole [value], so slices that never
+         * split a pair escape exactly as the whole string would.
+         */
+        internal fun appendEscaped(out: StringBuilder, value: String, start: Int, end: Int) {
+            var runStart = start
+            for (i in start until end) {
                 val c = value[i]
                 val escape: String? = when {
                     c == '"' -> "\\\""
@@ -173,8 +221,7 @@ public class JsonWriter(public val out: StringBuilder = StringBuilder()) {
                 }
                 runStart = i + 1
             }
-            if (runStart < value.length) out.append(value, runStart, value.length)
-            out.append('"')
+            if (runStart < end) out.append(value, runStart, end)
         }
 
         /**

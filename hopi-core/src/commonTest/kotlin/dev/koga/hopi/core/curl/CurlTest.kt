@@ -6,6 +6,8 @@ import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.textBody
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class CurlTest {
     @Test
@@ -112,6 +114,43 @@ class CurlTest {
                 "curl -X POST 'https://h/' --data-raw 'abc'",
             toCurl(tx),
         )
+    }
+
+    @Test
+    fun aBodyThatDoesNotFitMaxCharsIsCutInsideAClosedQuoteWithAWarning() {
+        val body = "it's ".repeat(400_000) // 2M chars, a quote every 5
+        val tx = pending(1, method = "POST", url = "https://h/", headers = listOf("Content-Length" to "2000000"), body = textBody(body))
+        val curl = toCurl(tx, maxChars = 100_000)
+        assertTrue(curl.length <= 100_000, "${curl.length} chars")
+        val lines = curl.lines()
+        assertTrue(lines[0].startsWith(CURL_BODY_CUT_WARNING), lines[0])
+        val kept = Regex("first (\\d+) characters \\((\\d+) of 2000000 bytes\\)").find(lines[0])
+        assertNotNull(kept, lines[0])
+        assertEquals(kept.groupValues[1], kept.groupValues[2], "ASCII: one byte per char")
+        assertEquals("# note: Content-Length header (2000000) omitted; curl sends the length of the body in this command (${kept.groupValues[1]})", lines[1])
+        val command = lines[2]
+        assertTrue(command.startsWith("curl -X POST 'https://h/' --data-raw 'it'\\''s "), command.take(60))
+        // The quote is closed: undoing the quoting gives back exactly the kept prefix.
+        assertTrue(command.endsWith("'"))
+        val quoted = command.removePrefix("curl -X POST 'https://h/' --data-raw ")
+        assertEquals(body.take(kept.groupValues[1].toInt()), quoted.removeSurrounding("'").replace("'\\''", "'"))
+        // Each quote costs 4 chars, so 5 chars of body take 8: the budget is used almost whole.
+        assertTrue(kept.groupValues[1].toInt() > 99_000 * 5 / 8, "the budget is mostly used: ${kept.groupValues[1]}")
+    }
+
+    @Test
+    fun aCutNeverSplitsASurrogatePairAndABodyThatFitsIsUnchanged() {
+        val emoji = "\uD83D\uDE00".repeat(300_000)
+        val curl = toCurl(pending(1, method = "POST", url = "https://h/", body = textBody(emoji)), maxChars = 10_001)
+        assertTrue(curl.length <= 10_001)
+        val quoted = curl.lines().last().substringAfter("--data-raw '").removeSuffix("'")
+        assertTrue(quoted.isNotEmpty() && quoted.length % 2 == 0 && !quoted.last().isHighSurrogate(), "${quoted.length}")
+        val crowded = toCurl(pending(1, method = "POST", url = "https://h/" + "p".repeat(20_000), body = textBody("x".repeat(50_000))), maxChars = 10_000)
+        assertTrue(crowded.startsWith("# warning: request body cut out (50000 bytes)"), crowded.take(80))
+        assertTrue(!crowded.contains("--data-raw"))
+        val small = pending(1, method = "POST", url = "https://h/", body = textBody("abc"))
+        assertEquals(toCurl(small), toCurl(small, maxChars = 100_000))
+        assertEquals("curl -X POST 'https://h/' --data-raw 'abc'", toCurl(small, maxChars = 100_000))
     }
 
     @Test

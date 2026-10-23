@@ -24,6 +24,17 @@ private val PROOF_VALUE = Regex("\"proof\":\"[^\"]*\"")
 private const val SQUAT_EXTRA = "squat"
 
 /**
+ * Giant-body measurements: `--el maxBodyBytes N` sets Hopi's capture cap for the process
+ * (before the client exists, so force-stop the app first), and `--es giant <spec>` runs
+ * [giantJsonAction] at launch, e.g. `--es giant 'mb=1,5,20;shape=minified;runs=5'`.
+ */
+private const val MAX_BODY_BYTES_EXTRA = "maxBodyBytes"
+
+/** `--el maxTotalBytes N`: Hopi's store byte cap (the body cap is clamped to half of it). */
+private const val MAX_TOTAL_BYTES_EXTRA = "maxTotalBytes"
+private const val GIANT_EXTRA = "giant"
+
+/**
  * Hosts the shared sample UI (`sample/shared`, which also owns the HTTP client and Hopi) and
  * adds what only Android has: the bridge self-check and the squatter that the CLI's security
  * checks drive through intent extras.
@@ -34,6 +45,12 @@ class MainActivity : ComponentActivity() {
         // readable on its light and dark backgrounds.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (intent.hasExtra(MAX_BODY_BYTES_EXTRA)) {
+            SampleHttp.maxBodyBytes = intent.getLongExtra(MAX_BODY_BYTES_EXTRA, 0L).takeIf { it > 0 }
+        }
+        if (intent.hasExtra(MAX_TOTAL_BYTES_EXTRA)) {
+            SampleHttp.maxTotalBytes = intent.getLongExtra(MAX_TOTAL_BYTES_EXTRA, 0L).takeIf { it > 0 }
+        }
         // Created with the first activity so the bridge is up before the first request.
         SampleHttp.start()
         // `am start … --es selfCheck <process name>` runs the self-check against that app's bridge
@@ -43,8 +60,9 @@ class MainActivity : ComponentActivity() {
         val runSelfCheckNow = intent.hasExtra(SELF_CHECK_EXTRA)
         // `am start … --es squat <process name>` from a second install: the CLI must refuse it.
         intent.getStringExtra(SQUAT_EXTRA)?.let(::squat)
+        val launchAction = intent.getStringExtra(GIANT_EXTRA)?.let(::giantJsonAction) ?: selfCheck.takeIf { runSelfCheckNow }
         setContent {
-            SampleApp(platformActions = listOf(selfCheck), launchAction = selfCheck.takeIf { runSelfCheckNow })
+            SampleApp(platformActions = listOf(selfCheck), launchAction = launchAction)
         }
     }
 }

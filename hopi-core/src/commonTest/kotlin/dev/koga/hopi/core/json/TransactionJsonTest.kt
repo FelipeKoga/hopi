@@ -159,4 +159,27 @@ class TransactionJsonTest {
             assertTrue(TransactionJson.utf8Length(s) >= s.encodeToByteArray().size, "lone surrogates are an upper bound")
         }
     }
+
+    @Test
+    fun slicedDetailIsExactlyTheDetail() {
+        val text = CapturedBody(("{\"k\":\"日本😀\\n\"}" + "x".repeat(70_000)).encodeToByteArray(), null, false, "application/json", null)
+        val binary = CapturedBody(ByteArray(50_000) { (it % 7).toByte() }, null, false, "application/octet-stream", null)
+        val tx = pending(9, headers = (1..40).map { "X-H$it" to "v".repeat(it * 10) }, body = binary)
+            .completed(200, listOf("Content-Type" to "application/json"), text, 12, "HTTP/1.1")
+        val whole = TransactionJson.bridgeDetail(tx, Redactor.Default)
+        for (chunk in listOf(2, 3, 100, 4_096, 32_768)) {
+            val out = StringBuilder()
+            val sent = StringBuilder()
+            var flushes = 0
+            TransactionJson.writeBridgeDetail(tx, Redactor.Default, out, chunk) {
+                flushes++
+                assertTrue(out.length <= chunk * 6 + 2_048, "a slice of ${out.length} chars for chunks of $chunk")
+                sent.append(out)
+                out.setLength(0)
+            }
+            sent.append(out)
+            assertEquals(whole, sent.toString(), "chunks of $chunk")
+            assertTrue(flushes > 1)
+        }
+    }
 }

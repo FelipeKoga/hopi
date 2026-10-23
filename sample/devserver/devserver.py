@@ -20,6 +20,15 @@ Routes:
   GET  /items/N  one item with its description, 404 for an unknown id
   POST /items    creates an item from a JSON body {"title", "price", "description"}: 201 with the
                  item, 400 when the body is not such an object; items live in memory until exit
+  GET  /giant?mb=N&shape=S&chunked=0|1
+                 a JSON body of about N MiB (1..200), generated while it is sent, never held whole:
+                 shape minified (an array of records), pretty (the same records indented), string
+                 (one object holding one huge string) or nested (records 16 objects deep). With
+                 chunked=0 (default) it has a Content-Length, computed before the first byte; with
+                 chunked=1 it is sent with Transfer-Encoding: chunked. The same query always sends
+                 the same bytes.
+  POST /sink     reads and discards the request body, answers {"received": <bytes>}; the request
+                 is logged without its body
 
 Usage: python3 sample/devserver/devserver.py [--port 8765]
 """
@@ -32,6 +41,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 LARGE_BYTES = 300 * 1024
 CHUNKS = 8
@@ -39,6 +49,13 @@ SLOW_TICK_S = 5
 SLOW_PATH = re.compile(r"^/slow(?:\?s=([0-9]{1,3}))?$")
 SECRET_HEADERS = {"authorization", "proxy-authorization", "cookie"}
 ITEM_PATH = re.compile(r"^/items/([0-9]{1,9})$")
+GIANT_SHAPES = ("minified", "pretty", "string", "nested")
+GIANT_PIECE = 64 * 1024
+# Ids start here so every record has the same width, which is what lets the Content-Length be
+# computed before anything is sent.
+GIANT_FIRST_ID = 10_000_000
+GIANT_PAD = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore."
+GIANT_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:-_"
 
 ITEMS_LOCK = threading.Lock()
 ITEMS = [
@@ -75,6 +92,64 @@ def parse_item(body):
     if not isinstance(description, str) or len(description) > 2000:
         return None
     return {"title": title.strip(), "price": float(price), "description": description}
+
+
+def giant_record(shape, i):
+    """Record i of a giant body; every record of a shape has the same length."""
+    n = GIANT_FIRST_ID + i
+    if shape == "minified":
+        return ('{"id":%d,"name":"Item %d","price":%d.99,"rank":%d,"tags":["kmp","ktor","json"],'
+                '"description":"%s"}' % (n, n, n % 900 + 100, i % 10, GIANT_PAD))
+    if shape == "pretty":
+        return ('  {\n    "id": %d,\n    "name": "Item %d",\n    "price": %d.99,\n    "rank": %d,\n'
+                '    "tags": [\n      "kmp",\n      "ktor",\n      "json"\n    ],\n    "description": "%s"\n  }'
+                % (n, n, n % 900 + 100, i % 10, GIANT_PAD))
+    # nested: 16 objects deep, a realistic depth for API payloads.
+    depth = 16
+    inner = '{"value":%d,"label":"node %d"}' % (n, n)
+    for level in range(depth):
+        inner = '{"level%02d":%s}' % (level, inner)
+    return '{"id":%d,"tree":%s}' % (n, inner)
+
+
+def giant_pieces(mb, shape):
+    """(total length, generator of byte pieces) of the body /giant sends."""
+    target = mb * 1024 * 1024
+    if shape == "string":
+        head, tail = b'{"data":"', b'"}'
+        length = max(target - len(head) - len(tail), 0)
+        unit = (GIANT_ALPHABET * (GIANT_PIECE // len(GIANT_ALPHABET) + 1))[:GIANT_PIECE].encode("ascii")
+
+        def pieces():
+            yield head
+            left = length
+            while left > 0:
+                piece = unit[:min(left, len(unit))]
+                left -= len(piece)
+                yield piece
+            yield tail
+        return len(head) + length + len(tail), pieces()
+
+    separator = ",\n" if shape == "pretty" else ","
+    opening, closing = ("[\n", "\n]") if shape == "pretty" else ("[", "]")
+    record_length = len(giant_record(shape, 0))
+    count = max((target - len(opening) - len(closing) + len(separator)) // (record_length + len(separator)), 1)
+    total = len(opening) + len(closing) + count * record_length + (count - 1) * len(separator)
+
+    def pieces():
+        yield opening.encode("ascii")
+        batch, size = [], 0
+        for i in range(count):
+            part = (separator if i else "") + giant_record(shape, i)
+            batch.append(part)
+            size += len(part)
+            if size >= GIANT_PIECE:
+                yield "".join(batch).encode("ascii")
+                batch, size = [], 0
+        if batch:
+            yield "".join(batch).encode("ascii")
+        yield closing.encode("ascii")
+    return total, pieces()
 
 
 def log(record):
@@ -121,9 +196,47 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
         self.wfile.write(b"0\r\n\r\n")
 
+    def _send_giant(self):
+        query = parse_qs(urlsplit(self.path).query)
+        try:
+            mb = int(query.get("mb", ["1"])[0])
+        except ValueError:
+            mb = 0
+        shape = query.get("shape", ["minified"])[0]
+        chunked = query.get("chunked", ["0"])[0] == "1"
+        if not 1 <= mb <= 200 or shape not in GIANT_SHAPES:
+            self._send(400, {"error": "expected mb in 1..200 and shape in %s" % "|".join(GIANT_SHAPES)})
+            return
+        total, pieces = giant_pieces(mb, shape)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        if chunked:
+            self.send_header("Transfer-Encoding", "chunked")
+        else:
+            self.send_header("Content-Length", str(total))
+        self.end_headers()
+        sent = 0
+        for piece in pieces:
+            if not piece:
+                continue
+            sent += len(piece)
+            if chunked:
+                self.wfile.write(b"%x\r\n" % len(piece))
+                self.wfile.write(piece)
+                self.wfile.write(b"\r\n")
+            else:
+                self.wfile.write(piece)
+        if chunked:
+            self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+        if sent != total:
+            sys.stderr.write("giant: sent %d bytes, announced %d\n" % (sent, total))
+
     def do_GET(self):
         self._record(b"")
-        if self.path == "/json":
+        if self.path == "/giant" or self.path.startswith("/giant?"):
+            self._send_giant()
+        elif self.path == "/json":
             self._send(200, {"id": 1, "name": "Ada Lovelace", "languages": ["kotlin", "swift"]})
         elif self.path == "/large":
             item = '{"i":%d,"pad":"' + "x" * 80 + '"}'
@@ -157,6 +270,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found", "path": self.path})
 
     def do_POST(self):
+        if self.path == "/sink":
+            # Read in pieces and dropped: a giant upload is never held, nor logged.
+            left = int(self.headers.get("Content-Length") or 0)
+            received = 0
+            while left > 0:
+                piece = self.rfile.read(min(left, GIANT_PIECE))
+                if not piece:
+                    break
+                received += len(piece)
+                left -= len(piece)
+            self._record(b"")
+            self._send(200, {"received": received})
+            return
         body = self._read_body()
         record = self._record(body)
         if self.path == "/echo":

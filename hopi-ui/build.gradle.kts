@@ -58,8 +58,12 @@ kotlin {
             // `compose.desktop.currentOs`, which would bring Material onto the test classpath.
             runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-${skikoHostSuffix()}:${libs.versions.skiko.get()}")
         }
+        // The giant-body fixtures and probes, shared by every module's benchmark.
+        jvmTest { kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures")) }
     }
 }
+
+apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))
 
 fun skikoHostSuffix(): String {
     val os = System.getProperty("os.name").lowercase()

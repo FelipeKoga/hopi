@@ -29,7 +29,10 @@ public class HopiConfig {
 
     /**
      * Per-body capture cap; longer bodies are truncated. Zero records sizes only. Clamped to half
-     * of the store's [maxTotalBytes], so one transaction's two bodies always fit the store.
+     * of the store's [maxTotalBytes]. One entry keeps at most three quarters of the store: when a
+     * transaction's two bodies together exceed that (both near the largest cap), the store drops
+     * the larger one (the request's on a tie), so a raised cap never evicts the whole history. At
+     * the largest cap the store holds two entries of full-size bodies.
      */
     public var maxBodyBytes: Long = DEFAULT_MAX_BODY_BYTES
 
