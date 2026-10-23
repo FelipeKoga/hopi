@@ -1,0 +1,11 @@
+.gradle/
+build/
+.kotlin/
+local.properties
+.idea/
+*.iml
+.DS_Store
+xcuserdata/
+DerivedData/
+# Read-only third-party sources used as implementation reference; never shipped.
+.reference/
