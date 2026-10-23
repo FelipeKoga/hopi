@@ -1,5 +1,6 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.json.parseFlatJsonObject
@@ -225,7 +226,7 @@ class CliBridgeTest {
         postUser()
         val clear = cli("clear", "--bridge-file", bridgeFile, "--json")
         assertEquals(ExitCode.OK, clear.exitCode, clear.toString())
-        assertEquals(listOf("""{"type":"ok"}"""), clear.lines)
+        assertTrue(Regex("""\{"type":"ok","through":[1-9][0-9]*\}""").matches(clear.lines.single()), clear.toString())
         assertEquals("", cli("list", "--bridge-file", bridgeFile, "--json").stdout)
         assertEquals(listOf("cleared"), cli("clear", "--bridge-file", bridgeFile).lines)
     }

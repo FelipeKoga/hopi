@@ -1,4 +1,4 @@
-package dev.koga.hopi.cli
+package dev.koga.hopi.connect
 
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -7,6 +7,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+private fun fixture(name: String): String =
+    checkNotNull(object {}.javaClass.getResource("/fixtures/$name")) { "missing fixture $name" }.readText()
 
 class ParsingTest {
     @Test
@@ -73,7 +76,7 @@ class ParsingTest {
 
     @Test
     fun bridgeFileNeedsPortAndFullToken() {
-        val dir = Files.createTempDirectory("hopi-cli-parse")
+        val dir = Files.createTempDirectory("hopi-connect-parse")
         try {
             val file = dir.resolve("bridge.json")
             val token = "0123456789abcdef".repeat(4)
@@ -108,9 +111,7 @@ class ParsingTest {
         val mac = Paths.get("/Users/dev/Library/Android/sdk/platform-tools/adb")
         val onPath = Paths.get("/opt/bin/adb")
         fun locate(env: Map<String, String>, executables: Set<java.nio.file.Path>) = locateAdb(
-            CliEnvironment(
-                stdout = java.io.ByteArrayOutputStream(),
-                stderr = java.io.ByteArrayOutputStream(),
+            HostEnvironment(
                 env = env,
                 userHome = "/Users/dev",
                 isExecutable = { it in executables },

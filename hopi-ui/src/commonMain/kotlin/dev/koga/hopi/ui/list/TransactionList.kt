@@ -31,6 +31,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -39,6 +41,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,7 +71,11 @@ internal fun TransactionListPane(
     listState: LazyListState,
     onOpen: (Long) -> Unit,
     onClear: () -> Unit,
-    onClose: () -> Unit,
+    /** Null hides the close button (the desktop window closes itself). */
+    onClose: (() -> Unit)?,
+    /** The row shown beside the list (desktop panes); null in the full-screen list. */
+    selectedId: Long? = null,
+    searchFocus: FocusRequester? = null,
 ) {
     val colors = LocalHopiColors.current
     Column(Modifier.fillMaxSize()) {
@@ -85,9 +92,9 @@ internal fun TransactionListPane(
             }
             Spacer(Modifier.weight(1f))
             IconButton(HopiIcons.Trash, ListTags.CLEAR, onClear, enabled = model != null && model.total > 0)
-            IconButton(HopiIcons.Close, ListTags.CLOSE, onClose)
+            if (onClose != null) IconButton(HopiIcons.Close, ListTags.CLOSE, onClose)
         }
-        SearchField(query)
+        SearchField(query, searchFocus)
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 13.dp),
         ) {
@@ -114,7 +121,7 @@ internal fun TransactionListPane(
             )
             else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 items(model.rows, key = { it.id }, contentType = { "row" }) { row ->
-                    TransactionRowItem(row, colors, onOpen)
+                    TransactionRowItem(row, colors, onOpen, selected = row.id == selectedId)
                 }
             }
         }
@@ -122,7 +129,7 @@ internal fun TransactionListPane(
 }
 
 @Composable
-private fun SearchField(state: TextFieldState) {
+private fun SearchField(state: TextFieldState, focus: FocusRequester?) {
     val colors = LocalHopiColors.current
     Row(
         modifier = Modifier
@@ -142,7 +149,10 @@ private fun SearchField(state: TextFieldState) {
             }
             BasicTextField(
                 state = state,
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = ListTags.SEARCH },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
+                    .semantics { contentDescription = ListTags.SEARCH },
                 textStyle = HopiType.body.copy(color = colors.text),
                 cursorBrush = SolidColor(colors.text),
                 lineLimits = TextFieldLineLimits.SingleLine,
@@ -157,10 +167,11 @@ private fun SearchField(state: TextFieldState) {
 }
 
 @Composable
-private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: (Long) -> Unit) {
+private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: (Long) -> Unit, selected: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (selected) Modifier.background(colors.surface).semantics { this.selected = true } else Modifier)
             .clickable(onClickLabel = "Open details") { onOpen(row.id) }
             .heightIn(min = 60.dp),
     ) {

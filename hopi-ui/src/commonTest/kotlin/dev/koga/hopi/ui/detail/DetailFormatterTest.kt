@@ -17,6 +17,31 @@ import kotlinx.coroutines.test.runTest
 
 class DetailFormatterTest {
     @Test
+    fun aBodyNotFetchedYetIsLoadingNotMissingOrSkipped() = runTest {
+        val summary = complete(1, responseBody = CapturedBody.notFetched(5_120), requestBody = CapturedBody.notFetched(0))
+        val model = DetailFormatter().model(summary, Redactor.Default)
+        assertEquals("Loading body…", assertIs<BodyView.None>(model.response.body).message)
+        assertEquals("Loading body…", assertIs<BodyView.None>(model.request.body).message)
+        assertTrue(model.loading && model.request.loading && model.response.loading)
+        assertEquals("5.0 KB", model.overview.single { it.label == "Response size" }.value)
+
+        val fetched = DetailFormatter().model(complete(1), Redactor.Default)
+        assertTrue(!fetched.loading)
+        assertEquals("No request body", assertIs<BodyView.None>(fetched.request.body).message)
+    }
+
+    @Test
+    fun aBodyGoneFromTheAppStopsLoadingAndSaysSo() = runTest {
+        val gone = complete(1, responseBody = CapturedBody.gone(5_120), requestBody = CapturedBody.gone(0))
+        val model = DetailFormatter().model(gone, Redactor.Default)
+        assertEquals(GONE_BODY, assertIs<BodyView.None>(model.response.body).message)
+        assertEquals(GONE_BODY, assertIs<BodyView.None>(model.request.body).message)
+        assertTrue(!model.loading, "not loading: nothing is on its way")
+        assertTrue(model.gone && model.request.gone && model.response.gone)
+        assertEquals("5.0 KB", model.overview.single { it.label == "Response size" }.value)
+    }
+
+    @Test
     fun jsonBodiesArePrettyPrintedWithCoreAndChunked() = runTest {
         val model = DetailFormatter().model(complete(1, responseBody = textBody("""{"name":"Ada","tags":[1,2]}""")), Redactor.Default)
         val body = assertIs<BodyView.Text>(model.response.body)

@@ -1,16 +1,19 @@
-package dev.koga.hopi.cli
+package dev.koga.hopi.connect
 
+import dev.koga.hopi.core.HopiInternalApi
 import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Path
 import java.nio.file.Paths
 
 /** One line of `adb devices -l`. [state] is adb's word: `device` (ready), `unauthorized`, `offline`, … */
-internal class AdbDevice(val serial: String, val state: String, val model: String?) {
-    val isReady: Boolean get() = state == "device"
+@HopiInternalApi
+public class AdbDevice(public val serial: String, public val state: String, public val model: String?) {
+    public val isReady: Boolean get() = state == "device"
 }
 
 /** `$ANDROID_HOME/platform-tools/adb`, then `~/Library/Android/sdk/platform-tools/adb`, then `PATH`. */
-internal fun locateAdb(environment: CliEnvironment): Path? {
+internal fun locateAdb(environment: HostEnvironment): Path? {
     val candidates = buildList {
         environment.env["ANDROID_HOME"]?.takeIf { it.isNotEmpty() }?.let { add(Paths.get(it, "platform-tools", "adb")) }
         if (environment.userHome.isNotEmpty()) {
@@ -44,6 +47,46 @@ internal fun parseForwards(output: String): List<Pair<String, String>> = output.
     .filter { it.size == 3 }
     .map { it[0] to it[1] }
     .toList()
+
+/**
+ * The process names of `@hopi.<name>` sockets in `/proc/net/unix` (the path is the last
+ * field; a connected client repeats it), sorted, without duplicates.
+ */
+internal fun parseUnixSocketBridges(output: String): List<String> = output.lineSequence()
+    .mapNotNull { line -> line.trim().split(WHITESPACE).lastOrNull()?.takeIf { it.startsWith(BRIDGE_SOCKET_PREFIX) } }
+    .map { it.removePrefix(BRIDGE_SOCKET_PREFIX) }
+    .filter { TargetIds.APP.matches(it) }
+    .distinct()
+    .sorted()
+    .toList()
+
+/**
+ * One message of an adb tracking service (`track-devices`, `track-jdwp`): four hex digits giving
+ * the length, then that many bytes. Null at the end of the stream or on anything else.
+ */
+internal fun readTrackFrame(input: InputStream): String? {
+    val header = input.readExactly(4) ?: return null
+    val length = header.decodeToString().toIntOrNull(16)?.takeIf { it in 0..MAX_TRACK_FRAME } ?: return null
+    return input.readExactly(length)?.decodeToString()
+}
+
+/** `track-jdwp`: one pid per line. */
+internal fun parseJdwpPids(frame: String): Set<Int> =
+    frame.lineSequence().mapNotNull { it.trim().toIntOrNull() }.toSet()
+
+private fun InputStream.readExactly(count: Int): ByteArray? {
+    val bytes = ByteArray(count)
+    var read = 0
+    while (read < count) {
+        val n = read(bytes, read, count - read)
+        if (n < 0) return null
+        read += n
+    }
+    return bytes
+}
+
+private const val BRIDGE_SOCKET_PREFIX = "@hopi."
+private const val MAX_TRACK_FRAME = 0xffff
 
 private val WHITESPACE = Regex("\\s+")
 private val PROOF = Regex("[0-9a-f]{64}")
@@ -109,6 +152,20 @@ internal class Adb(private val path: Path, private val processes: ProcessRunner)
                 "the app must be a debuggable build whose bridge started (another app may hold the socket name)",
         )
     }
+
+    /**
+     * The bridges listening on [serial]: the `@hopi.<process name>` entries of
+     * `/proc/net/unix` (readable by the shell on API 35; other levels unverified, then empty).
+     * A fixed command; only names that pass [TargetIds.APP] are returned.
+     */
+    fun bridges(serial: String): List<String> {
+        val result = run("-s", serial, "exec-out", "cat", "/proc/net/unix")
+        if (result.exitCode != 0) return emptyList()
+        return parseUnixSocketBridges(result.stdout)
+    }
+
+    /** The argument array of a long-running adb service (`track-devices`, `track-jdwp`). */
+    fun command(vararg args: String): List<String> = listOf(path.toString()) + args
 
     private fun run(vararg args: String): ProcessResult {
         val command = listOf(path.toString()) + args

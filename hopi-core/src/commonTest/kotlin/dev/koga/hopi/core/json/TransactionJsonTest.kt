@@ -19,9 +19,10 @@ class TransactionJsonTest {
                 "\"code\":200,\"ms\":183,\"reqBytes\":0,\"resBytes\":5120,\"state\":\"complete\"}",
             TransactionJson.summaryLogLine(tx, Redactor.Default),
         )
+        // The bridge's line adds what the app holds of a body cut short (10 of 5120 bytes here).
         assertEquals(
             "{\"type\":\"transaction\",\"id\":42,\"method\":\"GET\",\"url\":\"https://api.example.com/users?page=2\"," +
-                "\"code\":200,\"ms\":183,\"reqBytes\":0,\"resBytes\":5120,\"state\":\"complete\"}",
+                "\"code\":200,\"ms\":183,\"reqBytes\":0,\"resBytes\":5120,\"state\":\"complete\",\"resHeld\":10}",
             TransactionJson.bridgeSummary(tx, Redactor.Default),
         )
     }

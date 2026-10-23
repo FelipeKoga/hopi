@@ -1,5 +1,6 @@
-package dev.koga.hopi.cli
+package dev.koga.hopi.connect
 
+import dev.koga.hopi.core.HopiInternalApi
 import java.io.IOException
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -9,7 +10,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
 /** A booted iOS simulator from `simctl list devices booted -j`. [os] is e.g. `iOS 18.2`. */
-internal class Simulator(val udid: String, val name: String, val state: String, val os: String?)
+@HopiInternalApi
+public class Simulator(public val udid: String, public val name: String, public val state: String, public val os: String?)
 
 /**
  * Parses `xcrun simctl list devices booted -j`:

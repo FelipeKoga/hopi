@@ -19,6 +19,9 @@ kotlin {
         // byNames matches a `$` in a JVM class name as `.`, hence `ComposableSingletons.*`.
         filters {
             exclude.byNames.addAll("**.ComposableSingletons.*", "**\$stableprop", "**\$stableprop_getter")
+            // The desktop viewer's entry point (jvm only, @HopiInternalApi, names core's
+            // HopiStore): Hopi-internal, not consumer API, so it has no noop twin.
+            exclude.byNames.add("dev.koga.hopi.ui.desktop.**")
         }
     }
 

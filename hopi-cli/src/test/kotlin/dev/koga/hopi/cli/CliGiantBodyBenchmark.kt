@@ -8,6 +8,7 @@ import dev.koga.hopi.bench.measure
 import dev.koga.hopi.bench.mb
 import dev.koga.hopi.bench.ms
 import dev.koga.hopi.bench.ratio
+import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction

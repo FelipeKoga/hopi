@@ -1,5 +1,9 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.BridgeClient
+import dev.koga.hopi.connect.ProcessResult
+import dev.koga.hopi.connect.ProcessRunner
+import dev.koga.hopi.connect.ShutdownHooks
 import dev.koga.hopi.core.bridge.BridgeConnection
 import dev.koga.hopi.core.bridge.BridgeListener
 import java.io.ByteArrayOutputStream

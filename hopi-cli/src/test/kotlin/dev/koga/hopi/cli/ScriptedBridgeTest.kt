@@ -1,5 +1,7 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.BridgeClient
+import dev.koga.hopi.connect.ExitCode
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader

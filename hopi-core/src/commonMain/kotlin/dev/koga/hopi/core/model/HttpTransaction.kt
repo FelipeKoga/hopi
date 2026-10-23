@@ -23,8 +23,16 @@ public class CapturedBody(
     public val truncated: Boolean,
     public val contentType: String?,
     public val skippedReason: String?,
+    /**
+     * Set on a copy without the bytes (a bridge summary, a host viewer's [notFetched] body): how
+     * many bytes the original held, so what a `get` would transfer. Null when [bytes] are the body.
+     */
+    public val originalCapturedBytes: Long? = null,
 ) {
     public val capturedBytes: Int get() = bytes.size
+
+    /** Bytes the app holds for this body: [originalCapturedBytes] on a copy without them, else [capturedBytes]. */
+    public val heldBytes: Long get() = originalCapturedBytes ?: bytes.size.toLong()
 
     /** Size to report: the known total, else what was captured. */
     public val reportedBytes: Long get() = totalBytes ?: bytes.size.toLong()
@@ -36,6 +44,7 @@ public class CapturedBody(
             truncated == other.truncated &&
             contentType == other.contentType &&
             skippedReason == other.skippedReason &&
+            originalCapturedBytes == other.originalCapturedBytes &&
             bytes.contentEquals(other.bytes)
     }
 
@@ -45,16 +54,46 @@ public class CapturedBody(
         result = 31 * result + truncated.hashCode()
         result = 31 * result + (contentType?.hashCode() ?: 0)
         result = 31 * result + (skippedReason?.hashCode() ?: 0)
+        result = 31 * result + (originalCapturedBytes?.hashCode() ?: 0)
         return result
     }
 
     override fun toString(): String =
         "CapturedBody(captured=${bytes.size}, totalBytes=$totalBytes, truncated=$truncated, " +
-            "contentType=$contentType, skippedReason=$skippedReason)"
+            "contentType=$contentType, skippedReason=$skippedReason, originalCapturedBytes=$originalCapturedBytes)"
+
+    /** True for a body a viewer knows only by its size so far ([notFetched]): not "no body". */
+    public val isNotFetched: Boolean get() = skippedReason == NOT_FETCHED
+
+    /** True for a body a viewer can no longer fetch ([gone]): the app evicted or cleared it. */
+    public val isGone: Boolean get() = skippedReason == GONE
 
     public companion object {
+        /**
+         * [skippedReason] of a body a host viewer has not fetched yet: a bridge summary carries
+         * only its size, the bytes come with `get` when someone opens it. Never set by the app.
+         */
+        public const val NOT_FETCHED: String = "not fetched"
+
+        /**
+         * [skippedReason] of a body a host viewer asked for with `get` after the app had evicted
+         * or cleared it (`NOT_FOUND`): the viewer kept the summary, the bytes are gone. Never set
+         * by the app.
+         */
+        public const val GONE: String = "gone from the app"
+
         public fun skipped(reason: String, contentType: String?, totalBytes: Long?): CapturedBody =
             CapturedBody(ByteArray(0), totalBytes, truncated = false, contentType, reason)
+
+        /**
+         * A body of [totalBytes] whose bytes are still on the app's side; the app holds
+         * [heldBytes] of them (less when it truncated or skipped the body), which `get` transfers.
+         */
+        public fun notFetched(totalBytes: Long, heldBytes: Long = totalBytes): CapturedBody =
+            CapturedBody(ByteArray(0), totalBytes, truncated = false, contentType = null, NOT_FETCHED, originalCapturedBytes = heldBytes)
+
+        /** A body of [totalBytes] the app no longer has (see [GONE]). */
+        public fun gone(totalBytes: Long): CapturedBody = skipped(GONE, contentType = null, totalBytes)
     }
 }
 

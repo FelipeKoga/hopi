@@ -141,6 +141,12 @@ public object TransactionJson {
             .field("reqBytes", transaction.requestBody?.reportedBytes ?: 0L)
             .field("resBytes", transaction.responseBody?.reportedBytes ?: 0L)
             .field("state", transaction.state.wireName)
+        if (bridge) {
+            // What a `get` would transfer, when the app holds less than the size (a truncated or
+            // skipped body): a host viewer budgets its fetches on it.
+            heldBytes(transaction.requestBody)?.let { w.field("reqHeld", it) }
+            heldBytes(transaction.responseBody)?.let { w.field("resHeld", it) }
+        }
         if (transaction.state == TransactionState.Failed) {
             w.field("error", error)
         }
@@ -149,6 +155,8 @@ public object TransactionJson {
         w.endObject()
         return w.toString()
     }
+
+    private fun heldBytes(body: CapturedBody?): Long? = body?.heldBytes?.takeIf { it != body.reportedBytes }
 
     private fun writeExchange(
         w: JsonWriter,

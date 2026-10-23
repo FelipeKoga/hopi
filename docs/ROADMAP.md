@@ -75,25 +75,36 @@ ViewModel receives, every UiState it emits, and every one-off event (navigation,
   capture states that are not data classes; privacy redaction of fields.
 
 ### Desktop viewer
-Planned. A Compose Desktop app (macOS first) that shows the app's traffic on the developer's
-screen instead of inside the emulator. It talks to the app over the existing bridge protocol, so the
-app needs nothing new and pays no extra cost: the bridge already encodes only while a client is
-connected, and the in-app screen never has to be composed.
-- **Connection.** Reuses the CLI's target code (`hopi-cli` logic moves to a shared JVM module):
-  `adb forward` + proof check on Android, `bridge.json` + token on the iOS simulator, a device and
-  app picker, auto-reconnect when the app restarts or adb resets (event-driven: `adb track-devices`,
-  no polling loop).
-- **UI.** Reuses `hopi-ui`'s list/detail composables on the JVM target (already built and
-  tested there) with a desktop layout: list and detail side by side, keyboard navigation, multiple
-  windows/tabs per device, larger bodies shown comfortably.
-- **Desktop extras.** Save/export a session (HAR and NDJSON), open a body in an external editor,
-  copy as cURL, diff two transactions, filter by app when several are connected.
-- **Bodies.** Fetched on demand with `get` only for the selected transaction; the list streams
-  summaries via `tail`, so a giant body never crosses the bridge unless opened.
-- **Distribution.** A signed `.dmg` and a `jpackage` build for Linux/Windows later; not shipped as a
-  dependency of the app.
-- **Cost on the app.** Same as a connected CLI `tail` (measured: 0 CPU ticks for Hopi threads
-  while idle). Measured again on the sample app before shipping.
+Built in v1 (`hopi-desktop`, see the architecture doc's "Desktop viewer" section). A
+Compose Desktop app (macOS first, an unsigned `.dmg`) that shows the app's traffic on the
+developer's screen instead of inside the emulator, over the existing bridge protocol (plus two
+additive fields: `reqHeld`/`resHeld` on summaries of cut bodies, `through` on the `clear` reply),
+so the app pays no extra cost.
+- **Connection (built).** The CLI's target code in the shared JVM module `hopi-connect`:
+  `adb forward` + proof check on Android, `bridge.json` + token on the iOS simulator and the JVM,
+  a device and app picker (Android lists the bridges listening on the device), auto-reconnect
+  when the app restarts or adb resets. Reconnects are event-driven: `adb track-devices`, `adb
+  track-jdwp` and a watch on the `bridge.json` directory, never a polling loop (the JDK's watch
+  service polls on macOS, so a watch runs only while the viewer waits for the app, or for the
+  picker's JVM processes while the window has focus and nothing is connected). On Android a
+  bounded settle (at most 4 attempts over 5.5 s) follows an event, because the process appears
+  before its bridge binds.
+- **UI (built).** `hopi-ui`'s list/detail composables on the JVM target (`HopiPanes`),
+  list and detail side by side, keyboard navigation (↓/↑, Enter, Esc, ⌘F, ⌘K, ⌘E, ⌘R), a status
+  bar. Later: multiple windows/tabs per device, larger bodies shown more comfortably.
+- **Desktop extras.** Built: export a session as HAR 1.2 and NDJSON (bodies fetched on demand,
+  bounded), copy as cURL. Later: open a body in an external editor, diff two transactions, filter
+  by app when several are connected.
+- **Bodies (built).** Fetched on demand with `get` only for the selected transaction; the list
+  streams summaries via `tail`, so a giant body never crosses the bridge unless opened.
+- **Distribution.** Built: an unsigned `.dmg` (`:hopi-desktop:packageDmg`, 65 MB). Later:
+  signing and notarization, `jpackage` builds for Linux/Windows. Never shipped as a dependency of
+  the app.
+- **Cost on the app.** Same as a connected CLI `tail`: measured on the JVM bridge, the app's
+  bridge threads take 0 ns CPU while the viewer is connected and idle; on the API 35 emulator
+  emulator (`DeviceViewerUiTest`) the sample's 5 Hopi threads took 0 ticks over 60 s with
+  the viewer connected, and 500 `POST /items` took 2660 to 2781 ms connected against 2526 to
+  2704 ms disconnected (3 alternating rounds each).
 - Open questions: whether the in-app screen becomes optional (noop-by-default UI artifact, with the
   desktop as the main viewer); physical iOS devices (no bridge in v1).
 

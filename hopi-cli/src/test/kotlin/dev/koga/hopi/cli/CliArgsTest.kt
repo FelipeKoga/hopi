@@ -1,5 +1,8 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.CliException
+import dev.koga.hopi.connect.ExitCode
+import dev.koga.hopi.connect.Platform
 import java.nio.file.Paths
 import kotlin.test.Test
 import kotlin.test.assertEquals

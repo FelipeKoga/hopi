@@ -1,5 +1,6 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore

@@ -37,7 +37,9 @@ This document is the contract every module is built against. Change it before ch
 | `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          |
 | `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       |
 | `hopi-ui-noop`   | compose-runtime, compose-ui          | Same public API as `hopi-ui`, renders nothing         |
-| `hopi-cli`       | JVM, kotlinx-serialization           | Host CLI for developers and AI agents                      |
+| `hopi-connect`   | core (JVM), kotlinx-serialization    | Host side of the bridge: targets, `bridge.json`, bridge client (all `@HopiInternalApi`) |
+| `hopi-cli`       | connect, core (JVM)                  | Host CLI for developers and AI agents                      |
+| `hopi-desktop`   | connect, ui (JVM), core (JVM), Compose Desktop | Desktop viewer app (macOS `.dmg`); never a dependency of an app |
 | `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests          |
 
 Targets for every KMP library module: `android`, `iosArm64`, `iosSimulatorArm64`, and `jvm` (the JVM
@@ -124,7 +126,11 @@ normalisation is the module's own name in the dump file names and in the klib du
 missing target fails the build with the differing lines. The two UI modules exclude the same
 Compose compiler output from their dumps (`**.ComposableSingletons.*` lambda holders and the
 `$stableprop`/`$stableprop_getter` stability markers of internal classes): it is public in the
-binary but no declaration of ours, and the noop has none of it. A change to the consumer API is
+binary but no declaration of ours, and the noop has none of it. Both also exclude the package
+`dev.koga.hopi.ui.desktop` (jvm only): the desktop viewer's entry point, `HopiPanes`, is
+`@HopiInternalApi` and names core's `HopiStore`, so it is Hopi-internal rather than
+consumer API, and a noop that must not depend on core could not declare it (the theme accessors
+for the viewer's own chrome live there too, for the same reason). A change to the consumer API is
 therefore made in both modules and both dumps together
 (`./gradlew :hopi-ktor:updateKotlinAbi :hopi-ktor-noop:updateKotlinAbi`, and the same
 for the UI).
@@ -197,6 +203,16 @@ class CapturedBody(
     val skippedReason: String?,   // e.g. "binary content-type", "streaming", "disabled" — bytes empty
 )
 ```
+
+`CapturedBody.NOT_FETCHED` (`"not fetched"`, built with `CapturedBody.notFetched(totalBytes)`) is a
+skipped reason the app never sets: a host viewer stores a bridge summary with both bodies in that
+state (size known, bytes still on the app's side), so its UI says "Loading body…" and
+"Loading headers…" rather than "No body", and copy cURL waits for the detail. `notFetched` also
+keeps what the app holds of the body (`originalCapturedBytes`, read as `heldBytes`: less than the
+size for a truncated or skipped body), which is what a `get` would move. `CapturedBody.GONE`
+(`"gone from the app"`, `CapturedBody.gone`) is the other viewer-only reason: the `get` was
+answered `NOT_FOUND` (the app evicted or cleared it), so the detail says the body and headers are
+gone instead of loading forever, and the row is not asked for again.
 
 Body text decoding and pretty-printing are functions over `CapturedBody`, computed on demand.
 
@@ -421,7 +437,9 @@ bytes of margin below that cut for other OS versions. Physical devices have not 
 are cut at code point boundaries, and the line gains `"urlTruncated":true` and/or
 `"errorTruncated":true` as its last fields. Unpaired surrogates are written as `\u` escapes, so a
 line is always valid UTF-8. The bridge's summaries have the same shape with `"type":"transaction"`
-in place of `"hopi":1` and the 3999-byte budget.
+in place of `"hopi":1` and the 3999-byte budget, plus `"reqHeld"`/`"resHeld"` after `state`
+when the app holds fewer bytes of that body than its size (truncated, or skipped: `0`): what a
+`get` would move, so a host viewer can budget its fetches. A body-free live copy keeps the number.
 
 ### 2. The bridge + CLI (full detail)
 
@@ -565,7 +583,7 @@ Client to app:
 {"cmd":"list","since":0,"limit":100}  // → {"type":"transaction",...summary...}* then {"type":"end"}
 {"cmd":"get","id":42}                 // → {"type":"transaction",...full detail, bodies as text or base64...}
 {"cmd":"tail","since":0}              // → summaries since `since`, then live events until disconnect
-{"cmd":"clear"}                       // → {"type":"ok"}
+{"cmd":"clear"}                       // → {"type":"ok","through":N}
 ```
 
 Errors: `{"type":"error","code":"NOT_FOUND|BAD_REQUEST|UNAUTHORIZED|SLOW_CLIENT","message":"…"}`;
@@ -615,10 +633,33 @@ hopi <command> --platform jvm --bridge-file <path> [--app <id>]   # a JVM bridge
 ```
 
 `hopi-cli` is a Kotlin/JVM application. It depends on `hopi-core`'s JVM artifact for the
-cURL export, the JSON writer (requests), `prettyPrintJson`, `formatBytes` and `parseFlatJsonObject`
-(`bridge.json`), and on kotlinx-serialization-json only for its JSON tree parser (replies; no
-compiler plugin). It parses its own arguments (no CLI library). `./gradlew :hopi-cli:installDist`
-produces a runnable `hopi-cli/build/install/hopi-cli/bin/hopi`.
+cURL export, the JSON writer (requests), `prettyPrintJson` and `formatBytes` (`hopi-connect`
+uses its `parseFlatJsonObject` for `bridge.json`), and on kotlinx-serialization-json only for its
+JSON tree parser (replies; no compiler plugin). It parses its own arguments (no CLI library). `./gradlew :hopi-cli:installDist`
+produces a runnable `hopi-cli/build/install/hopi-cli/bin/hopi`. Everything that
+reaches an app (adb and simctl, the targets below, `bridge.json`, the bridge client with its
+handshake and proof check) lives in the JVM module `hopi-connect`, shared with the desktop
+viewer; the CLI adds argument parsing, rendering and exit codes on top. Its whole public API is
+`@HopiInternalApi`, kept in `hopi-connect/api/` by `updateKotlinAbi`.
+
+For the desktop viewer, `hopi-connect` also holds `BridgeDecoder` (summary and `get` lines
+back into `HttpTransaction`s: the inverse of core's `TransactionJson`, round-trip tested) and
+`RemoteSession`. A `tail` reads nothing after it, so a session opens two connections on one
+endpoint (one adb forward): the tail streams summaries into an `HopiStore` of the viewer's own
+(2000 entries, 256 MB, keyed by the app's ids, with the store's default redaction on top of the
+app's), the other serves `get` and `clear`. A body crosses the bridge only for the selected
+transaction (`select`, fetched again when a pending selection completes) or an explicit `fetch`; a
+later summary of a fetched snapshot (a re-tail replays the backlog) never replaces its bodies. A
+`SLOW_CLIENT` reply (`SlowClientException.since`) re-tails at once from that `since` on the same
+endpoint. Anything else that ends a connection closes both and the endpoint and reports
+`Disconnected`; the caller connects again on an event. A connect that finds another process (a
+SHA-256 of the token and the Android proof, both new with every app start, compared in memory and
+never shown) starts a fresh store, because the app's ids restart at 1, and drops the selection,
+whose id now means another transaction. A `get` answered `NOT_FOUND` marks the row's bodies
+`CapturedBody.gone`; a `get` answered pending after the tail brought the terminal summary is sent
+once more. `clear` clears this store up to the reply's `through` (all of it for an app that sends
+none). Nothing polls: one tail thread blocked on its socket, one request thread blocked on its
+queue.
 
 **Targets.** `--platform` is inferred when only one of adb/simctl has a target: a `--device` names
 its platform; otherwise the platform with a ready target (adb state `device`, or a booted simulator)
@@ -634,8 +675,8 @@ a path).
 - **Android:** `adb -s <serial> forward tcp:0 localabstract:hopi.<app>`; the port is the digits
   adb prints. The CLI always removes that forward (`adb -s <serial> forward --remove tcp:<port>`)
   when the command ends, and a JVM shutdown hook, registered before the forward is created, removes
-  it on SIGINT during `tail` (removal runs once either way). Listing bridges from `/proc/net/unix` is
-  not implemented: `--app` is required. adb drops every forward of a device whose transport resets
+  it on SIGINT during `tail` (removal runs once either way). The CLI does not list bridges from
+  `/proc/net/unix`: `--app` is required (the desktop viewer's picker does, see Desktop viewer). adb drops every forward of a device whose transport resets
   (an emulator's adb connection did twice in one session; `adb reconnect` does it on demand), which
   ends the connection while the app keeps running. When an established connection ends, the CLI
   runs `adb -s <serial> forward --list`: if its port is gone it says "adb lost its connection to
@@ -684,7 +725,8 @@ again would hide what the app chose to show.
   `pending`); `tail` prints summaries and `{"type":"notice","dropped":N}` lines (the first one at
   once when drops happened before it connected), flushed one by one; `get` prints the one detail
   line. Agents skip types they do not know.
-- `clear`: `{"type":"ok"}`.
+- `clear`: `{"type":"ok","through":N}`, N being the last id the clear covers (a host viewer clears
+  its own copy up to exactly that id, keeping what its tail brought from after the clear).
 - `devices`: one line per target,
   `{"type":"device","platform":"android"|"ios","id":"…","state":"…","name":"…"|null,"os":"…"|null}`;
   Android's `state` is adb's word (`device` = ready, `unauthorized`, `offline`, …) and `os` is null;
@@ -712,6 +754,141 @@ store does not hold). Every error is one actionable line on stderr, `hopi: <mess
 stdout is a buffered writer over the raw file descriptor (not `System.out`, which hides write
 errors), flushed once at the end, and after every line in `tail`; when stdout is closed (`hopi
 tail | head -1`) the CLI exits 0 without a message.
+
+## Desktop viewer (`hopi-desktop`)
+
+A Compose Desktop application (`org.jetbrains.compose` `application`, `compose.desktop.currentOs`
+with Material excluded: foundation only) that shows one app's traffic on the developer's screen.
+It is a host tool like the CLI and never a dependency of an app. It talks to the app over the
+bridge protocol unchanged, through `hopi-connect`: the app needs nothing new.
+
+**Pieces** (package `dev.koga.hopi.desktop`, all `internal`):
+
+- `Viewer`, the connection logic without UI. It lists targets (`discover`): adb devices with, for
+  each ready one, the bridges listening there (`Targets.androidBridges`: the `@hopi.<name>`
+  entries of `adb exec-out cat /proc/net/unix`, a fixed command; names must pass
+  `TargetIds.APP`), booted simulators, and JVM bridges (`<java.io.tmpdir>/hopi/*/bridge.json`).
+  It also holds the one `Target` being viewed (a device plus an app id; optional for a JVM bridge)
+  and its `RemoteSession`. Every state change runs on one thread (`hopi-desktop-connect`), so
+  callers never block and two connects never overlap.
+- `ViewerContent`, the window content: a target bar (device chips, an app id field checked with
+  `TargetIds.APP` before anything reaches a subprocess, the device's bridges as suggestions,
+  Connect, Disconnect, Refresh), `HopiPanes` over the session's own store, and a status bar
+  (connected, connecting, reconnecting, app stopped, device offline, the error; the request and
+  pending counts; the app's dropped count from `notice` lines; the last export's outcome).
+- `SessionExport` writes HAR 1.2 and NDJSON. `Main` opens the window with a native menu bar.
+
+**Data.** A `RemoteSession` per target: its own `HopiStore` (2000 entries, 256 MB), keyed by
+the app's ids, with `Redactor.Default` on top of the app's redaction. The panes select through
+`Viewer.select`, so only the selected transaction's body is fetched (`get`); list rows are
+summaries and show "Loading body…" until then. A new app process (another token or proof) gets
+a fresh store and the selection is cleared, since the ids restart.
+
+**Connections.** Two per app, as `RemoteSession` opens them (a streaming `tail`, and one for `get`
+and `clear`) on one endpoint, so one adb forward on Android. Every attempt is a
+`RemoteSession.connect`, which closes the previous sockets and forward first, so the app never
+serves more than these two of its 8 slots. Disconnect, a new target and closing the window close
+both sockets, remove the forward and stop the target's watcher. A JVM shutdown hook does the same
+on SIGTERM or SIGINT, so neither a forward nor an adb tracking subprocess outlives the viewer.
+Closing closes the session, the trackers and the watches on the closing thread, not on the
+connect worker: a connect blocked on an app that does not answer (stopped at a breakpoint) can hold
+the worker up to its read timeout.
+
+**Reconnecting is event-driven.** Nothing is scheduled while no event happened:
+
+- `adb track-devices -l` (`Targets.trackAndroidDevices`, with each device's model like `adb devices -l`, a streaming subprocess read by one thread
+  blocked on it; length-prefixed frames, `0000` for none) updates the picker. When the target's
+  device is listed ready again (after an adb reset, a reconnected phone), it starts a reconnect. A
+  device listed offline or gone shows "Device offline". When the adb server stops, the stream ends
+  and is started once more, which starts a new server; it is not restarted again until it has
+  delivered a frame.
+- `adb -s <serial> track-jdwp` (`Targets.trackDebuggableProcesses`) on the target's device. A
+  change in its debuggable processes means the app (or another debuggable app) started or ended.
+  This is the Android app-restart event: there is no `bridge.json` on Android, and `track-devices`
+  does not change when an app restarts.
+- A watch on the bridge file's directory (`PathWatcher`, the JDK `WatchService`) for the iOS
+  simulator (`<container>/Library/Caches/hopi/`, resolved once with `simctl
+  get_app_container`) and the JVM (the bridge file's directory). A restarted app writes a new
+  `bridge.json` there. The nearest existing ancestor is watched until the directory exists, and a
+  watch on `<java.io.tmpdir>/hopi/` keeps the picker's JVM processes current. On macOS the
+  JDK 17 watch service is the JDK's polling implementation (each watched directory is listed every
+  2 s at `SensitivityWatchEventModifier.HIGH`): host-side work only, the app is never asked. So
+  each watch runs only while there is something to wait for: the bridge file's while the viewer
+  waits for the app (it starts with one look, in case the file was written just before), the JVM
+  root's while the window has focus and nothing is connected (a look when it starts refreshes the
+  picker). Connected, or with the window in the background, no watch runs.
+- The session's own disconnect while connected. One attempt follows at once, which is all an adb
+  forward dropped under a running app needs.
+
+The JDWP event comes before the app binds its bridge: the process registers with adbd when it is
+forked, and the bridge binds when the Ktor client is created. So on Android an event (a process
+change, the device ready again, a lost link) is followed by at most 4 more attempts, 0.3, 1, 2.5
+and 5.5 s after the first (`Viewer.ANDROID_SETTLE_DELAYS_MS`; empty turns them off). They are
+cancelled by success and by any newer event or command. An attempt against an unbound socket is
+answered by adbd (it closes the forwarded connection) and never reaches the app. A change for
+another debuggable app on the device triggers the same bounded attempts.
+
+A failed attempt is classified from `Targets`' own messages: "app not running", "process not
+running" and a missing bridge file mean the app is stopped. A device adb does not list as ready
+means the device is offline. Anything else (a proof mismatch, an app not installed) is shown as
+the error, and ⌘R or Reconnect tries again.
+
+**Keyboard.** One `onPreviewKeyEvent` on the content root handles every shortcut, so they work
+from the search field too: ↓/↑ (`HopiPanesState.selectNext`/`selectPrevious`), Enter (the
+first row when none is selected; left to the app id field when it has focus), Esc (clears the
+selection, focus back to the root), ⌘F (search), ⌘K (`clear`, the app's store first), ⌘E and ⇧⌘E
+(export), ⌘R (reconnect). Ctrl replaces ⌘ outside macOS. The menu bar lists the same commands
+without binding the keys a second time.
+
+**Export.** `SessionExport` streams one transaction at a time, giant bodies in 32K-char slices
+(`JsonWriter.chunkedValue`). Each transaction known only by its summary is first completed with
+`get` (`RemoteSession.fetch`, on the export thread) while it fits the budget: 32 MB per
+transaction and 256 MB per export, counted in the bytes `get` would move (the summary's
+`reqHeld`/`resHeld`), so a 50 MB download the app truncated to 256 KB costs 256 KB. Beyond that it
+is written with its sizes and a comment, so an export never pulls every giant body over the bridge
+at once. A row gone from the app is written without bodies, and its comment says so.
+
+- **HAR 1.2:** `log.version` `"1.2"`, `creator` (`Hopi`, the app's jar version), one entry
+  per transaction in store order. Each entry has `startedDateTime` (ISO 8601, UTC, milliseconds)
+  and `time` (the duration). Its request has the method, the URL, `httpVersion` (the protocol),
+  the headers and the percent-decoded `queryString` as name/value pairs, `postData` (`mimeType`,
+  `text`; binary as base64 with `_encoding`), `headersSize` -1 and `bodySize`. Its response has
+  `status` (0 when pending or failed), `content` (`size`, `mimeType`, `text`, `encoding` `"base64"`
+  for binary), `redirectURL` from `Location`, and `_error` for a failure. It also has an empty
+  `cache` and `timings` with only `wait` measured (send and receive 0, so they add up to `time`).
+  `comment` says pending, failed, truncated, not captured or not exported, and `_hopiId`
+  carries the app's id. Redaction is the store's `Redactor.Default`, as for copy as cURL.
+- **NDJSON:** one bridge `get` line per transaction (`TransactionJson.writeBridgeDetail`), exactly
+  what `hopi get --json` prints, which `BridgeDecoder.detail` reads back.
+
+**Packaging.** `./gradlew :hopi-desktop:packageDmg` builds an unsigned
+`Hopi-1.0.0.dmg` (64.8 MB, with a jlinked runtime that adds `jdk.unsupported` for the watch
+modifier; the app image is 118 MB). `:hopi-desktop:run` runs it from the repository.
+
+**Tests** (`:hopi-desktop:test`, no device). `SessionExportTest` checks every export against
+a HAR 1.2 structure validator: required fields and types, name/value pairs, ISO dates, timings
+that add up, no field outside the spec unless it starts with `_`. It also covers the budget and
+the NDJSON round trip. `ViewerTest` covers a JVM app that stops and starts again under an
+unchanged `bridge.json` path (reconnected by the watch alone, into a fresh store), and Android
+events against scripted adb. Those events are a `track-jdwp` change followed by exactly the
+bounded attempts, a device offline then ready again, and every adb forward removed. The same
+suite measures the app's bridge threads at 0 ns CPU over 3 s while the viewer is connected and
+idle, with exactly two connections. `ViewerUiTest` composes the window content against an
+in-process `JvmAgentBridge`. It connects, streams, selects from the keyboard (only the selected
+body is fetched), exports with ⌘E, clears with Esc and ⌘K, and follows the app stopping and
+starting again in the status bar. It writes screenshots to `build/reports/screenshots/`.
+
+`DeviceViewerUiTest` runs the same window content against a real target, only with
+`-Phopi.desktop.device=android` (one emulator, the sample's real debug build installed, the
+dev server up) or `=ios` (one booted simulator, the sample's Debug build installed); without the
+property it does nothing. It drives the sample with adb and `benchmark/device/scripts/ui.py` (or
+`simctl`), and writes one JSON line per check and the window's content to
+`build/evidence/desktop/`. On Android it checks live rows, a 5 MB body fetched only when selected,
+copy as cURL (redacted), both exports, 0 CPU ticks for Hopi's threads over 60 s idle, the
+app-side connection count (connected `@hopi.<app>` sockets in `/proc/net/unix`: 2, never
+more), force-stop and relaunch, an adb server reset, and 500 `POST /items` connected against
+disconnected. On iOS: the connection through `bridge.json`, terminate and relaunch, live rows and
+a body fetched on selection.
 
 ## Sample app (`sample/`)
 
@@ -829,6 +1006,16 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   `UIActivityViewController` on iOS) with the method, URL, status, duration and cURL, cut at
   100 000 chars (the Android binder limit); the JVM has no share sheet, so the action is absent
   there.
+- **Desktop panes:** `HopiPanes(store, onSelected, onClear, …)` in the jvm-only package
+  `dev.koga.hopi.ui.desktop` (`@HopiInternalApi`) reuses the list and detail panes, the
+  row cache, the detail formatter and the actions over any store: side by side from 720 dp wide
+  (the selected row marked), one at a time below. It has no close button, back handler or system
+  bar handling (the window owns those), reports every selection so the caller fetches its body,
+  and leaves clearing to the caller (the app's store too). `HopiPanesState` carries the
+  selection and the keyboard moves over the rows as shown. `HopiScreen` composes the same
+  list, detail and actions helpers and is otherwise unchanged. `HopiDesktopTheme`,
+  `hopiDesktopColors` and `HopiDesktopType` (same package, same exclusion from the
+  parity surface) give the desktop window's own chrome the monochrome palette and text styles.
 - **Launcher:** a small draggable floating button over the app content opening the screen full
   screen. It never touches the store (resolving `HopiStore.default` only when the screen
   opens), recomposes only when tapped (dragging moves it in the layout phase), keeps its position

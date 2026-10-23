@@ -176,7 +176,8 @@ class BridgeSessionTest {
         val client = serve(store)
         // The consumer applies a clear later; the replies right after it must already reflect it.
         val gate = pauseStore()
-        assertEquals(mapOf("type" to "ok"), fields(client.request("{\"cmd\":\"clear\"}")))
+        // `through`: the last id it covers, which a host viewer clears up to.
+        assertEquals(mapOf("type" to "ok", "through" to 2L), fields(client.request("{\"cmd\":\"clear\"}")))
         assertEquals(mapOf("type" to "end"), fields(client.request("{\"cmd\":\"list\"}")))
         assertError(BridgeError.NOT_FOUND, client.request("{\"cmd\":\"get\",\"id\":1}"))
         assertEquals(0L, fields(client.request("{\"cmd\":\"hello\"}"))["count"])
@@ -254,6 +255,32 @@ class BridgeSessionTest {
         assertEquals(mapOf("type" to "end"), fields(client.nextLine()))
         assertNull(client.nextLineOrEnd())
         assertEquals(1, client.closeCount)
+    }
+
+    /** A live summary is a body-free copy, yet still says how much a `get` would move for a cut body. */
+    @Test
+    fun liveSummariesOfTruncatedAndSkippedBodiesSayWhatTheAppHolds() {
+        val store = store()
+        store.submit(complete(store.nextId()))
+        store.awaitIds(1)
+        val client = serve(store)
+        client.send("{\"cmd\":\"tail\"}")
+        // The backlog line: the tail listens from now on, so what follows is live.
+        assertEquals(1L, fields(client.nextLine())["id"])
+        val cut = CapturedBody(ByteArray(256) { 'a'.code.toByte() }, 50_000_000, truncated = true, "text/plain", null)
+        store.submit(complete(store.nextId(), responseBody = cut))
+        val truncated = fields(client.nextLine())
+        assertEquals(50_000_000L, truncated["resBytes"])
+        assertEquals(256L, truncated["resHeld"])
+        assertFalse("reqHeld" in truncated, "sent only where it differs from the size")
+
+        store.submit(complete(store.nextId(), responseBody = CapturedBody.skipped("binary content type", "video/mp4", 100_000_000)))
+        val skipped = fields(client.nextLine())
+        assertEquals(100_000_000L, skipped["resBytes"])
+        assertEquals(0L, skipped["resHeld"])
+
+        store.submit(complete(store.nextId(), responseBody = CapturedBody("ok".encodeToByteArray(), 2, false, null, null)))
+        assertFalse("resHeld" in fields(client.nextLine()))
     }
 
     @Test

@@ -23,10 +23,16 @@ distributions {
     }
 }
 
-// The giant-body fixtures and probes, shared by every module's benchmark.
-sourceSets.test { kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures")) }
+sourceSets.test {
+    // The giant-body fixtures and probes, shared by every module's benchmark.
+    kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures"))
+    // The adb and simctl output fixtures live with the parsers in :hopi-connect.
+    resources.srcDir(rootProject.layout.projectDirectory.dir("hopi-connect/src/test/resources"))
+}
 
 dependencies {
+    // Targets, adb and simctl, bridge.json and the bridge client: shared with the desktop viewer.
+    implementation(project(":hopi-connect"))
     // cURL export, JSON writer, body helpers and the bridge itself (tests); never reimplemented here.
     implementation(project(":hopi-core"))
     // Only the JSON tree parser; no serialization compiler plugin is needed for it.

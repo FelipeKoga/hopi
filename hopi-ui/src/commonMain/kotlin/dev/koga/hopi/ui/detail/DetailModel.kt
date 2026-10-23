@@ -58,8 +58,17 @@ internal sealed interface BodyView {
         BodyView
 }
 
-/** One request or response's displayed content. */
-internal class ExchangeView(val headers: List<Pair<String, String>>, val body: BodyView)
+/**
+ * One request or response's displayed content. [loading] while a host viewer has only the
+ * summary ([CapturedBody.isNotFetched]): its headers and body are still on the app's side.
+ * [gone] when the app no longer had them once asked ([CapturedBody.isGone]): they never arrive.
+ */
+internal class ExchangeView(
+    val headers: List<Pair<String, String>>,
+    val body: BodyView,
+    val loading: Boolean = false,
+    val gone: Boolean = false,
+)
 
 internal class OverviewField(val label: String, val value: String)
 
@@ -72,7 +81,13 @@ internal class DetailModel(
     val overview: List<OverviewField>,
     val request: ExchangeView,
     val response: ExchangeView,
-)
+) {
+    /** A summary only (host viewer): headers and bodies are being fetched, so cURL would lack them. */
+    val loading: Boolean get() = request.loading || response.loading
+
+    /** A summary whose headers and bodies the app no longer has: cURL would lack them for good. */
+    val gone: Boolean get() = request.gone || response.gone
+}
 
 /**
  * Builds [DetailModel]s and caches the expensive part, the body views (decode, JSON pretty-print,
@@ -104,8 +119,18 @@ internal class DetailFormatter(private val capacity: Int = 16, private val maxCh
             url = url,
             title = "${transaction.method} ${statusText(transaction)}",
             overview = overview(transaction, url, redactor),
-            request = ExchangeView(shownHeaders(redactor.headers(transaction.requestHeaders)), requestBody),
-            response = ExchangeView(shownHeaders(redactor.headers(transaction.responseHeaders)), responseBody),
+            request = ExchangeView(
+                shownHeaders(redactor.headers(transaction.requestHeaders)),
+                requestBody,
+                loading = transaction.requestBody?.isNotFetched == true,
+                gone = transaction.requestBody?.isGone == true,
+            ),
+            response = ExchangeView(
+                shownHeaders(redactor.headers(transaction.responseHeaders)),
+                responseBody,
+                loading = transaction.responseBody?.isNotFetched == true,
+                gone = transaction.responseBody?.isGone == true,
+            ),
         )
     }
 
@@ -201,6 +226,9 @@ private fun formatBody(body: CapturedBody, side: String): BodyView {
         else -> formatBytes(body.bytes.size.toLong())
     }
     val summary = listOfNotNull(size, type).joinToString(" · ").ifEmpty { null }
+    // Not "not captured": the bytes exist on the app's side and are on their way.
+    if (body.isNotFetched) return BodyView.None(LOADING_BODY)
+    if (body.isGone) return BodyView.None(GONE_BODY)
     body.skippedReason?.let { return BodyView.Skipped(summary, it) }
     if (body.bytes.isEmpty()) return BodyView.None(if (body.truncated) "Nothing captured" else "Empty $side body")
     val notice = if (body.truncated) {
@@ -245,6 +273,10 @@ private fun BodyView.chars(): Int = when (this) {
 }
 
 private const val HEX_PREVIEW_BYTES = 512
+
+internal const val LOADING_BODY = "Loading body…"
+
+internal const val GONE_BODY = "Gone from the app: it evicted or cleared this request before the body was opened"
 
 /**
  * The request as cURL with the store's redaction (core's export), at most [maxChars] long: a body

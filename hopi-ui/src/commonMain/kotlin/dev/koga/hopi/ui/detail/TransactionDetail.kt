@@ -69,7 +69,8 @@ internal fun TransactionDetailPane(
     missing: Boolean,
     tab: DetailTab,
     onTab: (DetailTab) -> Unit,
-    onBack: () -> Unit,
+    /** Null hides the back button (the desktop panes show the list beside the detail). */
+    onBack: (() -> Unit)?,
     actions: DetailActions,
 ) {
     val colors = LocalHopiColors.current
@@ -79,8 +80,12 @@ internal fun TransactionDetailPane(
             modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp).heightIn(min = 56.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(HopiIcons.Back, DetailTags.BACK, onBack)
-            Spacer(Modifier.width(4.dp))
+            if (onBack != null) {
+                IconButton(HopiIcons.Back, DetailTags.BACK, onBack)
+                Spacer(Modifier.width(4.dp))
+            } else {
+                Spacer(Modifier.width(12.dp))
+            }
             BasicText(
                 model?.title ?: "",
                 style = HopiType.title.copy(color = colors.text),
@@ -95,7 +100,8 @@ internal fun TransactionDetailPane(
             else -> {
                 val responseText = model.response.body as? BodyView.Text
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 13.dp)) {
-                    ActionButton(HopiIcons.Terminal, DetailTags.COPY_CURL, actions.copyCurl)
+                    // A summary has no headers or body (yet, or ever): its cURL would be wrong, not just short.
+                    ActionButton(HopiIcons.Terminal, DetailTags.COPY_CURL, actions.copyCurl, enabled = !model.loading && !model.gone)
                     ActionButton(HopiIcons.Link, DetailTags.COPY_URL, actions.copyUrl)
                     ActionButton(HopiIcons.Copy, DetailTags.COPY_BODY, actions.copyBody, enabled = responseText != null)
                     actions.share?.let { ActionButton(HopiIcons.Share, DetailTags.SHARE, it) }
@@ -168,7 +174,16 @@ private fun LazyListScope.exchange(exchange: ExchangeView, colors: HopiColors) {
         SectionTitle("Headers", trailing = exchange.headers.size.toString())
     }
     if (exchange.headers.isEmpty()) {
-        item(key = "headers-none", contentType = "message") { Message("No headers", colors) }
+        item(key = "headers-none", contentType = "message") {
+            Message(
+                when {
+                    exchange.loading -> "Loading headers…"
+                    exchange.gone -> "Headers gone from the app"
+                    else -> "No headers"
+                },
+                colors,
+            )
+        }
     } else {
         itemsIndexed(exchange.headers, key = { index, _ -> "header-$index" }, contentType = { _, _ -> "header" }) { _, (name, value) ->
             HeaderRow(name, value, colors)

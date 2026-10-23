@@ -1,34 +1,13 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.Platform
+import dev.koga.hopi.connect.TargetIds
+import dev.koga.hopi.connect.usageError
 import java.nio.file.Path
 import java.nio.file.Paths
 
-/** Process exit codes; part of the CLI's contract with scripts and agents. */
-internal object ExitCode {
-    const val OK: Int = 0
-    const val USAGE: Int = 1
-    const val NOT_REACHABLE: Int = 2
-    const val NOT_FOUND: Int = 3
-}
-
-/** Ends the command with [exitCode]; [message] is the one line printed to stderr. */
-internal class CliException(val exitCode: Int, message: String) : Exception(message)
-
-internal fun usageError(message: String): CliException = CliException(ExitCode.USAGE, message)
-
-internal fun notReachable(message: String): CliException = CliException(ExitCode.NOT_REACHABLE, message)
-
-internal enum class Platform(val id: String) {
-    Android("android"),
-    Ios("ios"),
-    Jvm("jvm"),
-    ;
-
-    companion object {
-        fun parse(value: String): Platform =
-            entries.firstOrNull { it.id == value } ?: throw usageError("--platform must be android, ios or jvm, not '$value'")
-    }
-}
+private fun parsePlatform(value: String): Platform =
+    Platform.entries.firstOrNull { it.id == value } ?: throw usageError("--platform must be android, ios or jvm, not '$value'")
 
 internal enum class Command(val wireName: String, val takesId: Boolean, val flags: Set<String>) {
     Devices("devices", takesId = false, setOf("--json", "--platform")),
@@ -63,14 +42,10 @@ internal sealed interface Invocation {
 internal const val DEFAULT_LIMIT: Int = 100
 internal const val MAX_LIMIT: Int = 10_000
 
-/**
- * Application ids, bundle ids and Android process names (`com.example:remote`). Values reach
- * subprocess argument arrays, so anything that could read as an option or a path is refused.
- */
-private val APP_ID = Regex("[A-Za-z0-9_][A-Za-z0-9._:-]{0,254}")
+/** Shared with the desktop viewer's picker (see [TargetIds]). */
+private val APP_ID = TargetIds.APP
 
-/** adb serials (`emulator-5554`, `192.168.1.20:5555`) and simulator UDIDs. */
-private val DEVICE_ID = Regex("[A-Za-z0-9_][A-Za-z0-9._:-]{0,127}")
+private val DEVICE_ID = TargetIds.DEVICE
 
 internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation {
     if (argv.isEmpty() || argv.any { it == "-h" || it == "--help" || it == "help" && argv.size == 1 }) {
@@ -109,7 +84,7 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
         if (it.isEmpty()) throw usageError("--bridge-file needs a path")
         Paths.get(it)
     }
-    val platform = values["--platform"]?.let(Platform::parse) ?: if (bridgeFile != null) Platform.Jvm else null
+    val platform = values["--platform"]?.let(::parsePlatform) ?: if (bridgeFile != null) Platform.Jvm else null
     if (command == Command.Devices && platform == Platform.Jvm) throw usageError("devices lists android and ios targets only")
     if (platform == Platform.Jvm && bridgeFile == null && command != Command.Devices) {
         throw usageError("--platform jvm needs --bridge-file <path>")

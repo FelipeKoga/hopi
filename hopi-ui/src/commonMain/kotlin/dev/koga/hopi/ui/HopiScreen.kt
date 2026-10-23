@@ -20,14 +20,17 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -107,88 +110,13 @@ internal fun HopiScreen(
         val listState = rememberLazyListState()
         val rowCache = remember(store) { RowModelCache() }
         val formatter = remember(store) { DetailFormatter() }
-        val scope = rememberCoroutineScope()
         var toast by remember { mutableStateOf<Toast?>(null) }
 
-        // The store is collected here, while the screen is composed, never before. Rows are built
-        // off the main thread, and only for snapshots the cache has not seen.
-        val list by produceState<ListModel?>(null, store, formatDispatcher) {
-            val rows = store.transactions
-                .map { rowCache.rowsFor(it, store.redactor) }
-                .conflate()
-                .flowOn(formatDispatcher)
-            val criteria = snapshotFlow { query.text.toString() to filter }.distinctUntilChanged()
-            combine(rows, criteria) { all, (text, status) -> filterRows(all, text, status) }
-                .conflate()
-                .flowOn(formatDispatcher)
-                .collect { value = it }
-        }
-
-        val detail by produceState<DetailState?>(null, store, selectedId, formatDispatcher) {
-            // A new selection never shows the previous one's state, not even for a frame.
-            value = null
-            val id = selectedId ?: return@produceState
-            // The store's redactor grows when another client installs the plugin: a new redactor is a
-            // change too, so headers it now redacts do not stay readable on an open detail.
-            store.transactions
-                .map { store.get(id) to store.redactor }
-                .distinctUntilChanged { old, new -> old.first === new.first && old.second === new.second }
-                .collectLatest { (transaction, redactor) ->
-                    value = if (transaction == null) {
-                        DetailState.Missing
-                    } else {
-                        DetailState.Ready(withContext(formatDispatcher) { formatter.model(transaction, redactor) })
-                    }
-                }
-        }
-
-        @Suppress("DEPRECATION") // The text-only clipboard API is the one common to every target.
-        val clipboard = LocalClipboardManager.current
-        val shareSheet = rememberShareSheet()
+        // The store is collected here, while the screen is composed, never before.
+        val list by rememberListModel(store, query, { filter }, rowCache, formatDispatcher)
+        val detail by rememberDetailState(store, selectedId, formatter, formatDispatcher)
         val model = (detail as? DetailState.Ready)?.model
-        val actions = remember(model, clipboard, shareSheet) {
-            // The clip crosses a binder transaction on Android: it is cut like the share text, and a
-            // clipboard that still refuses it shows a toast instead of crashing the app.
-            fun copy(label: String, cutInside: (String) -> Boolean = { false }, text: suspend () -> String) {
-                scope.launch {
-                    val (full, clip) = withContext(formatDispatcher) { text().let { it to cutAt(it) } }
-                    toast = try {
-                        clipboard.setText(AnnotatedString(clip))
-                        Toast(
-                            when {
-                                clip !== full -> "$label copied (first ${MAX_SHARE_CHARS / 1_000}k characters)"
-                                cutInside(full) -> "$label copied (request body cut to fit ${MAX_SHARE_CHARS / 1_000}k characters)"
-                                else -> "$label copied"
-                            },
-                        )
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: RuntimeException) {
-                        Toast("$label could not be copied")
-                    }
-                }
-            }
-            DetailActions(
-                copyCurl = { model?.let { m -> copy("cURL", ::curlBodyWasCut) { curlOf(m.transaction, store.redactor) } } },
-                copyUrl = { model?.let { m -> copy("URL") { m.url } } },
-                copyBody = {
-                    (model?.response?.body as? BodyView.Text)?.let { body ->
-                        // One character more than the cap, so the copy knows it was cut.
-                        copy("Response body") { body.pieces.join(maxChars = MAX_SHARE_CHARS + 1) }
-                    }
-                },
-                share = shareSheet?.let { sheet ->
-                    {
-                        model?.let { m ->
-                            scope.launch {
-                                val text = withContext(formatDispatcher) { shareTextOf(m, store.redactor) }
-                                sheet.share(m.title, text)
-                            }
-                        }
-                    }
-                },
-            )
-        }
+        val actions = rememberDetailActions(store, model, formatDispatcher) { toast = it }
 
         // ui-backhandler's BackHandler: the system back gesture on Android, the edge swipe on iOS.
         // Deprecated in favor of navigationevent's handler, which would add a dependency.
@@ -247,17 +175,128 @@ internal fun HopiScreen(
     }
 }
 
-private sealed interface DetailState {
+internal sealed interface DetailState {
     data object Missing : DetailState
 
     class Ready(val model: DetailModel) : DetailState
 }
 
+/**
+ * The list rows for [store], filtered by [query] and [filter]. The store is collected only while
+ * the caller is composed; rows are built off the main thread, and only for snapshots the cache
+ * has not seen.
+ */
+@Composable
+internal fun rememberListModel(
+    store: HopiStore,
+    query: TextFieldState,
+    /** Read inside a snapshot flow: a state read, so a new filter re-filters at once. */
+    filter: () -> StatusFilter,
+    rowCache: RowModelCache,
+    formatDispatcher: CoroutineDispatcher,
+): State<ListModel?> =
+    produceState<ListModel?>(null, store, formatDispatcher) {
+        val rows = store.transactions
+            .map { rowCache.rowsFor(it, store.redactor) }
+            .conflate()
+            .flowOn(formatDispatcher)
+        val criteria = snapshotFlow { query.text.toString() to filter() }.distinctUntilChanged()
+        combine(rows, criteria) { all, (text, status) -> filterRows(all, text, status) }
+            .conflate()
+            .flowOn(formatDispatcher)
+            .collect { value = it }
+    }
+
+/** The detail of [selectedId] in [store], formatted off the main thread; null while formatting. */
+@Composable
+internal fun rememberDetailState(
+    store: HopiStore,
+    selectedId: Long?,
+    formatter: DetailFormatter,
+    formatDispatcher: CoroutineDispatcher,
+): State<DetailState?> = produceState<DetailState?>(null, store, selectedId, formatDispatcher) {
+    // A new selection never shows the previous one's state, not even for a frame.
+    value = null
+    val id = selectedId ?: return@produceState
+    // The store's redactor grows when another client installs the plugin: a new redactor is a
+    // change too, so headers it now redacts do not stay readable on an open detail.
+    store.transactions
+        .map { store.get(id) to store.redactor }
+        .distinctUntilChanged { old, new -> old.first === new.first && old.second === new.second }
+        .collectLatest { (transaction, redactor) ->
+            value = if (transaction == null) {
+                DetailState.Missing
+            } else {
+                DetailState.Ready(withContext(formatDispatcher) { formatter.model(transaction, redactor) })
+            }
+        }
+}
+
+/** Copy and share for the detail of [model]; [onToast] shows the confirmation. */
+@Composable
+internal fun rememberDetailActions(
+    store: HopiStore,
+    model: DetailModel?,
+    formatDispatcher: CoroutineDispatcher,
+    onToast: (Toast) -> Unit,
+): DetailActions {
+    val scope = rememberCoroutineScope()
+    val toast = rememberUpdatedState(onToast)
+    @Suppress("DEPRECATION") // The text-only clipboard API is the one common to every target.
+    val clipboard = LocalClipboardManager.current
+    val shareSheet = rememberShareSheet()
+    return remember(model, clipboard, shareSheet) {
+        // The clip crosses a binder transaction on Android: it is cut like the share text, and a
+        // clipboard that still refuses it shows a toast instead of crashing the app.
+        fun copy(label: String, cutInside: (String) -> Boolean = { false }, text: suspend () -> String) {
+            scope.launch {
+                val (full, clip) = withContext(formatDispatcher) { text().let { it to cutAt(it) } }
+                toast.value(
+                    try {
+                        clipboard.setText(AnnotatedString(clip))
+                        Toast(
+                            when {
+                                clip !== full -> "$label copied (first ${MAX_SHARE_CHARS / 1_000}k characters)"
+                                cutInside(full) -> "$label copied (request body cut to fit ${MAX_SHARE_CHARS / 1_000}k characters)"
+                                else -> "$label copied"
+                            },
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: RuntimeException) {
+                        Toast("$label could not be copied")
+                    },
+                )
+            }
+        }
+        DetailActions(
+            copyCurl = { model?.let { m -> copy("cURL", ::curlBodyWasCut) { curlOf(m.transaction, store.redactor) } } },
+            copyUrl = { model?.let { m -> copy("URL") { m.url } } },
+            copyBody = {
+                (model?.response?.body as? BodyView.Text)?.let { body ->
+                    // One character more than the cap, so the copy knows it was cut.
+                    copy("Response body") { body.pieces.join(maxChars = MAX_SHARE_CHARS + 1) }
+                }
+            },
+            share = shareSheet?.let { sheet ->
+                {
+                    model?.let { m ->
+                        scope.launch {
+                            val text = withContext(formatDispatcher) { shareTextOf(m, store.redactor) }
+                            sheet.share(m.title, text)
+                        }
+                    }
+                }
+            },
+        )
+    }
+}
+
 /** A short confirmation; each instance is shown once. */
-private class Toast(val text: String)
+internal class Toast(val text: String)
 
 @Composable
-private fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {
+internal fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {
     val colors = LocalHopiColors.current
     // Keeps the last text while the toast fades out; plain memory, not state, so it never recomposes.
     val last = remember { arrayOfNulls<String>(1) }

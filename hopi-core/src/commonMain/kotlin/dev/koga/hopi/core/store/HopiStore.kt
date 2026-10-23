@@ -164,14 +164,24 @@ public class HopiStore(
         return false
     }
 
-    /** Removes every transaction whose id was allocated before this call, including pending ones. */
-    public fun clear() {
-        val through = lastId.load()
+    /**
+     * Removes every transaction whose id was allocated before this call, including pending ones.
+     * Returns the last id it covers.
+     */
+    public fun clear(): Long = clear(lastId.load())
+
+    /**
+     * Removes every transaction with an id up to [through], including pending ones, and ignores
+     * later snapshots of them. A host viewer passes the id the app's own clear covered (the bridge
+     * `clear` reply's `through`): a transaction its tail added since, with a higher id, stays.
+     */
+    public fun clear(through: Long): Long {
         while (true) {
             val current = clearedThrough.load()
             if (current >= through || clearedThrough.compareAndSet(current, through)) break
         }
         writes.trySend(null)
+        return through
     }
 
     /** The retained transaction with [id]; null once a [clear] covered it, even before the consumer applied it. */

@@ -1,5 +1,13 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.BridgeClient
+import dev.koga.hopi.connect.CliException
+import dev.koga.hopi.connect.ExitCode
+import dev.koga.hopi.connect.Platform
+import dev.koga.hopi.connect.Reply
+import dev.koga.hopi.connect.long
+import dev.koga.hopi.connect.notReachable
+import dev.koga.hopi.connect.visible
 import dev.koga.hopi.core.bridge.BridgeSession
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.json.JsonWriter

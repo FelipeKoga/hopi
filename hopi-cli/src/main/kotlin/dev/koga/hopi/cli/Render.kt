@@ -1,5 +1,10 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.bool
+import dev.koga.hopi.connect.long
+import dev.koga.hopi.connect.notReachable
+import dev.koga.hopi.connect.str
+import dev.koga.hopi.connect.visible
 import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.body.isJson
 import dev.koga.hopi.core.body.prettyPrintJson
@@ -10,28 +15,6 @@ import java.util.Base64
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-
-/**
- * [text] safe to write to a terminal: C0 controls, DEL and C1 controls become `\uXXXX`, so bytes a
- * server put in a body, header or error cannot move the cursor, rewrite lines or reach OSC
- * sequences (clipboard writes, titles). [multiline] keeps `\n` and `\t` (bodies); a single-line
- * field escapes them too. Applied to every bridge value human output prints; `--json` prints the
- * bridge's own escaped JSON instead.
- */
-internal fun visible(text: String, multiline: Boolean = false): String {
-    if (text.none { needsEscape(it, multiline) }) return text
-    return buildString(text.length + 16) {
-        for (c in text) {
-            if (needsEscape(c, multiline)) append("\\u").append(c.code.toString(16).padStart(4, '0')) else append(c)
-        }
-    }
-}
-
-private fun needsEscape(c: Char, multiline: Boolean): Boolean = when {
-    c == '\n' || c == '\t' -> !multiline
-    c < ' ' -> true
-    else -> c in '\u007f'..'\u009f'
-}
 
 /** Human output. `--json` never goes through here: it prints the bridge's lines as received. */
 internal object Render {

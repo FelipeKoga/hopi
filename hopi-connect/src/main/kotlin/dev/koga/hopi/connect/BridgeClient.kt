@@ -1,5 +1,6 @@
-package dev.koga.hopi.cli
+package dev.koga.hopi.connect
 
+import dev.koga.hopi.core.HopiInternalApi
 import dev.koga.hopi.core.json.JsonWriter
 import java.io.BufferedReader
 import java.io.IOException
@@ -17,22 +18,25 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.longOrNull
 
 /** One bridge reply line: [raw] exactly as received (what `--json` prints) and its parsed object. */
-internal class Reply(val raw: String, val json: JsonObject) {
-    val type: String? get() = json.str("type")
+@HopiInternalApi
+public class Reply(public val raw: String, public val json: JsonObject) {
+    public val type: String? get() = json.str("type")
 }
 
 /**
  * How `hello` proves it comes from the app (Android): [expected] reads the proof the app wrote to
  * its private storage; [mismatch] is the error when `hello` lacks it or carries another.
  */
-internal class ProofCheck(val expected: () -> String, val mismatch: String)
+@HopiInternalApi
+public class ProofCheck(public val expected: () -> String, public val mismatch: String)
 
 /**
  * One connection to a bridge on host loopback. [handshake] sends the token (token transports) and
  * `hello` and checks the answer before anything else is read; a peer that closes without a byte
  * means nothing serves the app (adb accepts the forwarded connection even then).
  */
-internal class BridgeClient private constructor(
+@HopiInternalApi
+public class BridgeClient private constructor(
     private val socket: Socket,
     private val endpoint: BridgeEndpoint,
     private val readTimeoutMs: Int,
@@ -41,14 +45,14 @@ internal class BridgeClient private constructor(
     private val output = socket.getOutputStream()
 
     /** The checked `hello` reply, once [handshake] returned. */
-    lateinit var hello: Reply
+    public lateinit var hello: Reply
         private set
 
     /**
      * Sends the token, `hello` and [request] in one write (one round trip), then checks `hello`.
      * A request that mutates (`clear`) is sent only after the check, with [send].
      */
-    fun handshake(request: String?): Reply {
+    public fun handshake(request: String?): Reply {
         val lines = StringBuilder(160)
         endpoint.token?.let { lines.append(it).append('\n') }
         lines.append(HELLO).append('\n')
@@ -79,10 +83,10 @@ internal class BridgeClient private constructor(
         if (!MessageDigest.isEqual(sent.encodeToByteArray(), expected.encodeToByteArray())) throw notReachable(check.mismatch)
     }
 
-    fun send(request: String) = write(StringBuilder(request.length + 1).append(request).append('\n'))
+    public fun send(request: String): Unit = write(StringBuilder(request.length + 1).append(request).append('\n'))
 
     /** Lets `tail` wait for events as long as it takes. */
-    fun waitForever() {
+    public fun waitForever() {
         socket.soTimeout = 0
     }
 
@@ -90,7 +94,7 @@ internal class BridgeClient private constructor(
      * The next reply; an `error` reply becomes a [CliException]. End of input fails with
      * [closedMessage], unless the endpoint knows the host side lost the connection.
      */
-    fun reply(closedMessage: String = CLOSED): Reply {
+    public fun reply(closedMessage: String = CLOSED): Reply {
         val reply = next() ?: throw notReachable(endpoint.transportLost() ?: closedMessage)
         if (reply.type == "error") {
             val code = reply.json.str("code")
@@ -98,11 +102,14 @@ internal class BridgeClient private constructor(
             throw when (code) {
                 "NOT_FOUND" -> CliException(ExitCode.NOT_FOUND, message)
                 "BAD_REQUEST" -> usageError("the bridge rejected the request: $message")
-                "SLOW_CLIENT" -> notReachable(
-                    "the bridge disconnected this client for reading too slowly (SLOW_CLIENT): " +
-                        (reply.json.long("since")?.let { "run hopi tail --since $it to resume without losing a transaction" }
-                            ?: "tail again with --since one below the lowest id still pending"),
-                )
+                "SLOW_CLIENT" -> reply.json.long("since").let { since ->
+                    SlowClientException(
+                        since,
+                        "the bridge disconnected this client for reading too slowly (SLOW_CLIENT): " +
+                            (since?.let { "run hopi tail --since $it to resume without losing a transaction" }
+                                ?: "tail again with --since one below the lowest id still pending"),
+                    )
+                }
                 else -> notReachable("bridge error ${code?.let(::visible)}: $message")
             }
         }
@@ -144,17 +151,17 @@ internal class BridgeClient private constructor(
         }
     }
 
-    companion object {
-        const val PROTOCOL: Long = 1
+    public companion object {
+        public const val PROTOCOL: Long = 1
         private const val CONNECT_TIMEOUT_MS = 5_000
         private const val CLOSED = "the app closed the bridge connection"
 
         /** Host loopback by address: `localhost` can resolve to `::1`, where neither adb nor the bridge listens. */
-        val LOOPBACK: InetAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
+        public val LOOPBACK: InetAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
 
         private val HELLO = request("hello").endObject().toString()
 
-        fun connect(endpoint: BridgeEndpoint, readTimeoutMs: Int): BridgeClient {
+        public fun connect(endpoint: BridgeEndpoint, readTimeoutMs: Int): BridgeClient {
             val socket = Socket()
             try {
                 socket.connect(InetSocketAddress(LOOPBACK, endpoint.port), CONNECT_TIMEOUT_MS)
@@ -168,12 +175,18 @@ internal class BridgeClient private constructor(
         }
 
         /** `{"cmd":"<command>"` with the object left open for its fields. */
-        fun request(command: String): JsonWriter = JsonWriter().beginObject().field("cmd", command)
+        public fun request(command: String): JsonWriter = JsonWriter().beginObject().field("cmd", command)
     }
 }
 
-internal fun JsonObject.str(name: String): String? = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+/** The string field [name]; null when absent, `null`, or not a JSON string. */
+@HopiInternalApi
+public fun JsonObject.str(name: String): String? = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
-internal fun JsonObject.long(name: String): Long? = (this[name] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
+/** The integer field [name]; null when absent, `null`, a string, or not an integer. */
+@HopiInternalApi
+public fun JsonObject.long(name: String): Long? = (this[name] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
 
-internal fun JsonObject.bool(name: String): Boolean? = (this[name] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+/** The boolean field [name]; null when absent, `null`, or not a JSON boolean. */
+@HopiInternalApi
+public fun JsonObject.bool(name: String): Boolean? = (this[name] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull

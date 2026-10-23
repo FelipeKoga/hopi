@@ -5,7 +5,8 @@ Android and iOS that use the Ktor client. Every request the app makes shows up i
 
 - an in-app screen (list, detail, cURL, share) behind a small floating button,
 - one NDJSON line per request in logcat or the iOS unified log,
-- a host CLI, `hopi`, whose `--json` output is a stable contract for AI coding agents.
+- a host CLI, `hopi`, whose `--json` output is a stable contract for AI coding agents,
+- a desktop viewer (Compose Desktop, macOS first) that shows the same traffic on your screen.
 
 It is built to cost nothing when nobody is looking: no timers, no polling, no global interception,
 and a `-noop` twin of every artifact, so release builds ship none of it. The design contract is
@@ -106,6 +107,35 @@ reachable. Exit codes: 0 ok, 1 usage, 2 not reachable, 3 not found; errors are o
 Secrets are redacted on every channel; the `--json` line shapes are specified in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#agent-access).
 
+## Desktop viewer
+
+`hopi-desktop` shows a running app's traffic in a window on your Mac: the in-app list and
+detail side by side, over the same bridge as the CLI (`agentBridge = true`, debug builds). The app
+needs nothing new, and a connected viewer costs it what a connected `hopi tail` does. Run it
+from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime):
+
+```bash
+./gradlew :hopi-desktop:run
+./gradlew :hopi-desktop:packageDmg   # hopi-desktop/build/compose/binaries/main/dmg/Hopi-1.0.0.dmg
+```
+
+Pick a device (adb devices and emulators, booted iOS simulators, JVM processes with a bridge),
+enter the app's id (on Android the bridges listening on the device are offered), and connect.
+Only the selected request's headers and bodies are fetched from the app, so a giant body never
+crosses unless you open it. When the app restarts, or adb resets, the viewer reconnects by itself.
+
+| Keys | |
+| --- | --- |
+| ↓ / ↑ | next / previous request |
+| Enter, Esc | select the first request, clear the selection |
+| ⌘F | search |
+| ⌘K | clear (the app's store too) |
+| ⌘E, ⇧⌘E | export the session as HAR 1.2, as NDJSON (`hopi get --json` lines) |
+| ⌘R | reconnect |
+
+Ctrl replaces ⌘ on Linux and Windows. An export fetches the bodies not opened yet, up to 32 MB
+per request and 256 MB in all; larger ones keep their sizes and a comment.
+
 ## Performance
 
 Measured so far (the methods and caveats are in the architecture doc):
@@ -132,6 +162,8 @@ Measured so far (the methods and caveats are in the architecture doc):
 | 8 MB JSON detail on the emulator (8 MB cap, pretty-printed), old vs new build | settle 600–768 vs 569–771 ms; Java heap peak while opening 68.7 vs 56.4 MB; main-thread frame gap at most 67 ms (frame ticker on) |
 | 16 MB JSON detail, 16 MB cap and 32 MB store, default 192 MB heap | Android: settles in 1.0–1.2 s, Java heap peak 84 MB, no OOM; iOS simulator: frame gaps at most 77 ms |
 | A tail client that stops reading | holds body-free events only (was up to ~2,400 full snapshots, 600 MB at the default cap) |
+| Desktop viewer connected to an idle app, JVM bridge in-process (`ViewerTest`) | the app's 5 bridge threads (accept, a reader and a writer per connection) 0 ns CPU over 3 s; exactly 2 connections |
+| Desktop viewer connected to the sample, Android emulator (API 35, `DeviceViewerUiTest`) | Hopi's 5 threads 0 CPU ticks over 60 s idle; 2 connections on the app side, never more through a force-stop, a relaunch and an adb server reset; 500 `POST /items` 2660 to 2781 ms connected, 2526 to 2704 ms disconnected |
 | Release APK of the sample built without the flag | 12 Hopi classes (the noop twins), 0 from `hopi-core`; 345 and 97 with `-Phopi.enabled=true` |
 
 The first idle and the 300 KB body figures were taken with the earlier, Android-only version of

@@ -1,5 +1,10 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.BridgeClient
+import dev.koga.hopi.connect.ExitCode
+import dev.koga.hopi.connect.Platform
+import dev.koga.hopi.connect.ProcessResult
+import dev.koga.hopi.connect.ProcessRunner
 import dev.koga.hopi.core.bridge.AgentBridgeServer
 import dev.koga.hopi.core.bridge.BridgeInfo
 import dev.koga.hopi.core.bridge.JvmAgentBridge

@@ -178,8 +178,10 @@ public class BridgeSession(
                     }
                 }
                 BridgeCommand.Clear -> {
-                    store.clear()
-                    reply(OK_LINE)
+                    // `through`: the last id the clear covers, so a host viewer clears exactly those
+                    // (its tail may already hold transactions started after it).
+                    val through = store.clear()
+                    reply(JsonWriter().beginObject().field("type", "ok").field("through", through).endObject().toString())
                 }
             }
         }
@@ -447,7 +449,7 @@ public class BridgeSession(
         private fun CapturedBody?.isSizeOnly(): Boolean = this == null || (bytes.isEmpty() && totalBytes != null)
 
         private fun CapturedBody.sizeOnly(): CapturedBody =
-            if (isSizeOnly()) this else CapturedBody(NO_BYTES, reportedBytes, truncated, contentType, skippedReason)
+            if (isSizeOnly()) this else CapturedBody(NO_BYTES, reportedBytes, truncated, contentType, skippedReason, originalCapturedBytes = heldBytes)
 
         /** Chars of a body escaped, encoded and written at a time by a `get` reply. */
         private const val DETAIL_CHUNK_CHARS = 32 * 1024
@@ -496,7 +498,6 @@ public class BridgeSession(
         private const val FINAL = 2
 
         private val END_LINE = JsonWriter().beginObject().field("type", "end").endObject().toString()
-        private val OK_LINE = JsonWriter().beginObject().field("type", "ok").endObject().toString()
 
         public fun error(code: BridgeError, message: String): String = JsonWriter().beginObject()
             .field("type", "error")
