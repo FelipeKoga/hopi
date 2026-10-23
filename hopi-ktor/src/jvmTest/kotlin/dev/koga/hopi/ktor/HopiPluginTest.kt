@@ -417,9 +417,24 @@ class HopiPluginTest {
     }
 
     @Test
-    fun agentBridgeRequestReachesTheRegisteredStarterWithTheDefaultStore() = runBlocking<Unit> {
+    fun agentBridgeStartsOnlyWhenRequestedAndWithTheDefaultStore() = runBlocking<Unit> {
+        // The once-per-process flag makes this the only test that may request the bridge; the
+        // starter stands in for the platform bridge, so no socket is bound in the test JVM.
         val started = CompletableDeferred<HopiStore>()
         AgentBridgeHook.register { store -> started.complete(store) }
+        HttpClient(MockEngine { respond("") }) {
+            install(Hopi) {
+                logSink = HopiLogSink.Off
+            }
+        }
+        HttpClient(MockEngine { respond("") }) {
+            install(Hopi) {
+                logSink = HopiLogSink.Off
+                agentBridge = true
+                store = HopiStore()
+            }
+        }
+        assertFalse(started.isCompleted, "the bridge started without agentBridge = true on the default store")
         HttpClient(MockEngine { respond("") }) {
             install(Hopi) {
                 logSink = HopiLogSink.Off

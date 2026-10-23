@@ -1,0 +1,28 @@
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-2" : [
+      {
+        "lastBootedAt" : "2026-10-20T09:12:44Z",
+        "dataPath" : "\/Users\/dev\/Library\/Developer\/CoreSimulator\/Devices\/90E767A1-5F25-4E8E-B1B2-D1A8F53295FA\/data",
+        "dataPathSize" : 1803038720,
+        "logPath" : "\/Users\/dev\/Library\/Logs\/CoreSimulator\/90E767A1-5F25-4E8E-B1B2-D1A8F53295FA",
+        "udid" : "90E767A1-5F25-4E8E-B1B2-D1A8F53295FA",
+        "isAvailable" : true,
+        "logPathSize" : 65536,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        "state" : "Booted",
+        "name" : "iPhone 16"
+      },
+      {
+        "udid" : "1D2C3B4A-0000-4000-8000-000000000001",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation",
+        "state" : "Shutting Down",
+        "name" : "iPhone SE (3rd generation)"
+      }
+    ]
+  }
+}

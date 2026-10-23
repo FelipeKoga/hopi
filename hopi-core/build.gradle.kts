@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -36,5 +37,14 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
+    }
+}
+
+// `-Phopi.simulator=<udid>` runs the iOS tests on that already booted simulator instead of a
+// standalone one, so its unified log can be read afterwards with `simctl spawn booted log show`.
+providers.gradleProperty("hopi.simulator").orNull?.let { udid ->
+    tasks.withType<KotlinNativeSimulatorTest>().configureEach {
+        device.set(udid)
+        standalone.set(false)
     }
 }

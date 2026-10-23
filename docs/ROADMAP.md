@@ -34,6 +34,46 @@ both platforms vs the platform accessibility APIs (`AccessibilityNodeInfo`, UIAc
   `task_vm_info.phys_footprint` on iOS. Sampled on demand or at a stated interval.
 - **FPS overlay.** Derived from the frame-timing source above, never a separate timer.
 
+### Analytics debugger
+Explore. An inspector for the analytics events the app emits, with validation against
+per-provider constraints, so bad events are caught in debug instead of silently dropped in prod.
+- **Capture.** A tiny `hopi-analytics` API the app's own analytics wrapper calls
+  (`HopiAnalytics.track(provider, name, params)`), plus optional adapters for common KMP
+  analytics SDKs. No swizzling, no interception of vendor SDK internals. Noop twin, as always.
+- **Constraints.** Declarative rule sets, built in for common providers and user-definable:
+  max event name length, allowed name pattern (e.g. `^[a-zA-Z][a-zA-Z0-9_]*$`), reserved names and
+  prefixes, max params per event, max param key / string value length, allowed value types,
+  required params per event, max user properties. Example: Firebase limits event names to 40 chars,
+  params to 25 per event, and string values to 100 chars.
+- **Output.** Each event is shown with violations highlighted in the in-app screen, emitted as an
+  NDJSON log line (`"violations":[…]`), and available through the bridge/CLI
+  (`hopi events --violations --json`) so an AI agent can audit tracking in a test run.
+- **Cost.** Validation runs off the caller's thread, only for events Hopi receives; bounded ring
+  buffer like the HTTP store.
+- Open question: whether to also cross-check against a tracking plan file (event schema) checked
+  into the repo.
+
+### State tracker (UiState, actions, events)
+Explore. A Redux-DevTools-style timeline for MVI/MVVM screens: every action (user intent) a
+ViewModel receives, every UiState it emits, and every one-off event (navigation, toast, effect).
+- **Capture.** Explicit, no reflection or bytecode tricks: `HopiState.track(scope, name, flow)`
+  for a `StateFlow<UiState>`, plus `action(name, payload)` / `event(name, payload)` calls (or thin
+  helpers for common patterns like `Channel`/`SharedFlow` events). Noop twin.
+- **Timeline.** Per screen/ViewModel: action, then the state transition it caused, then any
+  events, linked by order and timestamp. State shown as a diff against the previous state, not a
+  full dump, with the full value one tap away. HTTP transactions started during an action can be
+  linked to it.
+- **Rendering.** States are rendered lazily via `toString()` (data classes) or a user-supplied
+  formatter / kotlinx-serialization serializer; nothing is formatted unless something is looking.
+- **Agent access.** NDJSON lines (`{"hopi":1,"kind":"action|state|event","screen":…}`) and
+  `hopi state tail --screen <name> --json`, so an AI agent can verify "tap X led to state Y"
+  without reading the UI.
+- **Cost.** Capture stores a reference plus a timestamp; diffing and formatting happen off the main
+  thread, only on demand. Bounded ring buffer per tracked flow. Large or high-frequency states
+  (e.g. scroll positions) are sampled or excluded by config.
+- Open questions: time travel (replaying an old state into the UI) vs read-only in v1; how to
+  capture states that are not data classes; privacy redaction of fields.
+
 ### Later candidates (from DebugSwift's feature set)
 - Console / log capture (app logs alongside HTTP).
 - WebSocket and SSE inspection for Ktor.

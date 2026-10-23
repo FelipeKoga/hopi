@@ -10,6 +10,9 @@ public actual fun emitPlatformLogLine(line: String) {
     hopi_os_log_line(line)
 }
 
-/** The unified logging system cuts a message's dynamic string at about 1 KiB. */
+/**
+ * Measured on an iOS 18.2 simulator (see ARCHITECTURE.md): lines up to 1015 UTF-8 bytes arrive
+ * intact, longer ones are cut to 1015 bytes plus `<…>`. 1000 keeps a margin for other versions.
+ */
 @HopiInternalApi
 public actual val platformLogLineMaxBytes: Int = 1000

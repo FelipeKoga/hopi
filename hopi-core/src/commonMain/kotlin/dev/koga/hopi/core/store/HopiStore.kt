@@ -59,6 +59,13 @@ public class HopiStore(
     private val batchLimit = channelCapacity
     private val terminalBatchLimit = terminalChannelCapacity
     private val lostTerminalWrites = AtomicLong(0)
+
+    /**
+     * The most events one consumer pass can publish at once (its first write plus a full drain of
+     * both lanes). Event listeners receive them in one synchronous burst, so a queue that a
+     * listener fills must hold at least this many to tell a burst from a reader that stopped.
+     */
+    public val maxBatchSize: Int = 1 + channelCapacity + terminalChannelCapacity
     private val _droppedTerminalWrites = MutableStateFlow(0L)
 
     private val _transactions = MutableStateFlow<List<HttpTransaction>>(emptyList())
@@ -82,6 +89,26 @@ public class HopiStore(
      * Each one is a transaction that never completes in this store and never gets a log line.
      */
     public val droppedTerminalWrites: StateFlow<Long> = _droppedTerminalWrites.asStateFlow()
+
+    private val listeners = AtomicReference<List<(TransactionEvent) -> Unit>>(emptyList())
+
+    /**
+     * Calls [listener] on the consumer for every event published from now on, in order and without
+     * loss (unlike [events], whose slow collectors lose the oldest), each after the snapshot
+     * containing it is published. [listener] must return at once: it runs on the store's consumer
+     * and must never block, suspend or throw. Returns the function that removes it.
+     */
+    public fun addEventListener(listener: (TransactionEvent) -> Unit): () -> Unit {
+        updateListeners { it + listener }
+        return { updateListeners { current -> current.filterNot { it === listener } } }
+    }
+
+    private inline fun updateListeners(change: (List<(TransactionEvent) -> Unit>) -> List<(TransactionEvent) -> Unit>) {
+        while (true) {
+            val current = listeners.load()
+            if (listeners.compareAndSet(current, change(current))) return
+        }
+    }
 
     private val outwardRedaction = AtomicReference<Redactor?>(null)
 
@@ -134,16 +161,21 @@ public class HopiStore(
         writes.trySend(null)
     }
 
+    /** The retained transaction with [id]; null once a [clear] covered it, even before the consumer applied it. */
     public fun get(id: Long): HttpTransaction? {
+        if (id <= clearedThrough.load()) return null
         val list = _transactions.value
         val index = list.binarySearchById(id)
         return if (index >= 0) list[index] else null
     }
 
-    /** Transactions with an id greater than [id], oldest first, at most [limit]. */
+    /**
+     * Transactions with an id greater than [id], oldest first, at most [limit]. Like [get], it
+     * honors a [clear] at once, so a reader never sees a transaction after clearing it.
+     */
     public fun since(id: Long, limit: Int = Int.MAX_VALUE): List<HttpTransaction> {
         val list = _transactions.value
-        val found = list.binarySearchById(id)
+        val found = list.binarySearchById(maxOf(id, clearedThrough.load()))
         val from = if (found >= 0) found + 1 else -(found + 1)
         val to = if (list.size - from > limit) from + limit else list.size
         return if (from >= to) emptyList() else list.subList(from, to)
@@ -169,7 +201,11 @@ public class HopiStore(
             dirty = drain(writes, batchLimit, pendingEvents) || dirty
             dirty = drain(terminalWrites, terminalBatchLimit, pendingEvents) || dirty
             if (dirty) _transactions.value = buffer.toList()
-            for (event in pendingEvents) _events.tryEmit(event)
+            val subscribed = listeners.load()
+            for (event in pendingEvents) {
+                _events.tryEmit(event)
+                for (listener in subscribed) listener(event)
+            }
             pendingEvents.clear()
             _droppedTerminalWrites.value = lostTerminalWrites.load()
         }

@@ -29,3 +29,5 @@ dependencyResolutionManagement {
 
 include(":hopi-core")
 include(":hopi-ktor")
+include(":hopi-cli")
+include(":sample:androidApp")

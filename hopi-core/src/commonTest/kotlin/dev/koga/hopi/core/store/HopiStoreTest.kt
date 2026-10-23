@@ -265,4 +265,35 @@ class HopiStoreTest {
         assertTrue(store.redactor.isRedactedHeader("x-api-key"))
         assertTrue(store.redactor.isRedactedHeader("Authorization"))
     }
+
+    @Test
+    fun readsHonorAClearBeforeTheConsumerAppliesIt() = runTest {
+        val store = store()
+        for (id in 1L..3L) store.submit(complete(store.nextId()))
+        runCurrent()
+        store.clear()
+        // No runCurrent(): the consumer has not pruned the buffer yet.
+        assertEquals(3, store.transactions.value.size)
+        assertNull(store.get(2))
+        assertTrue(store.since(0).isEmpty())
+        val next = store.nextId()
+        store.submit(complete(next))
+        runCurrent()
+        assertEquals(listOf(next), store.since(0).map { it.id })
+        assertNotNull(store.get(next))
+    }
+
+    @Test
+    fun eventListenersSeeEveryEventInOrderEvenWhenEventsCollectorsWouldDrop() = runTest {
+        val store = HopiStore(scope = backgroundScope, eventBufferCapacity = 1)
+        val seen = mutableListOf<Long>()
+        val remove = store.addEventListener { if (it is TransactionEvent.Completed) seen += it.transaction.id }
+        for (n in 1..50) store.submit(complete(store.nextId()))
+        runCurrent()
+        assertEquals((1L..50L).toList(), seen)
+        remove()
+        store.submit(complete(store.nextId()))
+        runCurrent()
+        assertEquals(50, seen.size)
+    }
 }

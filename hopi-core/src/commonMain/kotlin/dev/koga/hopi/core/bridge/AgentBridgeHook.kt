@@ -12,12 +12,13 @@ public fun interface AgentBridgeStarter {
 }
 
 /**
- * The single point where the agent bridge implementation plugs in. Until a [AgentBridgeStarter] is
- * registered, a requested bridge is not started.
+ * The single point where the agent bridge plugs in. The starter is core's own platform bridge
+ * (Android `LocalServerSocket`, iOS and JVM loopback plus token); [register] replaces it, which
+ * tests use to observe a request without binding a socket.
  */
 @HopiInternalApi
 public object AgentBridgeHook {
-    private val starter = AtomicReference<AgentBridgeStarter?>(null)
+    private val starter = AtomicReference(AgentBridgeStarter(::startPlatformAgentBridge))
     private val started = AtomicBoolean(false)
 
     public fun register(starter: AgentBridgeStarter) {
@@ -25,11 +26,12 @@ public object AgentBridgeHook {
     }
 
     /**
-     * Starts the bridge for [store] the first time it is called with a starter registered; later
-     * calls do nothing. Returns false when no starter is registered.
+     * Starts the bridge for [store] the first time it is called; later calls do nothing. The
+     * platform starter binds and accepts on its own background thread, so this returns at once.
+     * Returns true when a starter is registered (always, unless replaced by one that is not).
      */
     public fun requestStart(store: HopiStore): Boolean {
-        val current = starter.load() ?: return false
+        val current = starter.load()
         if (started.compareAndSet(false, true)) current.start(store)
         return true
     }
