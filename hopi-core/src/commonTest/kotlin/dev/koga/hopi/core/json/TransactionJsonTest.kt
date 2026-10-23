@@ -1,0 +1,162 @@
+package dev.koga.hopi.core.json
+
+import dev.koga.hopi.core.complete
+import dev.koga.hopi.core.model.CapturedBody
+import dev.koga.hopi.core.pending
+import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.core.textBody
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+class TransactionJsonTest {
+    @Test
+    fun summaryLineHasTheContractShape() {
+        val tx = pending(42).completed(200, emptyList(), CapturedBody(ByteArray(10), 5120, true, "application/json", null), 183, null)
+        assertEquals(
+            "{\"hopi\":1,\"id\":42,\"method\":\"GET\",\"url\":\"https://api.example.com/users?page=2\"," +
+                "\"code\":200,\"ms\":183,\"reqBytes\":0,\"resBytes\":5120,\"state\":\"complete\"}",
+            TransactionJson.summaryLogLine(tx, Redactor.Default),
+        )
+        assertEquals(
+            "{\"type\":\"transaction\",\"id\":42,\"method\":\"GET\",\"url\":\"https://api.example.com/users?page=2\"," +
+                "\"code\":200,\"ms\":183,\"reqBytes\":0,\"resBytes\":5120,\"state\":\"complete\"}",
+            TransactionJson.bridgeSummary(tx, Redactor.Default),
+        )
+    }
+
+    @Test
+    fun failedSummaryCarriesTheError() {
+        val tx = pending(3, method = "POST").failed("java.io.IOException: \"reset\"", 12)
+        assertEquals(
+            "{\"hopi\":1,\"id\":3,\"method\":\"POST\",\"url\":\"https://api.example.com/users?page=2\"," +
+                "\"code\":null,\"ms\":12,\"reqBytes\":0,\"resBytes\":0,\"state\":\"failed\",\"error\":\"java.io.IOException: \\\"reset\\\"\"}",
+            TransactionJson.summaryLogLine(tx, Redactor.Default),
+        )
+    }
+
+    @Test
+    fun summaryRedactsTheUrl() {
+        val line = TransactionJson.summaryLogLine(pending(1, url = "https://h/?token=abc"), Redactor.create(queryParameters = listOf("token")))
+        assertTrue("\"url\":\"https://h/?token=<redacted>\"" in line, line)
+    }
+
+    @Test
+    fun errorMessagesMentioningTheUrlAreRedacted() {
+        val url = "https://h/?token=abc"
+        val tx = pending(1, url = url).failed("HttpRequestTimeoutException: Request timeout has expired [url=$url]", 5)
+        val redactor = Redactor.create(queryParameters = listOf("token"))
+        for (json in listOf(TransactionJson.summaryLogLine(tx, redactor), TransactionJson.bridgeDetail(tx, redactor))) {
+            assertTrue("abc" !in json, json)
+            assertTrue("[url=https://h/?token=<redacted>]" in json, json)
+        }
+        assertTrue("token=abc]" in TransactionJson.summaryLogLine(tx, Redactor.Disabled))
+    }
+
+    @Test
+    fun longUrlsAreCutBelowTheByteCapAndMarked() {
+        for (unit in listOf("a", "é", "😀", "\"", "\u0001", "中")) {
+            val url = "https://h/" + unit.repeat(5000)
+            val line = TransactionJson.summaryLogLine(pending(1, url = url), Redactor.Default)
+            val bytes = line.encodeToByteArray().size
+            assertTrue(bytes < 4000, "unit=$unit bytes=$bytes")
+            assertTrue(bytes > 3900, "cut too aggressively: unit=$unit bytes=$bytes")
+            assertTrue(line.endsWith(",\"urlTruncated\":true}"), line.takeLast(40))
+            val parsedUrl = line.substringAfter("\"url\":\"").substringBefore("\",\"code\"")
+            assertTrue(!parsedUrl.last().isHighSurrogate())
+        }
+        val short = TransactionJson.summaryLogLine(pending(1), Redactor.Default)
+        assertTrue("urlTruncated" !in short)
+    }
+
+    @Test
+    fun aSmallerBudgetCutsTheUrlAndKeepsTheLineParseable() {
+        val url = "https://bucket.s3.amazonaws.com/key?X-Amz-Signature=" + "f".repeat(1500)
+        val line = TransactionJson.summaryLogLine(pending(1, url = url), Redactor.Default, maxBytes = 1000)
+        val bytes = line.encodeToByteArray().size
+        assertTrue(bytes in 900..1000, "bytes=$bytes")
+        val parsed = assertNotNull(parseFlatJsonObject(line), line)
+        assertEquals(true, parsed["urlTruncated"])
+        assertTrue(url.startsWith(parsed["url"] as String))
+    }
+
+    @Test
+    fun aLongErrorIsBudgetedTogetherWithTheUrl() {
+        val url = "https://h/" + "u".repeat(900)
+        val error = "IOException: " + "\"e\"".repeat(200)
+        for (maxBytes in listOf(1000, TransactionJson.MAX_SUMMARY_LINE_BYTES)) {
+            val line = TransactionJson.summaryLogLine(pending(1, url = url).failed(error, 5), Redactor.Default, maxBytes)
+            assertTrue(line.encodeToByteArray().size <= maxBytes, "maxBytes=$maxBytes size=${line.encodeToByteArray().size}")
+            val parsed = assertNotNull(parseFlatJsonObject(line), line)
+            assertTrue(error.startsWith(parsed["error"] as String))
+            assertTrue(url.startsWith(parsed["url"] as String))
+            if (maxBytes == 1000) {
+                assertEquals(true, parsed["urlTruncated"])
+                assertEquals(true, parsed["errorTruncated"])
+                assertTrue((parsed["error"] as String).length >= 100, "the error keeps a fair share")
+            } else {
+                assertEquals(null, parsed["urlTruncated"])
+                assertEquals(null, parsed["errorTruncated"])
+            }
+        }
+    }
+
+    @Test
+    fun errorAndMethodCutsNeverSplitASurrogatePair() {
+        val error = "a".repeat(511) + "😀 tail"
+        val method = "M".repeat(63) + "😀"
+        val line = TransactionJson.summaryLogLine(pending(1, method = method).failed(error, 5), Redactor.Default)
+        assertTrue(line.indices.all { i ->
+            val c = line[i]
+            when {
+                c.isHighSurrogate() -> i + 1 < line.length && line[i + 1].isLowSurrogate()
+                c.isLowSurrogate() -> i > 0 && line[i - 1].isHighSurrogate()
+                else -> true
+            }
+        }, "no unpaired surrogate in the line")
+        val parsed = assertNotNull(parseFlatJsonObject(line), line)
+        assertEquals("a".repeat(511), parsed["error"])
+        assertEquals("M".repeat(63), parsed["method"])
+    }
+
+    @Test
+    fun detailEncodesBodiesAsUtf8OrBase64AndRedacts() {
+        val tx = pending(
+            7,
+            method = "POST",
+            url = "https://h/?token=abc",
+            headers = listOf("Authorization" to "Bearer x", "Accept" to "*/*"),
+            body = CapturedBody(byteArrayOf(0, 1, -1), 3, false, "application/octet-stream", null),
+        ).completed(201, listOf("Set-Cookie" to "s=1"), textBody("{\"ok\":true}"), 9, "HTTP/2.0")
+        val json = TransactionJson.bridgeDetail(tx, Redactor.create(queryParameters = listOf("token")))
+        assertEquals(
+            "{\"type\":\"transaction\",\"id\":7,\"startedAt\":1700000000000,\"method\":\"POST\"," +
+                "\"url\":\"https://h/?token=<redacted>\",\"state\":\"complete\",\"code\":201,\"ms\":9," +
+                "\"protocol\":\"HTTP/2.0\",\"error\":null," +
+                "\"request\":{\"headers\":[[\"Authorization\",\"<redacted>\"],[\"Accept\",\"*/*\"]]," +
+                "\"body\":{\"encoding\":\"base64\",\"data\":\"AAH/\",\"truncated\":false,\"capturedBytes\":3,\"totalBytes\":3," +
+                "\"contentType\":\"application/octet-stream\",\"skippedReason\":null}}," +
+                "\"response\":{\"headers\":[[\"Set-Cookie\",\"<redacted>\"]]," +
+                "\"body\":{\"encoding\":\"utf8\",\"text\":\"{\\\"ok\\\":true}\",\"truncated\":false,\"capturedBytes\":11,\"totalBytes\":11," +
+                "\"contentType\":\"application/json\",\"skippedReason\":null}}}",
+            json,
+        )
+    }
+
+    @Test
+    fun detailWithoutBodies() {
+        val json = TransactionJson.bridgeDetail(complete(1), Redactor.Disabled)
+        assertTrue(json.endsWith("\"request\":{\"headers\":[],\"body\":null},\"response\":{\"headers\":[[\"Content-Type\",\"application/json\"]],\"body\":null}}"), json)
+    }
+
+    @Test
+    fun utf8LengthMatchesEncoding() {
+        for (s in listOf("", "abc", "é中😀")) {
+            assertEquals(s.encodeToByteArray().size, TransactionJson.utf8Length(s), s)
+        }
+        for (s in listOf("\uD800x", "x\uDC00")) {
+            assertTrue(TransactionJson.utf8Length(s) >= s.encodeToByteArray().size, "lone surrogates are an upper bound")
+        }
+    }
+}

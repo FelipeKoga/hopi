@@ -1,0 +1,18 @@
+language = C
+package = dev.koga.hopi.core.internal.oslog
+headerFilter = hopi-oslog-shim-only
+---
+// os_log is a variadic macro whose format string must live in the binary image, so it cannot be
+// called from Kotlin directly; this shim is compiled into the klib. The headers are included here,
+// not listed in `headers`, and the filter matches no header, so only the shim gets a binding.
+#include <os/log.h>
+#include <dispatch/dispatch.h>
+
+static inline void hopi_os_log_line(const char *line) {
+    static os_log_t handle;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        handle = os_log_create("dev.koga.hopi", "http");
+    });
+    os_log(handle, "%{public}s", line);
+}

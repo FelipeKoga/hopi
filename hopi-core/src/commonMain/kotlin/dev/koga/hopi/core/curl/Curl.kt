@@ -1,0 +1,135 @@
+package dev.koga.hopi.core.curl
+
+import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.core.body.textOrNull
+import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.redact.Redactor
+
+/** File name the binary-body note tells the user to create; the command reads it with `@`. */
+@HopiInternalApi
+public const val CURL_BINARY_BODY_FILE: String = "body.bin"
+
+/**
+ * The request as a single-line POSIX shell `curl` command. Comment lines (`# warning:` or
+ * `# note:`) precede it whenever the command cannot reproduce the request byte for byte.
+ * `Content-Length` and `Transfer-Encoding` are left to curl, which frames the body it sends.
+ */
+@HopiInternalApi
+public fun toCurl(transaction: HttpTransaction, redaction: Redactor = Redactor.Default): String {
+    val comments = StringBuilder()
+    val headers = StringBuilder()
+    var contentType: String? = null
+    var declaredLength: String? = null
+    var transferEncoding = false
+    var compressed = false
+    for ((name, value) in transaction.requestHeaders) {
+        when {
+            name.equals("Content-Length", ignoreCase = true) -> {
+                declaredLength = value.trim()
+                continue
+            }
+            name.equals("Transfer-Encoding", ignoreCase = true) -> {
+                transferEncoding = true
+                continue
+            }
+            name.equals("Content-Type", ignoreCase = true) -> contentType = value
+            name.equals("Accept-Encoding", ignoreCase = true) && advertisesCompression(value) -> compressed = true
+        }
+        headers.append(" -H ")
+        val shown = redaction.headerValue(name, value)
+        // curl drops a header written as `Name:` with nothing after it; `Name;` sends it empty.
+        appendShellQuoted(headers, if (shown.isBlank()) "$name;" else "$name: $shown")
+    }
+    if (compressed) headers.append(" --compressed")
+
+    val data = StringBuilder()
+    var sentBytes = 0
+    val body = transaction.requestBody
+    val isMultipart = (contentType ?: body?.contentType)?.trim()?.startsWith("multipart/", ignoreCase = true) == true
+    when {
+        body == null -> if (isMultipart) multipartWarning(comments)
+        body.skippedReason != null || isMultipart -> {
+            if (isMultipart) {
+                multipartWarning(comments)
+            } else {
+                comments.append("# warning: request body was not captured (")
+                    .append(body.skippedReason)
+                    .append("); this command sends no body\n")
+            }
+        }
+        body.bytes.isEmpty() -> Unit
+        else -> {
+            if (body.truncated) {
+                comments.append("# warning: request body truncated to ")
+                    .append(body.bytes.size)
+                    .append(" of ")
+                    .append(body.totalBytes?.toString() ?: "unknown")
+                    .append(" bytes; this command sends the truncated body\n")
+            }
+            sentBytes = body.bytes.size
+            val text = body.textOrNull()
+            if (text != null) {
+                data.append(" --data-raw ")
+                appendShellQuoted(data, text)
+            } else {
+                comments.append("# note: binary request body (")
+                    .append(body.bytes.size)
+                    .append(" bytes) is not inlined; save it as ")
+                    .append(CURL_BINARY_BODY_FILE)
+                    .append(" before running this command\n")
+                data.append(" --data-binary '@").append(CURL_BINARY_BODY_FILE).append('\'')
+            }
+        }
+    }
+    if (declaredLength != null && declaredLength != sentBytes.toString()) {
+        comments.append("# note: Content-Length header (").append(declaredLength)
+            .append(") omitted; curl sends the length of the body in this command (").append(sentBytes).append(")\n")
+    }
+    if (transferEncoding) {
+        comments.append("# note: Transfer-Encoding header omitted; curl frames the body itself\n")
+    }
+
+    val command = StringBuilder("curl ")
+    if (transaction.method.equals("HEAD", ignoreCase = true) && data.isEmpty()) {
+        // -X HEAD makes curl wait for a body a HEAD response never sends.
+        command.append("-I")
+    } else {
+        command.append("-X ")
+        appendMethod(command, transaction.method)
+    }
+    command.append(' ')
+    appendShellQuoted(command, redaction.url(transaction.url))
+    command.append(headers).append(data)
+    return if (comments.isEmpty()) command.toString() else comments.append(command).toString()
+}
+
+private fun multipartWarning(comments: StringBuilder) {
+    comments.append("# warning: multipart request body is not reproduced; this command sends no body\n")
+}
+
+/** POSIX single quoting: everything literal, `'` becomes `'\''`. */
+@HopiInternalApi
+public fun appendShellQuoted(out: StringBuilder, value: String) {
+    out.append('\'')
+    var runStart = 0
+    var quote = value.indexOf('\'')
+    while (quote >= 0) {
+        out.append(value, runStart, quote).append("'\\''")
+        runStart = quote + 1
+        quote = value.indexOf('\'', runStart)
+    }
+    out.append(value, runStart, value.length).append('\'')
+}
+
+private fun appendMethod(out: StringBuilder, method: String) {
+    val isToken = method.isNotEmpty() && method.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '-' || it == '_' }
+    if (isToken) out.append(method) else appendShellQuoted(out, method)
+}
+
+private fun advertisesCompression(acceptEncoding: String): Boolean =
+    acceptEncoding.split(',').any { token ->
+        when (token.substringBefore(';').trim().lowercase()) {
+            "gzip", "deflate", "br" -> true
+            else -> false
+        }
+    }

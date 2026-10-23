@@ -28,3 +28,4 @@ dependencyResolutionManagement {
 }
 
 include(":hopi-core")
+include(":hopi-ktor")

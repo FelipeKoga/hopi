@@ -8,6 +8,11 @@ plugins {
 kotlin {
     explicitApi()
 
+    compilerOptions {
+        optIn.add("dev.koga.hopi.core.HopiInternalApi")
+        optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
+    }
+
     android {
         namespace = "dev.koga.hopi.core"
         compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -16,12 +21,16 @@ kotlin {
     }
     // Host target so pure-logic tests run in seconds.
     jvm()
-    iosArm64()
-    iosSimulatorArm64()
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.compilations.getByName("main").cinterops.create("oslog") {
+            definitionFile.set(project.file("src/nativeInterop/cinterop/oslog.def"))
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
+            // StateFlow and SharedFlow are part of core's API surface.
+            api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
