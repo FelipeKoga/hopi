@@ -43,8 +43,17 @@ public class Redactor private constructor(
         )
     }
 
+    /**
+     * [url] with its userinfo (`user:password@`) replaced by [REDACTED] and the values of the
+     * redacted query parameters replaced by [REDACTED]. Returns [url] itself when nothing changed.
+     */
     public fun url(url: String): String {
-        if (!enabled || queryParameterNames.isEmpty()) return url
+        if (!enabled) return url
+        val masked = maskUserinfo(url)
+        return if (queryParameterNames.isEmpty()) masked else redactQuery(masked)
+    }
+
+    private fun redactQuery(url: String): String {
         val queryStart = url.indexOf('?')
         if (queryStart < 0) return url
         val fragmentStart = url.indexOf('#', queryStart + 1).let { if (it < 0) url.length else it }
@@ -94,6 +103,25 @@ public class Redactor private constructor(
                 headerNames = headers,
                 queryParameterNames = queryParameters.mapTo(HashSet()) { it.lowercase() },
             )
+        }
+
+        /**
+         * `scheme://userinfo@host…` becomes `scheme://<redacted>@host…`. The authority runs from
+         * `://` to the first `/`, `?` or `#`; its userinfo ends at the last `@` in it. A URL without
+         * userinfo is returned as is.
+         */
+        private fun maskUserinfo(url: String): String {
+            val schemeEnd = url.indexOf("://")
+            if (schemeEnd < 0) return url
+            val authorityStart = schemeEnd + 3
+            var at = -1
+            for (i in authorityStart until url.length) {
+                val c = url[i]
+                if (c == '/' || c == '?' || c == '#') break
+                if (c == '@') at = i
+            }
+            if (at < 0) return url
+            return url.substring(0, authorityStart) + REDACTED + url.substring(at)
         }
 
         private fun percentDecode(text: String, start: Int, end: Int): String {

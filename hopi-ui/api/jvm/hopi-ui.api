@@ -1,0 +1,8 @@
+public final class dev/koga/hopi/ui/HopiLauncherKt {
+	public static final fun HopiLauncher (Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;I)V
+}
+
+public final class dev/koga/hopi/ui/HopiScreenKt {
+	public static final fun HopiScreen (Lkotlin/jvm/functions/Function0;Landroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;II)V
+}
+

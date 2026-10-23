@@ -51,6 +51,24 @@ class RedactorTest {
     }
 
     @Test
+    fun userinfoIsMaskedWheneverRedactionIsOn() {
+        val plain = Redactor.Default
+        assertEquals("https://<redacted>@api.example.com/v1", plain.url("https://alice:s3cret@api.example.com/v1"))
+        assertEquals("http://<redacted>@127.0.0.1:8765", plain.url("http://u@127.0.0.1:8765"))
+        // The userinfo ends at the authority's last `@`; an `@` in the path or query is not userinfo.
+        assertEquals("https://<redacted>@h/p?mail=a@b", plain.url("https://a@b:p@ss@h/p?mail=a@b"))
+        val noUserinfo = "https://h/users/@me?x=a@b#c@d"
+        assertSame(noUserinfo, plain.url(noUserinfo))
+        val both = Redactor.create(queryParameters = listOf("token"))
+        assertEquals("https://<redacted>@h/p?token=<redacted>", both.url("https://u:pw@h/p?token=abc"))
+        assertEquals(
+            "failed to reach https://<redacted>@h/p",
+            plain.textMentioning("failed to reach https://u:pw@h/p", "https://u:pw@h/p"),
+        )
+        assertEquals("https://u:pw@h/p", Redactor.Disabled.url("https://u:pw@h/p"))
+    }
+
+    @Test
     fun disabledModeRedactsNothing() {
         val r = Redactor.create(extraHeaders = listOf("X"), queryParameters = listOf("token"), enabled = false)
         assertFalse(r.enabled)

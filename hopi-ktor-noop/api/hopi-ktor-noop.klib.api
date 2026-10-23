@@ -1,0 +1,48 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <hopi:hopi-ktor-noop>
+final enum class dev.koga.hopi.ktor/HopiLogSink : kotlin/Enum<dev.koga.hopi.ktor/HopiLogSink> { // dev.koga.hopi.ktor/HopiLogSink|null[0]
+    enum entry Off // dev.koga.hopi.ktor/HopiLogSink.Off|null[0]
+    enum entry Summary // dev.koga.hopi.ktor/HopiLogSink.Summary|null[0]
+
+    final val entries // dev.koga.hopi.ktor/HopiLogSink.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<dev.koga.hopi.ktor/HopiLogSink> // dev.koga.hopi.ktor/HopiLogSink.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): dev.koga.hopi.ktor/HopiLogSink // dev.koga.hopi.ktor/HopiLogSink.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<dev.koga.hopi.ktor/HopiLogSink> // dev.koga.hopi.ktor/HopiLogSink.values|values#static(){}[0]
+}
+
+final class dev.koga.hopi.ktor/HopiConfig { // dev.koga.hopi.ktor/HopiConfig|null[0]
+    constructor <init>() // dev.koga.hopi.ktor/HopiConfig.<init>|<init>(){}[0]
+
+    final var agentBridge // dev.koga.hopi.ktor/HopiConfig.agentBridge|{}agentBridge[0]
+        final fun <get-agentBridge>(): kotlin/Boolean // dev.koga.hopi.ktor/HopiConfig.agentBridge.<get-agentBridge>|<get-agentBridge>(){}[0]
+        final fun <set-agentBridge>(kotlin/Boolean) // dev.koga.hopi.ktor/HopiConfig.agentBridge.<set-agentBridge>|<set-agentBridge>(kotlin.Boolean){}[0]
+    final var enabled // dev.koga.hopi.ktor/HopiConfig.enabled|{}enabled[0]
+        final fun <get-enabled>(): kotlin/Boolean // dev.koga.hopi.ktor/HopiConfig.enabled.<get-enabled>|<get-enabled>(){}[0]
+        final fun <set-enabled>(kotlin/Boolean) // dev.koga.hopi.ktor/HopiConfig.enabled.<set-enabled>|<set-enabled>(kotlin.Boolean){}[0]
+    final var logSink // dev.koga.hopi.ktor/HopiConfig.logSink|{}logSink[0]
+        final fun <get-logSink>(): dev.koga.hopi.ktor/HopiLogSink // dev.koga.hopi.ktor/HopiConfig.logSink.<get-logSink>|<get-logSink>(){}[0]
+        final fun <set-logSink>(dev.koga.hopi.ktor/HopiLogSink) // dev.koga.hopi.ktor/HopiConfig.logSink.<set-logSink>|<set-logSink>(dev.koga.hopi.ktor.HopiLogSink){}[0]
+    final var maxBodyBytes // dev.koga.hopi.ktor/HopiConfig.maxBodyBytes|{}maxBodyBytes[0]
+        final fun <get-maxBodyBytes>(): kotlin/Long // dev.koga.hopi.ktor/HopiConfig.maxBodyBytes.<get-maxBodyBytes>|<get-maxBodyBytes>(){}[0]
+        final fun <set-maxBodyBytes>(kotlin/Long) // dev.koga.hopi.ktor/HopiConfig.maxBodyBytes.<set-maxBodyBytes>|<set-maxBodyBytes>(kotlin.Long){}[0]
+    final var maxEntries // dev.koga.hopi.ktor/HopiConfig.maxEntries|{}maxEntries[0]
+        final fun <get-maxEntries>(): kotlin/Int // dev.koga.hopi.ktor/HopiConfig.maxEntries.<get-maxEntries>|<get-maxEntries>(){}[0]
+        final fun <set-maxEntries>(kotlin/Int) // dev.koga.hopi.ktor/HopiConfig.maxEntries.<set-maxEntries>|<set-maxEntries>(kotlin.Int){}[0]
+    final var maxTotalBytes // dev.koga.hopi.ktor/HopiConfig.maxTotalBytes|{}maxTotalBytes[0]
+        final fun <get-maxTotalBytes>(): kotlin/Long // dev.koga.hopi.ktor/HopiConfig.maxTotalBytes.<get-maxTotalBytes>|<get-maxTotalBytes>(){}[0]
+        final fun <set-maxTotalBytes>(kotlin/Long) // dev.koga.hopi.ktor/HopiConfig.maxTotalBytes.<set-maxTotalBytes>|<set-maxTotalBytes>(kotlin.Long){}[0]
+
+    final fun redactHeaders(kotlin/Array<out kotlin/String>...) // dev.koga.hopi.ktor/HopiConfig.redactHeaders|redactHeaders(kotlin.Array<out|kotlin.String>...){}[0]
+    final fun redactQueryParameters(kotlin/Array<out kotlin/String>...) // dev.koga.hopi.ktor/HopiConfig.redactQueryParameters|redactQueryParameters(kotlin.Array<out|kotlin.String>...){}[0]
+    final fun unsafeDisableRedaction() // dev.koga.hopi.ktor/HopiConfig.unsafeDisableRedaction|unsafeDisableRedaction(){}[0]
+}
+
+final val dev.koga.hopi.ktor/Hopi // dev.koga.hopi.ktor/Hopi|{}Hopi[0]
+    final fun <get-Hopi>(): io.ktor.client.plugins.api/ClientPlugin<dev.koga.hopi.ktor/HopiConfig> // dev.koga.hopi.ktor/Hopi.<get-Hopi>|<get-Hopi>(){}[0]

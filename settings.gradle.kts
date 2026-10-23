@@ -29,5 +29,9 @@ dependencyResolutionManagement {
 
 include(":hopi-core")
 include(":hopi-ktor")
+include(":hopi-ktor-noop")
+include(":hopi-ui")
+include(":hopi-ui-noop")
 include(":hopi-cli")
+include(":sample:shared")
 include(":sample:androidApp")

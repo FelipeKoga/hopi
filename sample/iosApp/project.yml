@@ -1,0 +1,64 @@
+# The Xcode project of the iOS sample. iosApp.xcodeproj is generated from this file and checked in,
+# so building needs only Xcode; after editing this file run `xcodegen generate` here
+# (generated with XcodeGen 2.46.0).
+name: iosApp
+options:
+  bundleIdPrefix: dev.koga.hopi
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # The Gradle build phase writes into sample/shared/build, outside what Xcode's script sandbox allows.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  iosApp:
+    type: application
+    platform: iOS
+    # A shared scheme, so `xcodebuild -scheme iosApp` works from a fresh checkout.
+    scheme: {}
+    sources:
+      - path: iosApp
+        excludes:
+          - "Info-*.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.koga.hopi.sample
+        PRODUCT_NAME: HopiSample
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        # The shared framework has no x86_64 simulator slice (iosSimulatorArm64 only), and Release
+        # builds every architecture: without this a Release simulator build fails on x86_64.
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+        # The static framework embedAndSignAppleFrameworkForXcode puts here for this configuration and SDK.
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-framework"
+          - "Shared"
+      configs:
+        # Debug allows cleartext to the dev server on the host loopback only; Release has no ATS exception.
+        Debug:
+          INFOPLIST_FILE: iosApp/Info-Debug.plist
+        Release:
+          INFOPLIST_FILE: iosApp/Info-Release.plist
+    preBuildScripts:
+      - name: Build the shared Kotlin framework
+        basedOnDependencyAnalysis: false
+        shell: /bin/sh
+        script: |
+          # Debug links the real Hopi modules; any other configuration their noop twins
+          # (docs/ARCHITECTURE.md, "Selecting real vs noop").
+          set -eu
+          cd "$SRCROOT/../.."
+          if [ "$CONFIGURATION" = "Debug" ]; then
+            ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true
+          else
+            ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode
+          fi

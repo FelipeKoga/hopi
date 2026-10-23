@@ -17,6 +17,13 @@ class CurlTest {
     }
 
     @Test
+    fun userinfoIsRedactedUnlessRedactionIsDisabled() {
+        val tx = pending(1, url = "https://alice:s3cret@api.example.com/v1")
+        assertEquals("curl -X GET 'https://<redacted>@api.example.com/v1'", toCurl(tx))
+        assertEquals("curl -X GET 'https://alice:s3cret@api.example.com/v1'", toCurl(tx, Redactor.Disabled))
+    }
+
+    @Test
     fun headersInOrderWithDuplicates() {
         val tx = pending(1, headers = listOf("Accept" to "application/json", "X-Trace" to "a", "X-Trace" to "b"))
         assertEquals(

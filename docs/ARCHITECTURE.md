@@ -23,8 +23,9 @@ This document is the contract every module is built against. Change it before ch
 4. **No network exposure.** Nothing listens on a routable interface. The agent channel uses
    device-local transports only (details below) and authenticates every connection.
 5. **Secrets are redacted by default** in every outward channel (UI copy, cURL, logs, agent
-   channel): `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, plus user-configured
-   headers and query parameters. Opting out is explicit.
+   channel): `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, the userinfo of a URL
+   (`https://user:password@host` becomes `https://<redacted>@host`), plus user-configured headers
+   and query parameters. Opting out is explicit.
 6. English everywhere: code, comments, docs, commits.
 
 ## Modules
@@ -35,7 +36,7 @@ This document is the contract every module is built against. Change it before ch
 | `hopi-ktor`      | core, ktor-client-core               | The Ktor client plugin                                     |
 | `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          |
 | `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       |
-| `hopi-ui-noop`   | compose-runtime                      | Same public API as `hopi-ui`, renders nothing         |
+| `hopi-ui-noop`   | compose-runtime, compose-ui          | Same public API as `hopi-ui`, renders nothing         |
 | `hopi-cli`       | JVM, kotlinx-serialization           | Host CLI for developers and AI agents                      |
 | `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests          |
 
@@ -96,8 +97,45 @@ only spawns that thread. `agentBridge = false` never touches the hook.
 ```
 
 The noop twins expose exactly these declarations with the same signatures. `HopiConfig` in
-the noop accepts every setter and ignores it. `HopiScreen` in the noop renders nothing;
-`HopiLauncher` in the noop renders `content()` and nothing else.
+the noop accepts every setter and ignores it (a property reads back what was set, with the same
+defaults); `Hopi` is a `createClientPlugin("Hopi", ::HopiConfig) {}` that registers
+no hook. `HopiScreen` in the noop renders nothing; `HopiLauncher` in the noop renders
+`content()` and nothing else, laid out exactly as the real launcher lays it out (one compose-ui
+`Layout` with the same measure policy: every root child of `content` gets the launcher's own
+constraints unchanged and is placed at the top start, and the launcher is as large as its largest
+child), so a release build has the layout tested in debug. `LauncherLayoutTest`, the same file in
+both modules' JVM tests, checks it. `hopi-ktor-noop` depends on ktor-client-core only (the API names
+`ClientPlugin`). `hopi-ui-noop` depends on compose-runtime and compose-ui and applies only the
+Compose compiler plugin (for the `@Composable` calling convention), not the Compose Multiplatform
+Gradle plugin: compose-ui is there because `HopiScreen`'s `modifier` parameter is
+`androidx.compose.ui.Modifier`, which lives in compose-ui (it brings ui-graphics, ui-text and
+ui-unit, no foundation and no Material). Neither noop depends on `hopi-core`; each noop's JVM
+tests assert that its test runtime classpath holds no `hopi-core` and that core's classes
+cannot be loaded.
+
+**Parity is checked mechanically.** The four modules enable the Kotlin Gradle plugin's built-in ABI
+validation (`kotlin { abiValidation { … } }`, KGP 2.4.20, `@ExperimentalAbiValidation`), which
+writes JVM, Android and klib (iOS) dumps to each module's `api/` directory (`updateKotlinAbi`) and
+fails `check` when the code no longer matches them (`checkKotlinAbi`). The dumps are checked in.
+The root task `:checkNoopParity` (part of the root `check`) runs every `checkKotlinAbi` of both
+sides, then compares each real module's dumps with its twin's file by file, line by line; the only
+normalisation is the module's own name in the dump file names and in the klib dump's
+`// Library unique name:` line. A declaration on one side only, a different signature, or a
+missing target fails the build with the differing lines. The two UI modules exclude the same
+Compose compiler output from their dumps (`**.ComposableSingletons.*` lambda holders and the
+`$stableprop`/`$stableprop_getter` stability markers of internal classes): it is public in the
+binary but no declaration of ours, and the noop has none of it. A change to the consumer API is
+therefore made in both modules and both dumps together
+(`./gradlew :hopi-ktor:updateKotlinAbi :hopi-ktor-noop:updateKotlinAbi`, and the same
+for the UI).
+
+The dumps hold signatures, not initializers, so they cannot see a default that changed on one
+side (the noop cannot take core's constants: it copies them). `DefaultsParityTest` in
+`hopi-ktor-noop`'s JVM tests closes that gap: it loads the real `hopi-ktor` and its
+`hopi-core` from a resolvable configuration of their own (`realKtorJvm`, handed to the test as
+a system property, never on the noop's test classpath) in a child-first classloader, and compares
+every public getter of a fresh `HopiConfig`, the class's runtime-visible annotations, and
+`HopiLogSink`'s entries in order.
 
 ### Selecting real vs noop in a KMP project
 
@@ -114,8 +152,23 @@ commonMain.dependencies {
 
 Debug builds pass `-Phopi.enabled=true` (Android Studio run configuration, the Xcode build
 phase that calls Gradle). Release builds get the noop unless someone deliberately passes the flag.
-The sample app will demonstrate this once the noop twins exist; until then `sample/androidApp`
-depends on `hopi-ktor` directly (see Sample app).
+
+An Android-only app module does have build types, so it can select with `debugImplementation`
+(real) and `releaseImplementation` (noop) instead. An app module that consumes a KMP shared module
+must not: the shared module already brings one of the two, and real and noop declare the same
+classes. `sample/androidApp` therefore names neither and takes whatever `sample/shared` selected.
+
+The sample checks the switch mechanically. `:sample:androidApp:verifyReleaseUsesNoop` reads the
+class definitions of the release APK's dex files and fails unless the release runtime classpath
+holds exactly `:hopi-ktor-noop` and `:hopi-ui-noop`, the APK has no
+`dev.koga.hopi.core` class, and its Hopi classes (outside `dev.koga.hopi.sample`, D8's
+`$$ExternalSynthetic…` classes counted as their owner's) are exactly those the noop twins' jars
+hold. `:sample:androidApp:verifyHopiSelection` makes the same comparison for whatever the
+property selected, so with `-Phopi.enabled=true` it requires `:hopi-core`,
+`:hopi-ktor` and `:hopi-ui` and all of their classes (it is part of the app's `check`).
+Measured on this change: 12 Hopi classes and 0 core classes without the flag, 345 and 97 with
+it (the noop launcher's layout policy added two classes; earlier counts were 10 and 327). On iOS, a framework linked without the flag has no
+`kfun:dev.koga.hopi.core` symbol; the Debug app the Xcode project builds has 503.
 
 ## Data model (`hopi-core`)
 
@@ -271,7 +324,8 @@ request bodies and multipart requests produce a cURL with a leading `# warning:`
 instead of a silently wrong command. `Content-Length` and `Transfer-Encoding` request headers are
 not emitted, since curl frames the body it sends; a `# note:` line says so when the captured
 `Content-Length` differs from the bytes the command sends, and whenever `Transfer-Encoding` is
-dropped. Redacted header values become `<redacted>`.
+dropped. Redacted header values become `<redacted>`, and the URL is the redactor's (userinfo and
+redacted query values masked).
 
 The command is one line; comment lines precede it. A method that is not a plain token is quoted.
 A binary body is written as `--data-binary '@body.bin'` preceded by
@@ -467,8 +521,8 @@ bounds the work.)
 
 Full detail encodes bodies as `{"encoding":"utf8","text":"…"}` when decodable as UTF-8 text,
 otherwise `{"encoding":"base64","data":"…"}`, plus `truncated`, `totalBytes`, `contentType`,
-`skippedReason`. Redaction applies to everything sent over the bridge: header values and query
-parameters. Bodies are sent as captured, so a server that echoes a credential in its response
+`skippedReason`. Redaction applies to everything sent over the bridge: header values, query
+parameters and the URL's userinfo. Bodies are sent as captured, so a server that echoes a credential in its response
 body shows it (the sample dev server masks credentials in its echo for that reason).
 
 Full detail shape: `{"type":"transaction","id","startedAt","method","url","state","code","ms",
@@ -595,35 +649,140 @@ tail | head -1`) the CLI exits 0 without a message.
 
 ## Sample app (`sample/`)
 
-`sample/androidApp` is the start of the CMP sample, Android only for now: one Compose (foundation
-only) activity, `applicationId` `dev.koga.hopi.sample`, a Ktor OkHttp client with
-`agentBridge = true` and `logSink = Summary`. "Fire requests" sends, one after the other, a GET
-returning JSON, a POST with a JSON body and an `Authorization` header, a 404, a GET to an
-unresolvable `.invalid` host, a response larger than 256 KB and a chunked response. "Bridge
-self-check" connects to the app's own bridge as the app's uid and logs the `hello` reply under the
-`HopiSample` tag, its `proof` value replaced by `<redacted>`; `am start … --es selfCheck <process name>` runs it at launch against another
-app's bridge, and a second install built with `-Psample.applicationIdSuffix=.probe` (another uid)
-uses that to prove the bridge cannot be reached from another app. `am start … --es squat <process
-name>` makes that second install bind the other app's socket name first and answer with a forged
-`hello` (right app id, no proof) plus one forged transaction, to prove the CLI refuses a squatter.
+A Compose Multiplatform app for Android and iOS that makes real requests to a dev server on the
+host, so the inspector, the log stream and the CLI can be exercised (and measured) end to end.
+
+- **`sample/shared`** (KMP: `android`, `iosArm64`, `iosSimulatorArm64`; foundation only, no
+  Material) holds everything both apps share. It selects `hopi-ktor`/`hopi-ui` or their
+  noop twins with the `hopi.enabled` property exactly as in "Selecting real vs noop", and
+  generates `HOPI_ENABLED` from the same property, so the app says which one it was built
+  with. One process-wide Ktor client (`SampleHttp`; OkHttp on Android, Darwin on iOS,
+  `ContentNegotiation` with kotlinx-serialization JSON) installs Hopi with
+  `logSink = Summary` and `agentBridge = true`. The UI, wrapped in `HopiLauncher`, is a small
+  shop with three tabs: **Items** (`GET /items`, a lazy list keyed by id, then `GET /items/{id}`
+  for the detail), **New item** (a validated form that POSTs JSON to `/items` with an
+  `Authorization` header and opens the created item), and **Diagnostics**, whose "Fire requests"
+  sends, one after the other, a GET returning JSON, a POST with a JSON body and an `Authorization`
+  header, a 404, a GET to an unresolvable `.invalid` host, a response larger than 256 KB and a
+  chunked response. Two more buttons serve the device checks: "Slow request (60 s)" (`GET /slow`,
+  a transaction that stays pending for a minute) and "Create 500 items" (500 `POST /items`, 8 at a
+  time), which fills the store to its default 500 entries and gives the app's own item list as
+  many rows, so scrolling the inspector and scrolling the app can be compared. The back gesture (ui-backhandler `BackHandler`) returns to the item list. iOS
+  gets `MainViewController()`, a `ComposeUIViewController`; the static framework is `Shared`.
+- **`sample/androidApp`** (`applicationId` `dev.koga.hopi.sample`) hosts the shared UI in one
+  activity and depends on `sample/shared` only. It adds what only Android has, as a Diagnostics
+  button and two intent extras. "Bridge self-check" connects to the app's own bridge as the app's
+  uid and logs the `hello` reply under the `HopiSample` tag, its `proof` value replaced by
+  `<redacted>`; `am start … --es selfCheck <process name>` runs it at launch (opening Diagnostics)
+  against another app's bridge, and a second install built with
+  `-Psample.applicationIdSuffix=.probe` (another uid) uses that to prove the bridge cannot be
+  reached from another app. `am start … --es squat <process name>` makes that second install bind
+  the other app's socket name first and answer with a forged `hello` (right app id, no proof) plus
+  one forged transaction, to prove the CLI refuses a squatter. **Both need the real bridge, so the
+  APKs for these checks are built with `-Phopi.enabled=true`**
+  (`./gradlew :sample:androidApp:installDebug -Phopi.enabled=true`); a debug build without
+  the flag packages the noop like a release build does.
+- **`sample/iosApp`**: a SwiftUI app (bundle id `dev.koga.hopi.sample`, iOS 16+) whose only
+  view hosts `MainViewController()`. `project.yml` describes it and the checked-in
+  `iosApp.xcodeproj` is generated from it with XcodeGen (2.46.0); no CocoaPods, no SwiftPM. A
+  pre-build phase runs `./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode`, with
+  `-Phopi.enabled=true` for the Debug configuration only, so Release links the noop twins.
+  Script sandboxing is off for that phase (Gradle writes to `sample/shared/build`). ATS: the Debug
+  configuration's `Info-Debug.plist` allows insecure HTTP loads to `127.0.0.1` and `localhost`
+  only (`NSExceptionDomains`; no `NSAllowsArbitraryLoads`, no `NSAllowsLocalNetworking`);
+  `Info-Release.plist` has no ATS exception. Run on an iPhone 16 simulator (iOS 18.2), both
+  configurations reach `http://127.0.0.1:8765`: ATS does not apply to IP address literals, so the
+  `127.0.0.1` exception is not what lets the requests through (the `localhost` one is the exception
+  that matters, and the sample does not use that name). The simulator build excludes `x86_64`
+  (`EXCLUDED_ARCHS[sdk=iphonesimulator*]`), since the framework has only an `iosSimulatorArm64`
+  slice and a Release build otherwise builds, and fails on, every architecture.
 
 `sample/devserver/devserver.py` (Python 3 standard library, bound to `127.0.0.1:8765`) serves those
-routes and logs every request as one JSON line on stdout. The emulator reaches it with
-`adb reverse tcp:8765 tcp:8765`; the debug build's network security config allows cleartext to
-`127.0.0.1` only. Nothing reaches an external network.
+routes (`/slow?s=N` sends a chunked body over N seconds, one chunk every 5 s so no client read
+timeout fires; `/items` keeps created items in memory until it exits and answers 400 to a body that is not
+an item) and logs every request as one JSON line on stdout. The Android emulator reaches it with
+`adb reverse tcp:8765 tcp:8765`; the iOS simulator shares the host's loopback, so it needs nothing.
+The Android debug build's network security config allows cleartext to `127.0.0.1` only. Nothing
+reaches an external network.
 
 ## UI (`hopi-ui`)
 
 Compose Multiplatform, no Material dependency (foundation only), monochrome, dense, fast:
 
 - **List:** newest first; method, status code, host + path, duration, size; Pending/Failed visible at
-  a glance. Search by URL substring, filter by status class. Lazy list keyed by id; `transactions`
-  collected with `collectAsState`; no per-row formatting work beyond what is visible.
+  a glance. Search by URL substring, filter by status class (2xx, 3xx, 4xx, 5xx, failed, pending,
+  each chip with its count). Lazy list keyed by id. `transactions` is collected only while
+  `HopiScreen` is composed (a `produceState`, not `collectAsState`, so that the mapping runs
+  off the main thread): each emission goes through a row cache on `Dispatchers.Default` that keeps
+  one precomputed row (every string the row shows) per id and rebuilds it only when that id maps
+  to a different snapshot instance (the store replaces, never mutates; `HttpTransaction.equals`
+  compares body bytes, so identity is the cheap and exact test), then through the search and
+  filter. Composing a row formats nothing. URLs shown, searched, copied and shared are the store
+  `redactor`'s, which masks the userinfo (`https://<redacted>@host/…`), so a password in a URL is
+  never shown, found by search or copied; only `unsafeDisableRedaction()` on every installation
+  shows it. The row's host line drops the userinfo in any case.
 - **Detail:** Overview (URL, method, code, duration, sizes, protocol), Request (headers, body),
-  Response (headers, body). JSON bodies pretty-printed lazily off the main thread and cached.
-  Truncation and skip reasons visible.
-- **Actions:** copy cURL, copy URL, copy response body, share (platform share sheet), clear.
-- **Launcher:** a small draggable floating button over the app content opening the screen.
+  Response (headers, body). Headers redacted by the store's `redactor`. Body views (strict UTF-8
+  decode, core's `prettyPrintJson`, a hex preview of the first 512 bytes for binary bodies) are
+  computed on `Dispatchers.Default` and cached by body instance (at most 16 bodies and 4M
+  characters of formatted text, least recently used first; the view just formatted is kept even
+  when it alone is larger), then cut into pieces of at most 64 lines and 4096 chars, so a large
+  body is many lazy items and never one text layout. The pieces are the only copy of the text a
+  view keeps (with one flag per piece for the newline it dropped); copy rebuilds the text from
+  them off the main thread. The cache lives only while the screen is composed. A detail is
+  formatted again when its transaction's snapshot or the store's `redactor` changes (the redactor
+  grows when another client installs the plugin; it is read on each store emission, so the open
+  detail follows it at the next request). Truncation and skip reasons visible. Text is selectable
+  (within the pieces on screen).
+- **Actions:** copy cURL (core's `toCurl` with the store's `redactor`), copy URL, copy response
+  body, share, clear. Copy uses Compose's text clipboard. A clip crosses the same binder limit as
+  an intent (past about 1 MB `setPrimaryClip` throws in the app), so copied text is cut at
+  100 000 chars too, at a code point boundary, and the confirmation says so ("Response body
+  copied (first 100k characters)"); a clipboard that still throws shows "… could not be copied"
+  instead of crashing the app. The confirmation is a polite live region, so TalkBack and VoiceOver
+  announce it. Share is the platform sheet (`Intent.ACTION_SEND` on Android,
+  `UIActivityViewController` on iOS) with the method, URL, status, duration and cURL, cut at
+  100 000 chars (the Android binder limit); the JVM has no share sheet, so the action is absent
+  there.
+- **Launcher:** a small draggable floating button over the app content opening the screen full
+  screen. It never touches the store (resolving `HopiStore.default` only when the screen
+  opens), recomposes only when tapped (dragging moves it in the layout phase), keeps its position
+  with `rememberSaveable` as fractions of the safe area and settles on the nearer side edge. The
+  content is laid out as by the noop (see Consumer API): its constraints pass through unchanged,
+  and the button and the screen cover exactly the content's area, which is the window when the
+  app's root fills it (wrap the app's root, as the sample does). While the screen is open the
+  app's content is hidden from accessibility services, cannot hold or take focus (opening clears
+  focus, so a focused field of the app drops the keyboard and stops receiving keys; a focus group
+  cancels any focus entering it), and, once the enter transition has ended, is not drawn: the
+  launcher skips drawing it (`drawWithContent`, reading the transition state in the draw phase
+  only), so the opaque screen is not drawn over a full-window layer of the app on every frame. The
+  app stays composed, so its state survives, and draws again as soon as the screen starts to
+  leave.
+- **Back:** the system back gesture (ui-backhandler `BackHandler`) leaves a detail, then calls
+  `onClose`.
+- **System bars:** the screen covers the host window's bar areas, so while it is composed it sets
+  the bars' icons dark over its light background and light over its dark one, on Android
+  (`WindowInsetsController.setSystemBarsAppearance` on API 30+, the `SYSTEM_UI_FLAG_LIGHT_*` flags
+  below; no androidx.core), and restores the host's appearance when it leaves. API 30 reads an
+  appearance of 0 until the app itself called `setSystemBarsAppearance`, even when its theme
+  made the bars light, so on API 30 the screen first calls `setSystemBarsAppearance(0, 0)`, which
+  makes the controller own the appearance the window derived from the theme and legacy flags, and
+  reads it then (androidx's `WindowInsetsControllerCompat` does the same). Not run on an API 30
+  device yet. Without it, a host
+  with light icons (any app not calling `enableEdgeToEdge`, the sample before this change) showed
+  white icons on the light inspector. iOS asks the view controller for the status bar style, which
+  follows the system appearance there, so iOS does nothing.
+- **Design:** foundation only, no Material; monochrome greys, light or dark following the system;
+  the platform's default and monospace fonts; touch targets of at least 48 dp; content
+  descriptions on icon-only controls and on the status badges; containers that hold text have
+  minimum sizes, never fixed ones, so a large font scale (200% on Android, accessibility Dynamic
+  Type on iOS) grows them instead of clipping their text, and a status badge widens rather than
+  wrapping its code; a binary body's hex dump scrolls sideways; safe-drawing insets respected;
+  short transitions only on open, close and list/detail navigation.
+
+Opening the screen before any client installed the plugin creates the default store with default
+caps (`HopiStore.default` creates it on first access); a later installation's caps then do not
+apply. Install the plugin when the app starts.
 
 ## Performance budget
 
@@ -659,3 +818,39 @@ Concretely, when nothing is looking (screen closed, no agent connected, log sink
 When the screen is open, the list renders only visible rows (lazy, keyed, precomputed row strings
 built once per transaction), detail formatting runs on `Dispatchers.Default`, and nothing animates
 continuously. These rules are reviewed in every phase and measured in the sample app.
+
+Measured on device (phase 3 acceptance, sample debug builds, API 35 emulator and an
+iPhone 16 simulator on iOS 18.2):
+
+- **Idle, launcher visible, screen closed, 60 s** (`/proc/<pid>/stat` and every
+  `/proc/<pid>/task/*/stat`): the real build and the noop build both use 0 CPU ticks once ART's
+  post-install `Profile Saver`/JIT work is over (that first window costs both, 9 to 19 ticks), and
+  draw 0 frames. The real build has 2 more threads; the one of Hopi's own,
+  `hopi-bridge` (blocked in `accept()`), uses 0 ticks. On iOS the Debug (real) app used
+  0.18 to 0.19 s of CPU per minute and the Release (noop) app 0.11 s, both near 0%; per thread
+  (`ps -M`) the bridge thread uses 0 and the difference is in the Kotlin/Native GC's own thread,
+  which both builds run. Debug and Release differ in optimisation too, so that comparison is not
+  exact.
+- **Scrolling 500 transactions** (identical flings, `dumpsys gfxinfo` summary plus `framestats`,
+  UI thread = `Vsync` to `SyncQueued`), measured again on the build that stops drawing the hidden
+  app (debug, `-Phopi.enabled=true`, default headless renderer, SwiftShader, guest load under
+  2, 6 rounds of two flings each, the inspector opened over the app's own item list): the
+  inspector list had 1 to 6.2% janky frames per round, p95 29 to 61 ms, GPU 17 ms at the median,
+  UI thread 1.9 to 4.0 ms at the median and 6 to 13 ms at p95. The app's own list on the same
+  emulator: 21 to 27% janky, p95 53 to 61 ms, GPU 20 to 21 ms, UI thread 7.5 to 10 ms at the median
+  and 15 to 18 ms at p95. The same build with the draw guard removed (an A/B APK, everything else
+  equal) measured the same (1 to 5.2% janky, GPU 17 ms, UI p95 3.6 to 12 ms): on SwiftShader the
+  hidden app's layer is not what costs the 17 ms, so no frame of either list meets 16.7 ms there
+  either way. HWUI's overdraw view (`debug.hwui.overdraw show`) does show the difference: with the
+  guard the screen over the item list is 1x everywhere, without it the app's cards show through at
+  2x to 4x, which a real GPU pays for in fill rate. The earlier rounds' "UI thread under 1 ms at the
+  median" was optimistic for this build: the phase 3 device report noted a p95 of 16 to 17.5 ms in
+  4 of 6 rounds of its final build on a loaded host (no raw data kept), and these settled rounds
+  put it at 6 to 13 ms. With `-gpu host` (phase 3
+  build, not re-measured) both lists had 0.8 to 1% janky frames and the same p90 21 ms, p95 22 ms,
+  of which the emulator's GPU path is 14 to 15 ms at the median; the inspector list's UI thread
+  p95 was 3.5 ms. An emulator's frame percentiles are an upper bound, not a device number.
+- **Opening:** the screen settles 284 to 335 ms after the tap, a detail 267 to 317 ms (both
+  include the 200 ms transition), and the Response tab of a 256 KB JSON body (300 KB, truncated)
+  draws in 1 or 2 frames, 41 to 77 ms after the tap. The first composition of a new pane is one
+  long frame (UI thread 20 to 50 ms in a debug build without R8).

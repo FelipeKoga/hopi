@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -7,6 +8,10 @@ plugins {
 
 kotlin {
     explicitApi()
+
+    // The public API dump that :checkNoopParity compares with the noop twin's.
+    @OptIn(ExperimentalAbiValidation::class)
+    abiValidation()
 
     compilerOptions {
         optIn.add("dev.koga.hopi.core.HopiInternalApi")
