@@ -9,8 +9,10 @@ import dev.koga.hopi.connect.SystemProcessRunner
 import dev.koga.hopi.connect.Targets
 import java.io.BufferedWriter
 import java.io.FileDescriptor
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.nio.file.Files
@@ -28,6 +30,8 @@ internal class CliEnvironment(
     shutdownHooks: ShutdownHooks = RuntimeShutdownHooks,
     /** Socket read timeout for one-shot commands; `tail` waits without one. */
     val readTimeoutMs: Int = 15_000,
+    /** What `--body @-` reads. */
+    val stdin: InputStream = InputStream.nullInputStream(),
 ) {
     val host: HostEnvironment = HostEnvironment(processes, env, userHome, isMac, isExecutable, shutdownHooks)
 
@@ -39,6 +43,7 @@ internal class CliEnvironment(
         fun system(): CliEnvironment = CliEnvironment(
             stdout = FileOutputStream(FileDescriptor.out),
             stderr = FileOutputStream(FileDescriptor.err),
+            stdin = FileInputStream(FileDescriptor.`in`),
         )
     }
 }

@@ -25,6 +25,9 @@ internal enum class Shortcut(val keys: String) {
     ExportHar("⌘E"),
     ExportNdjson("⇧⌘E"),
     Reconnect("⌘R"),
+
+    /** Shows or hides the rules panel. */
+    Rules("⌘L"),
 }
 
 internal val IS_MAC: Boolean = System.getProperty("os.name").orEmpty().startsWith("Mac")
@@ -39,6 +42,7 @@ internal fun shortcutOf(event: KeyEvent, isMac: Boolean = IS_MAC): Shortcut? {
             Key.F -> Shortcut.Search.takeUnless { event.isShiftPressed }
             Key.E -> if (event.isShiftPressed) Shortcut.ExportNdjson else Shortcut.ExportHar
             Key.R -> Shortcut.Reconnect.takeUnless { event.isShiftPressed }
+            Key.L -> Shortcut.Rules.takeUnless { event.isShiftPressed }
             else -> null
         }
         !plain -> null

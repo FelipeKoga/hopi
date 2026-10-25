@@ -8,18 +8,37 @@
 
 /* Begin PBXBuildFile section */
 		307C2654CD5972A25FB7FD87 /* iOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668CECA83ACC03A83C85A623 /* iOSApp.swift */; };
+		4C62AE8806BD0C7C1B63B496 /* CaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8863FA84593C6466370A86E7 /* CaptureTests.swift */; };
+		DA17A872DCD6B73323C9B670 /* ThirdPartySDK.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7832BB2FF3151C474ED667F2 /* ThirdPartySDK.swift */; };
+		F930AD6DAD1F183A7C4563E9 /* CaptureVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A19452C83CDE036158DE75C /* CaptureVerification.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		0393D20C2F3AB76A76A2FFD0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 242FB5348943441C388468CE /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 78B53CC79860CBFC2F5543C6;
+			remoteInfo = iosApp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		1A19452C83CDE036158DE75C /* CaptureVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureVerification.swift; sourceTree = "<group>"; };
+		270505B26072194DE3909A34 /* iosAppCaptureTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = iosAppCaptureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		668CECA83ACC03A83C85A623 /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
+		7832BB2FF3151C474ED667F2 /* ThirdPartySDK.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThirdPartySDK.swift; sourceTree = "<group>"; };
 		86038AE1032E284E79B32AD6 /* iosApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8863FA84593C6466370A86E7 /* CaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		1DB4B685CAEE8BEFEBBAEF94 /* iosApp */ = {
 			isa = PBXGroup;
 			children = (
+				1A19452C83CDE036158DE75C /* CaptureVerification.swift */,
 				668CECA83ACC03A83C85A623 /* iOSApp.swift */,
+				7832BB2FF3151C474ED667F2 /* ThirdPartySDK.swift */,
 			);
 			path = iosApp;
 			sourceTree = "<group>";
@@ -28,6 +47,7 @@
 			isa = PBXGroup;
 			children = (
 				1DB4B685CAEE8BEFEBBAEF94 /* iosApp */,
+				F01ECA9EBF225E5F9B4F1EDE /* iosAppCaptureTests */,
 				94C98B8B3A2BFC1966447269 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -36,8 +56,17 @@
 			isa = PBXGroup;
 			children = (
 				86038AE1032E284E79B32AD6 /* iosApp.app */,
+				270505B26072194DE3909A34 /* iosAppCaptureTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		F01ECA9EBF225E5F9B4F1EDE /* iosAppCaptureTests */ = {
+			isa = PBXGroup;
+			children = (
+				8863FA84593C6466370A86E7 /* CaptureTests.swift */,
+			);
+			path = iosAppCaptureTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -61,6 +90,24 @@
 			productReference = 86038AE1032E284E79B32AD6 /* iosApp.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E834CD753BE08AAC694AFEC6 /* iosAppCaptureTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B08A73288B2797E5CBAEFC91 /* Build configuration list for PBXNativeTarget "iosAppCaptureTests" */;
+			buildPhases = (
+				68435AF9E51C7F918DBFE845 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6ED9E237A13952800BBB3895 /* PBXTargetDependency */,
+			);
+			name = iosAppCaptureTests;
+			packageProductDependencies = (
+			);
+			productName = iosAppCaptureTests;
+			productReference = 270505B26072194DE3909A34 /* iosAppCaptureTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -71,6 +118,9 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					78B53CC79860CBFC2F5543C6 = {
+						ProvisioningStyle = Automatic;
+					};
+					E834CD753BE08AAC694AFEC6 = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -90,6 +140,7 @@
 			projectRoot = "";
 			targets = (
 				78B53CC79860CBFC2F5543C6 /* iosApp */,
+				E834CD753BE08AAC694AFEC6 /* iosAppCaptureTests */,
 			);
 		};
 /* End PBXProject section */
@@ -112,7 +163,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Debug links the real Hopi modules; any other configuration their noop twins\n# (docs/ARCHITECTURE.md, \"Selecting real vs noop\").\nset -eu\ncd \"$SRCROOT/../..\"\nif [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true\nelse\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode\nfi\n";
+			shellScript = "# Debug links the real Hopi modules; any other configuration their noop twins\n# (docs/ARCHITECTURE.md, \"Selecting real vs noop\"). The build setting HOPI_ENABLED=false\n# (`xcodebuild ... HOPI_ENABLED=false`) builds a Debug app with the noop twins, for A/B runs\n# against the same optimisation level.\nset -eu\ncd \"$SRCROOT/../..\"\nif [ \"$CONFIGURATION\" = \"Debug\" ] && [ \"${HOPI_ENABLED:-true}\" != \"false\" ]; then\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true\nelse\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -121,11 +172,29 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F930AD6DAD1F183A7C4563E9 /* CaptureVerification.swift in Sources */,
+				DA17A872DCD6B73323C9B670 /* ThirdPartySDK.swift in Sources */,
 				307C2654CD5972A25FB7FD87 /* iOSApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		68435AF9E51C7F918DBFE845 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4C62AE8806BD0C7C1B63B496 /* CaptureTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		6ED9E237A13952800BBB3895 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 78B53CC79860CBFC2F5543C6 /* iosApp */;
+			targetProxy = 0393D20C2F3AB76A76A2FFD0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		11814011E7D6EC822BFBC66D /* Release */ = {
@@ -256,6 +325,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -272,11 +342,37 @@
 					"$(inherited)",
 					"-framework",
 					Shared,
+					"-weak_framework",
+					CoreGraphics,
+					"-weak-lresolv",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample;
 				PRODUCT_NAME = HopiSample;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9835E74C9ED191E043343FFA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample.capturetests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HopiSample.app/HopiSample";
 			};
 			name = Debug;
 		};
@@ -303,11 +399,37 @@
 					"$(inherited)",
 					"-framework",
 					Shared,
+					"-weak_framework",
+					CoreGraphics,
+					"-weak-lresolv",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample;
 				PRODUCT_NAME = HopiSample;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D7223F647E77C749BBF4C860 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample.capturetests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HopiSample.app/HopiSample";
 			};
 			name = Release;
 		};
@@ -319,6 +441,15 @@
 			buildConfigurations = (
 				9221A1FDC06803E8A2FC6E61 /* Debug */,
 				AF835BFF1220CA5AB5B867E4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B08A73288B2797E5CBAEFC91 /* Build configuration list for PBXNativeTarget "iosAppCaptureTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9835E74C9ED191E043343FFA /* Debug */,
+				D7223F647E77C749BBF4C860 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

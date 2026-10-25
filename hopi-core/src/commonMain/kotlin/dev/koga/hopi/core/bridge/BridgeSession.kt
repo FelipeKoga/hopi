@@ -1,10 +1,22 @@
 package dev.koga.hopi.core.bridge
 
 import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.core.concurrent.WakeSignal
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.json.TransactionJson
+import dev.koga.hopi.core.json.encodeUtf8
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.rules.ReplayResult
+import dev.koga.hopi.core.rules.Replays
+import dev.koga.hopi.core.rules.RuleEngine
+import dev.koga.hopi.core.rules.RuleError
+import dev.koga.hopi.core.rules.RuleErrorCode
+import dev.koga.hopi.core.rules.RuleJson
+import dev.koga.hopi.core.rules.RuleJsonContext
+import dev.koga.hopi.core.rules.RuleLimits
+import dev.koga.hopi.core.rules.RuleParse
+import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.store.HopiStore
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
@@ -12,6 +24,7 @@ import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.incrementAndFetch
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.io.encoding.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -46,14 +59,25 @@ public enum class BridgeError {
      */
     UNAUTHORIZED,
     SLOW_CLIENT,
+
+    /** A limit of docs/design/rules.md ("Limits") was reached; the message names it. */
+    LIMIT,
+
+    /** The app cannot do it: rules are off or absent, or a replay was refused (the message says why). */
+    UNSUPPORTED,
 }
 
 /**
  * The transport-agnostic protocol handler for one connection: authenticates it (token transports),
- * then serves `hello`/`list`/`get`/`tail`/`clear` from [store], redacted with the store's redactor.
+ * then serves `hello`/`list`/`get`/`tail`/`clear` from [store], redacted with the store's redactor,
+ * and, after `hello` on the same connection, the rule commands (`rules.*`, `blob.put`, `replay`)
+ * against [RuleEngine]. Blobs a client stages live in this session only and die with it.
  *
  * [run] blocks the calling thread, which reads and answers requests; a second thread writes. The
  * two meet in a bounded reply channel, so a client that reads slowly only slows its own requests.
+ * The writer is a plain thread that blocks on a [WakeSignal] while both of its queues are empty,
+ * never in a coroutine event loop (Kotlin/Native's wakes on a keep-alive timer), so a connected,
+ * idle `tail` costs no CPU at all; every producer of its queues wakes it after queueing.
  * Live `tail` events reach the writer through a second bounded channel that the store's event
  * collector fills with a non-suspending `trySend` and nothing else; when it is full the client is
  * disconnected (`SLOW_CLIENT`), so no client ever suspends the store's consumer or another client.
@@ -80,6 +104,15 @@ public class BridgeSession(
     private val tailSince = AtomicLong(0)
     private val eventsAfterFinal = AtomicInt(0)
 
+    /** Wakes the writer thread: after each item queued for it, and after its queues close. */
+    private val writerSignal = WakeSignal()
+
+    /** How many times the writer slept and was woken (tests: it must not wake while nothing is sent). */
+    internal val writerWakeups: Long get() = writerSignal.wakeups
+
+    /** True while the writer blocks with nothing to send. */
+    internal val writerSleeping: Boolean get() = writerSignal.sleeping
+
     // Writer thread only: what this client has been sent of the live stream, for SLOW_CLIENT's `since`.
     private var sentPending: HashSet<Long>? = null
     private var highestSent = 0L
@@ -88,9 +121,16 @@ public class BridgeSession(
     public fun run() {
         var writerStarted = false
         var inputEnded = false
+        var detachViewer: (() -> Unit)? = null
         try {
             val reader = BridgeLineReader(connection)
             if (token != null && !authenticated(reader, token)) return
+            // A connected client is a viewer: requests in flight show as pending at once. What waited
+            // unapplied while nobody watched (starts, and ends marked in the store's batch window) is
+            // applied before the first request is read, so a `list` or `get` sent with the token and
+            // `hello` in one write sees every request that ended before the client connected.
+            detachViewer = store.attachViewer()
+            store.awaitApplied(ATTACH_APPLY_TIMEOUT_MS)
             holders.incrementAndFetch()
             try {
                 startBridgeThread("hopi-bridge-writer") { writeLoop() }
@@ -106,6 +146,7 @@ public class BridgeSession(
                 // The writer ended the session (a failed write, or SLOW_CLIENT) while a reply waited.
             }
         } finally {
+            detachViewer?.invoke()
             if (!writerStarted) {
                 tailJob.cancel()
                 connection.shutdown()
@@ -124,6 +165,7 @@ public class BridgeSession(
                 // Let the writer flush the replies already queued (a client may half-close after its request).
                 replies.close()
             }
+            writerSignal.wake()
             release()
         }
     }
@@ -132,6 +174,10 @@ public class BridgeSession(
         val line = reader.readLine()
         return line is BridgeLine.Text && token.matches(line.text)
     }
+
+    // Reader thread only: whether `hello` was answered on this connection, and the staged blobs.
+    private var helloSeen = false
+    private val blobs = HashMap<Long, Blob>()
 
     private suspend fun readLoop(reader: BridgeLineReader) {
         while (true) {
@@ -151,8 +197,19 @@ public class BridgeSession(
                 }
                 is BridgeParseResult.Ok -> parsed.command
             }
+            if (command.isWrite) {
+                when {
+                    !helloSeen -> reply(error(BridgeError.BAD_REQUEST, "hello first"))
+                    !RuleEngine.rulesAvailable -> reply(error(BridgeError.UNSUPPORTED, "rules are off in this app (rules = false)"))
+                    else -> serveRules(command)
+                }
+                continue
+            }
             when (command) {
-                BridgeCommand.Hello -> reply(hello())
+                BridgeCommand.Hello -> {
+                    helloSeen = true
+                    reply(hello())
+                }
                 is BridgeCommand.List -> {
                     val redactor = store.redactor
                     for (transaction in store.since(command.since, command.limit)) {
@@ -167,11 +224,11 @@ public class BridgeSession(
                     } else {
                         // Encoded by the writer as it sends: a queued reply holds the snapshot, not
                         // a string several times its body.
-                        replies.send(Outgoing.Detail(transaction))
+                        enqueue(Outgoing.Detail(transaction))
                     }
                 }
                 is BridgeCommand.Tail -> {
-                    startTail(command.since)
+                    startTail(command.since, command.rules)
                     // The stream runs until disconnect; later input is read only to notice that.
                     while (true) {
                         if (reader.readLine() == BridgeLine.End) return
@@ -183,17 +240,138 @@ public class BridgeSession(
                     val through = store.clear()
                     reply(JsonWriter().beginObject().field("type", "ok").field("through", through).endObject().toString())
                 }
+                else -> serveRules(command)
             }
         }
+    }
+
+    /** The write commands, after `hello`. Reader thread only. */
+    private suspend fun serveRules(command: BridgeCommand) {
+        when (command) {
+            is BridgeCommand.RulesAdd -> when (val parsed = RuleJson.parseRule(command.rule, ruleContext)) {
+                is RuleParse.Failed -> reply(ruleError(parsed.error))
+                is RuleParse.Ok -> when (val result = RuleEngine.add(parsed.value)) {
+                    is RuleResult.Failed -> reply(ruleError(result.error))
+                    is RuleResult.Ok -> {
+                        parsed.blobs.forEach { blobs.remove(it) }
+                        reply(RuleJson.ruleLine(result.rule, store.redactor))
+                    }
+                }
+            }
+            BridgeCommand.RulesList -> {
+                val redactor = store.redactor
+                for (rule in RuleEngine.list()) reply(RuleJson.ruleLine(rule, redactor))
+                reply(END_LINE)
+            }
+            is BridgeCommand.RulesUpdate -> when (val parsed = RuleJson.parsePatch(command.fields)) {
+                is RuleParse.Failed -> reply(ruleError(parsed.error))
+                is RuleParse.Ok -> when (val result = RuleEngine.update(command.id, parsed.value)) {
+                    is RuleResult.Failed -> reply(ruleError(result.error))
+                    is RuleResult.Ok -> reply(RuleJson.ruleLine(result.rule, store.redactor))
+                }
+            }
+            is BridgeCommand.RulesRemove ->
+                reply(if (RuleEngine.remove(command.id)) OK_LINE else error(BridgeError.NOT_FOUND, "no rule ${command.id}"))
+            BridgeCommand.RulesClear ->
+                reply(JsonWriter().beginObject().field("type", "ok").field("removed", RuleEngine.clear()).endObject().toString())
+            is BridgeCommand.BlobPut -> reply(putBlob(command))
+            is BridgeCommand.Replay -> {
+                val edit = command.edit?.let { fields ->
+                    when (val parsed = RuleJson.parseReplayEdit(fields, ruleContext)) {
+                        is RuleParse.Failed -> {
+                            reply(ruleError(parsed.error))
+                            return
+                        }
+                        is RuleParse.Ok -> parsed
+                    }
+                }
+                when (val result = Replays.start(store, command.id, edit?.value)) {
+                    is ReplayResult.Refused -> reply(ruleError(result.error))
+                    is ReplayResult.Started -> {
+                        edit?.blobs?.forEach { blobs.remove(it) }
+                        reply(JsonWriter().beginObject().field("type", "replay").field("of", result.of).field("id", result.id).endObject().toString())
+                    }
+                }
+            }
+            else -> reply(error(BridgeError.BAD_REQUEST, "unknown cmd"))
+        }
+    }
+
+    /**
+     * Appends one slice to a staged blob. Slices arrive in order: [BridgeCommand.BlobPut.offset]
+     * must equal the bytes received so far, which proves no line was lost. Any failure discards
+     * the blob, so a client never builds a rule on a blob with a hole.
+     */
+    private fun putBlob(command: BridgeCommand.BlobPut): String {
+        val existing = blobs[command.blob]
+        if (existing == null) {
+            if (command.offset != 0L) return error(BridgeError.BAD_REQUEST, "blob ${command.blob}: offset ${command.offset}, expected 0")
+            if (blobs.size >= RuleLimits.MAX_BLOBS_PER_SESSION) {
+                return error(BridgeError.LIMIT, "blob: at most ${RuleLimits.MAX_BLOBS_PER_SESSION} blobs per session")
+            }
+        } else if (command.offset != existing.size.toLong()) {
+            blobs.remove(command.blob)
+            return error(BridgeError.BAD_REQUEST, "blob ${command.blob}: offset ${command.offset}, expected ${existing.size}; blob discarded")
+        }
+        val bytes = try {
+            Base64.decode(command.data)
+        } catch (_: IllegalArgumentException) {
+            blobs.remove(command.blob)
+            return error(BridgeError.BAD_REQUEST, "blob ${command.blob}: data is not base64; blob discarded")
+        }
+        val blob = existing ?: Blob()
+        if (blob.size + bytes.size > RuleLimits.MAX_BODY_BYTES) {
+            blobs.remove(command.blob)
+            return error(BridgeError.LIMIT, "blob ${command.blob}: larger than ${RuleLimits.MAX_BODY_BYTES} bytes; blob discarded")
+        }
+        blob.append(bytes)
+        blobs[command.blob] = blob
+        return JsonWriter().beginObject().field("type", "ok").field("blob", command.blob).field("size", blob.size).endObject().toString()
+    }
+
+    private val ruleContext = object : RuleJsonContext {
+        override fun blob(id: Long): ByteArray? = blobs[id]?.bytes()
+
+        override fun transaction(id: Long): HttpTransaction? = store.get(id)
+    }
+
+    private fun ruleError(error: RuleError): String = error(
+        when (error.code) {
+            RuleErrorCode.BAD_REQUEST -> BridgeError.BAD_REQUEST
+            RuleErrorCode.LIMIT -> BridgeError.LIMIT
+            RuleErrorCode.NOT_FOUND -> BridgeError.NOT_FOUND
+            RuleErrorCode.UNSUPPORTED -> BridgeError.UNSUPPORTED
+        },
+        error.message,
+    )
+
+    /** A blob being staged: bytes appended in order, at most [RuleLimits.MAX_BODY_BYTES]. Reader thread only. */
+    private class Blob {
+        private var buffer = ByteArray(0)
+        var size = 0
+            private set
+
+        fun append(bytes: ByteArray) {
+            if (size + bytes.size > buffer.size) buffer = buffer.copyOf(maxOf(size + bytes.size, minOf(buffer.size * 2, RuleLimits.MAX_BODY_BYTES)))
+            bytes.copyInto(buffer, size)
+            size += bytes.size
+        }
+
+        fun bytes(): ByteArray = buffer.copyOf(size)
     }
 
     /**
      * Subscribes to live events before reading the backlog, so nothing published in between is
      * missed; the writer then skips every live event the backlog already showed (see [isNew]).
      */
-    private suspend fun startTail(since: Long) {
+    private suspend fun startTail(since: Long, rules: Boolean) {
         tailSince.store(since)
         tailing.store(true)
+        // Only a tail that asked: an older client never sees a line type it does not know.
+        if (rules) {
+            val removeRules = RuleEngine.addListener { offer(Live.Rules(RuleEngine.revision.value)) }
+            tailJob.invokeOnCompletion { removeRules() }
+        }
         // The store calls this on its consumer, losslessly; `events` would drop under a burst unnoticed.
         // A queued event holds a body-free copy: a client that stops reading must not pin captured
         // bodies (up to a whole queue of them, evicted ones included) outside the store's byte cap.
@@ -219,13 +397,16 @@ public class BridgeSession(
             reply(TransactionJson.bridgeSummary(transaction, redactor))
             shown[transaction.id] = transaction.liveSummary()
         }
-        replies.send(Outgoing.StartLive(since, shown))
+        enqueue(Outgoing.StartLive(since, shown))
     }
 
     /** Runs on the store's consumer (events) or a collector (drop count): never suspends, never encodes. */
     private fun offer(item: Live) {
         val result = live.trySend(item)
-        if (result.isSuccess) return
+        if (result.isSuccess) {
+            writerSignal.wake()
+            return
+        }
         if (result.isClosed) {
             // The writer owes the client its SLOW_CLIENT line. A client that stopped reading may
             // leave that write parked on a full socket, so once the client has fallen behind by
@@ -252,11 +433,12 @@ public class BridgeSession(
         }
         live.cancel()
         replies.cancel()
+        writerSignal.wake()
     }
 
     private fun writeLoop() {
         try {
-            runBlocking { writeAll() }
+            writeAll()
         } catch (_: Throwable) {
             // A failed write or a cancelled queue ends the session; nothing to report to whom.
         } finally {
@@ -275,8 +457,16 @@ public class BridgeSession(
         }
     }
 
-    private suspend fun writeAll() {
-        for (item in replies) {
+    /** Writes the replies in order until the live stream starts or the queue closes. Writer thread only. */
+    private fun writeAll() {
+        while (true) {
+            val next = replies.tryReceive()
+            val item = next.getOrNull()
+            if (item == null) {
+                if (next.isClosed) return
+                writerSignal.await()
+                continue
+            }
             when (item) {
                 is Outgoing.Line -> send(item.text)
                 is Outgoing.Detail -> sendDetail(item.transaction)
@@ -288,7 +478,7 @@ public class BridgeSession(
         }
     }
 
-    private suspend fun streamLive(since: Long, shown: HashMap<Long, HttpTransaction>) {
+    private fun streamLive(since: Long, shown: HashMap<Long, HttpTransaction>) {
         val pending = HashSet<Long>()
         var highest = since
         for ((id, transaction) in shown) {
@@ -297,11 +487,21 @@ public class BridgeSession(
         }
         highestSent = highest
         sentPending = pending
-        for (item in live) {
+        while (true) {
+            val next = live.tryReceive()
+            val item = next.getOrNull()
+            if (item == null) {
+                if (next.isClosed) return
+                writerSignal.await()
+                continue
+            }
             when (item) {
                 is Live.Dropped -> send(droppedNotice(item.total))
+                is Live.Rules -> send(rulesNotice(item.revision))
                 is Live.Event -> if (isNew(item.transaction, since, shown)) {
-                    send(TransactionJson.bridgeSummary(item.transaction, store.redactor))
+                    liveLine.setLength(0)
+                    TransactionJson.appendBridgeSummary(item.transaction, store.redactor, liveLine)
+                    send(liveLine)
                     val id = item.transaction.id
                     if (item.transaction.state.isTerminal) pending -= id else pending += id
                     if (id > highestSent) highestSent = id
@@ -337,7 +537,10 @@ public class BridgeSession(
         return true
     }
 
-    private fun send(line: String) {
+    // Writer thread only: each live summary line is built here, then encoded straight from it.
+    private val liveLine = StringBuilder(512)
+
+    private fun send(line: CharSequence) {
         if (!writerState.compareAndSet(IDLE, WRITING)) throw StopWriting
         writeRaw(line)
         if (!writerState.compareAndSet(WRITING, IDLE)) throw StopWriting
@@ -359,7 +562,7 @@ public class BridgeSession(
         if (!writerState.compareAndSet(WRITING, IDLE)) throw StopWriting
     }
 
-    private fun writeRaw(line: String) = writeText(line, newline = true)
+    private fun writeRaw(line: CharSequence) = writeText(line, newline = true)
 
     // Writer thread only: reused for every line, grown to the longest slice written.
     private var encoded = ByteArray(0)
@@ -375,7 +578,12 @@ public class BridgeSession(
     }
 
     private suspend fun reply(line: String) {
-        replies.send(Outgoing.Line(line))
+        enqueue(Outgoing.Line(line))
+    }
+
+    private suspend fun enqueue(item: Outgoing) {
+        replies.send(item)
+        writerSignal.wake()
     }
 
     private fun release() {
@@ -389,6 +597,8 @@ public class BridgeSession(
         .field("platform", info.platform)
         .field("count", store.since(0).size)
         .field("dropped", store.droppedTerminalWrites.value)
+        // Whether the rule commands work here; absent on an older app, which a host reads as false.
+        .field("rules", RuleEngine.rulesAvailable)
         .also { writer -> info.proof?.let { writer.field("proof", it) } }
         .endObject()
         .toString()
@@ -408,6 +618,9 @@ public class BridgeSession(
         class Event(val transaction: HttpTransaction) : Live
 
         class Dropped(val total: Long) : Live
+
+        /** The rule set changed; [revision] is the engine's. */
+        class Rules(val revision: Long) : Live
     }
 
     private object StopWriting : RuntimeException()
@@ -418,6 +631,13 @@ public class BridgeSession(
         /** Live events a client may lag behind, beyond one store batch, before it is disconnected. */
         public const val DEFAULT_LIVE_LAG: Int = 512
         public const val DEFAULT_REPLY_CAPACITY: Int = 64
+
+        /**
+         * The most a new connection waits for the store to apply what waited before serving it:
+         * a pass takes well under a millisecond; only a flood of queued records takes longer, and
+         * then the client is served what is applied by this time.
+         */
+        internal const val ATTACH_APPLY_TIMEOUT_MS: Long = 250
 
         /**
          * One full store batch (delivered to the listener in one burst, faster than any writer
@@ -457,47 +677,12 @@ public class BridgeSession(
         /** A larger encode buffer (a line that is not a sliced `get`) is dropped after its write. */
         private const val MAX_REUSED_BUFFER = 1024 * 1024
 
-        /**
-         * Encodes [text] into [out] (at least 3 bytes per char) and returns the byte count. An
-         * unpaired surrogate becomes U+FFFD, as [String.encodeToByteArray] does.
-         */
-        private fun encodeUtf8(text: CharSequence, out: ByteArray): Int {
-            var n = 0
-            var i = 0
-            val length = text.length
-            while (i < length) {
-                val c = text[i].code
-                when {
-                    c < 0x80 -> out[n++] = c.toByte()
-                    c < 0x800 -> {
-                        out[n++] = (0xC0 or (c shr 6)).toByte()
-                        out[n++] = (0x80 or (c and 0x3F)).toByte()
-                    }
-                    c in 0xD800..0xDBFF && i + 1 < length && text[i + 1].code in 0xDC00..0xDFFF -> {
-                        val point = 0x10000 + ((c - 0xD800) shl 10) + (text[i + 1].code - 0xDC00)
-                        out[n++] = (0xF0 or (point shr 18)).toByte()
-                        out[n++] = (0x80 or ((point shr 12) and 0x3F)).toByte()
-                        out[n++] = (0x80 or ((point shr 6) and 0x3F)).toByte()
-                        out[n++] = (0x80 or (point and 0x3F)).toByte()
-                        i++
-                    }
-                    else -> {
-                        val unit = if (c in 0xD800..0xDFFF) 0xFFFD else c
-                        out[n++] = (0xE0 or (unit shr 12)).toByte()
-                        out[n++] = (0x80 or ((unit shr 6) and 0x3F)).toByte()
-                        out[n++] = (0x80 or (unit and 0x3F)).toByte()
-                    }
-                }
-                i++
-            }
-            return n
-        }
-
         private const val IDLE = 0
         private const val WRITING = 1
         private const val FINAL = 2
 
         private val END_LINE = JsonWriter().beginObject().field("type", "end").endObject().toString()
+        private val OK_LINE = JsonWriter().beginObject().field("type", "ok").endObject().toString()
 
         public fun error(code: BridgeError, message: String): String = JsonWriter().beginObject()
             .field("type", "error")
@@ -515,6 +700,13 @@ public class BridgeSession(
             .field("code", BridgeError.SLOW_CLIENT.name)
             .field("message", "client fell behind the live stream; tail again with since $since to resume without losing a transaction")
             .field("since", since)
+            .endObject()
+            .toString()
+
+        /** `{"type":"rules","rev":N}`: sent to a `tail` that asked (`"rules":true`) whenever the rule set changes. */
+        public fun rulesNotice(revision: Long): String = JsonWriter().beginObject()
+            .field("type", "rules")
+            .field("rev", revision)
             .endObject()
             .toString()
 

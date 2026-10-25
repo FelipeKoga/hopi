@@ -4,9 +4,15 @@ import android.util.Log
 import dev.koga.hopi.core.HopiInternalApi
 import dev.koga.hopi.core.json.TransactionJson
 
+private const val TAG = "Hopi"
+
 @HopiInternalApi
 public actual fun emitPlatformLogLine(line: String) {
-    Log.i("Hopi", line)
+    Log.i(TAG, line)
+}
+
+internal actual fun emitPlatformLogLine(line: StringBuilder) {
+    Log.i(TAG, line.toString())
 }
 
 @HopiInternalApi

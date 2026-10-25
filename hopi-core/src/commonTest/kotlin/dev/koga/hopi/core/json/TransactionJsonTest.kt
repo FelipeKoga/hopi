@@ -28,6 +28,38 @@ class TransactionJsonTest {
     }
 
     @Test
+    fun theSourceFollowsTheStateAndIsOmittedWhenUnknown() {
+        val tx = pending(42).copy(source = "urlsession", finalUrl = "https://api.example.com/final?token=abc")
+            .completed(200, emptyList(), null, 7, "HTTP/1.1")
+        assertEquals(
+            "{\"hopi\":1,\"id\":42,\"method\":\"GET\",\"url\":\"https://api.example.com/users?page=2\"," +
+                "\"code\":200,\"ms\":7,\"reqBytes\":0,\"resBytes\":0,\"state\":\"complete\",\"source\":\"urlsession\"," +
+                "\"finalUrl\":\"https://api.example.com/final?token=abc\"}",
+            TransactionJson.summaryLogLine(tx, Redactor.Default),
+        )
+        val detail = TransactionJson.bridgeDetail(tx, Redactor.create(queryParameters = listOf("token")))
+        assertTrue(
+            "\"url\":\"https://api.example.com/users?page=2\",\"finalUrl\":\"https://api.example.com/final?token=<redacted>\"," +
+                "\"state\":\"complete\",\"source\":\"urlsession\",\"code\":200" in detail,
+            detail,
+        )
+        // An older app's records, and the plugin's before this field, carry neither.
+        val plain = TransactionJson.bridgeDetail(pending(1), Redactor.Default)
+        assertTrue("source" !in plain && "finalUrl" !in plain, plain)
+    }
+
+    @Test
+    fun theLineBudgetHoldsWithTheSource() {
+        val url = "https://api.example.com/" + "a".repeat(5000)
+        for (maxBytes in listOf(1000, TransactionJson.MAX_SUMMARY_LINE_BYTES)) {
+            val tx = pending(1, url = url).copy(source = "urlconnection").failed("e".repeat(2000), 5)
+            val line = TransactionJson.summaryLogLine(tx, Redactor.Default, maxBytes)
+            assertTrue(line.encodeToByteArray().size <= maxBytes, "maxBytes=$maxBytes size=${line.encodeToByteArray().size}")
+            assertTrue("\"source\":\"urlconnection\"" in line, line)
+        }
+    }
+
+    @Test
     fun failedSummaryCarriesTheError() {
         val tx = pending(3, method = "POST").failed("java.io.IOException: \"reset\"", 12)
         assertEquals(
@@ -182,5 +214,48 @@ class TransactionJsonTest {
             assertEquals(whole, sent.toString(), "chunks of $chunk")
             assertTrue(flushes > 1)
         }
+    }
+
+    @Test
+    fun aFailureAfterTheResponseKeepsItsStatusHeadersAndPartialBodyOnTheWire() {
+        val partial = CapturedBody("{\"items\":[1,2".encodeToByteArray(), 12, false, "application/json", null)
+        val tx = pending(7).failedAfterResponse("IOException: unexpected end of stream", 40, 200, listOf("Content-Type" to "application/json"), partial, "HTTP/1.1")
+        // The summary is the same shape as before: `code` and `resBytes` were always there, now set.
+        assertEquals(
+            "{\"hopi\":1,\"id\":7,\"method\":\"GET\",\"url\":\"https://api.example.com/users?page=2\"," +
+                "\"code\":200,\"ms\":40,\"reqBytes\":0,\"resBytes\":12,\"state\":\"failed\",\"error\":\"IOException: unexpected end of stream\"}",
+            TransactionJson.summaryLogLine(tx, Redactor.Default),
+        )
+        val detail = TransactionJson.bridgeDetail(tx, Redactor.Default)
+        assertTrue("\"state\":\"failed\",\"code\":200,\"ms\":40,\"protocol\":\"HTTP/1.1\",\"error\":\"IOException: unexpected end of stream\"" in detail, detail)
+        assertTrue("\"response\":{\"headers\":[[\"Content-Type\",\"application/json\"]],\"body\":{\"encoding\":\"utf8\",\"text\":\"{\\\"items\\\":[1,2\"" in detail, detail)
+    }
+
+    @Test
+    fun theFinalUrlIsInEverySummaryAndSharesTheLineBudget() {
+        val tx = pending(3).copy(finalUrl = "https://cdn.example.com/x").completed(200, emptyList(), null, 1, null)
+        assertTrue(TransactionJson.bridgeSummary(tx, Redactor.Default).endsWith("\"state\":\"complete\",\"finalUrl\":\"https://cdn.example.com/x\"}"))
+        val long = pending(4, url = "https://h/" + "a".repeat(3000)).copy(finalUrl = "https://f/" + "b".repeat(3000))
+            .failed("e".repeat(400), 2)
+        for (maxBytes in listOf(600, 1000, TransactionJson.MAX_SUMMARY_LINE_BYTES)) {
+            for (line in listOf(TransactionJson.summaryLogLine(long, Redactor.Default, maxBytes), TransactionJson.bridgeSummary(long, Redactor.Default))) {
+                val budget = if (line.startsWith("{\"type\"")) TransactionJson.MAX_SUMMARY_LINE_BYTES else maxBytes
+                val fields = assertNotNull(parseFlatJsonObject(line, Int.MAX_VALUE), line)
+                assertTrue(line.encodeToByteArray().size <= budget, "${line.length} > $budget")
+                assertEquals(true, fields["urlTruncated"])
+                assertEquals(true, fields["finalUrlTruncated"])
+                assertTrue((fields["finalUrl"] as String).startsWith("https://f/b"), line)
+                if (budget == TransactionJson.MAX_SUMMARY_LINE_BYTES) {
+                    // Shorter than its third of the line: whole, and its unused share goes to the URLs.
+                    assertEquals("e".repeat(400), fields["error"])
+                } else {
+                    assertEquals(true, fields["errorTruncated"])
+                    assertTrue((fields["error"] as String).length > 50, line)
+                }
+            }
+        }
+        val builder = StringBuilder("prefix")
+        TransactionJson.appendSummaryLogLine(long, Redactor.Default, 1000, builder)
+        assertEquals("prefix" + TransactionJson.summaryLogLine(long, Redactor.Default, 1000), builder.toString())
     }
 }

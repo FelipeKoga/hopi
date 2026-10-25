@@ -22,12 +22,15 @@ import kotlinx.coroutines.test.runTest
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HopiStoreTest {
+    /** A store with, unless [viewer] is false, a viewer attached: the test reads it as the UI would. */
     private fun TestScope.store(
         maxEntries: Int = 500,
         maxTotalBytes: Long = 1L shl 30,
         capacity: Int = 256,
         terminalCapacity: Int = HopiStore.DEFAULT_TERMINAL_CHANNEL_CAPACITY,
+        viewer: Boolean = true,
     ) = HopiStore(maxEntries, maxTotalBytes, backgroundScope, capacity, terminalChannelCapacity = terminalCapacity)
+        .also { if (viewer) it.attachViewer() }
 
     private fun HopiStore.ids() = transactions.value.map { it.id }
 
@@ -49,6 +52,44 @@ class HopiStoreTest {
         assertEquals(TransactionState.Complete, store.get(1)?.state)
         assertEquals(TransactionState.Pending, store.get(2)?.state)
         assertNull(store.get(99))
+    }
+
+    @Test
+    fun withNoViewerAPendingWriteWaitsForTheNextWake() = runTest {
+        val store = store(viewer = false)
+        store.submit(pending(1))
+        store.submit(pending(2))
+        runCurrent()
+        assertEquals(emptyList(), store.ids(), "nothing woke the consumer")
+        // The next terminal write applies the starts that waited, in the same pass.
+        store.submit(complete(1))
+        runCurrent()
+        assertEquals(listOf(1L, 2L), store.ids())
+        assertEquals(TransactionState.Complete, store.get(1)?.state)
+        assertEquals(TransactionState.Pending, store.get(2)?.state)
+    }
+
+    @Test
+    fun attachingAViewerAppliesWhatWaitedAndThenEveryStartAtOnce() = runTest {
+        val store = store(viewer = false)
+        val events = mutableListOf<TransactionEvent>()
+        store.addEventListener { events += it }
+        store.submit(pending(1))
+        runCurrent()
+        assertEquals(emptyList(), store.ids())
+        val detach = store.attachViewer()
+        runCurrent()
+        assertEquals(listOf(1L), store.ids(), "attaching applies the start that waited")
+        store.submit(pending(2))
+        runCurrent()
+        assertEquals(listOf(1L, 2L), store.ids(), "with a viewer a start shows at once")
+        assertEquals(listOf(1L, 2L), events.filterIsInstance<TransactionEvent.Started>().map { it.transaction.id })
+        detach()
+        detach()
+        assertEquals(0, store.attachedViewers, "detaching twice detaches once")
+        store.submit(pending(3))
+        runCurrent()
+        assertEquals(listOf(1L, 2L), store.ids())
     }
 
     @Test
@@ -205,13 +246,13 @@ class HopiStoreTest {
         for (i in 0 until 100_000) {
             if (store.submit(complete(store.nextId(), responseBody = bytesBody(16)))) accepted++
         }
-        // The idle consumer takes the first write directly; the channel buffers the next 1024.
-        assertEquals(1025, accepted, "terminal writes beyond their channel's capacity are rejected, not silently dropped")
+        // The consumer waits on its doorbell, not on the lane, so the lane buffers exactly its 1024.
+        assertEquals(1024, accepted, "terminal writes beyond their channel's capacity are rejected, not silently dropped")
         runCurrent()
-        assertEquals(100_000L - 1025, store.droppedTerminalWrites.value)
+        assertEquals(100_000L - 1024, store.droppedTerminalWrites.value)
         val ids = store.ids()
         assertEquals(500, ids.size)
-        assertEquals(100_000L + 1025, ids.last(), "every accepted terminal write was applied")
+        assertEquals(100_000L + 1024, ids.last(), "every accepted terminal write was applied")
         assertTrue(ids.zipWithNext().all { (x, y) -> x < y })
     }
 
@@ -341,5 +382,47 @@ class HopiStoreTest {
         store.submit(complete(store.nextId()))
         runCurrent()
         assertEquals(50, seen.size)
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class HopiStoreDeferredWriteTest {
+    @Test
+    fun aDeferredWriteIsBuiltOnTheConsumerStartBeforeEnd() = runTest {
+        val store = HopiStore(scope = backgroundScope)
+        val built = mutableListOf<String>()
+        val seen = mutableListOf<TransactionEvent>()
+        store.addEventListener { seen += it }
+        store.submitDeferred(terminal = false) { built += "start"; pending(1) }
+        store.submitDeferred(terminal = true) { built += "end"; complete(1) }
+        assertEquals(emptyList(), built, "the producer only queues")
+        runCurrent()
+        assertEquals(listOf("start", "end"), built)
+        assertIs<TransactionEvent.Started>(seen[0])
+        assertIs<TransactionEvent.Completed>(seen[1])
+        assertEquals(TransactionState.Complete, store.get(1)?.state)
+    }
+
+    @Test
+    fun aDeferredWriteThatThrowsIsDroppedAndTheStoreGoesOn() = runTest {
+        val store = HopiStore(scope = backgroundScope)
+        store.submitDeferred(terminal = true) { error("a recorder bug") }
+        store.submit(complete(2))
+        runCurrent()
+        assertEquals(listOf(2L), store.transactions.value.map { it.id })
+    }
+
+    @Test
+    fun aSnapshotKeepsItsEntriesWhileTheStoreMovesOn() = runTest {
+        val store = HopiStore(maxEntries = 40, scope = backgroundScope)
+        for (id in 1L..40L) store.submit(complete(id))
+        runCurrent()
+        val before = store.transactions.value
+        for (id in 41L..60L) store.submit(complete(id))
+        store.submit(pending(50).copy(url = "https://changed"))
+        runCurrent()
+        assertEquals((1L..40L).toList(), before.map { it.id })
+        assertEquals((21L..60L).toList(), store.transactions.value.map { it.id })
+        assertEquals(store.since(20), store.transactions.value)
     }
 }

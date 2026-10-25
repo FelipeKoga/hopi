@@ -9,14 +9,60 @@ import java.nio.file.Paths
 private fun parsePlatform(value: String): Platform =
     Platform.entries.firstOrNull { it.id == value } ?: throw usageError("--platform must be android, ios or jvm, not '$value'")
 
-internal enum class Command(val wireName: String, val takesId: Boolean, val flags: Set<String>) {
-    Devices("devices", takesId = false, setOf("--json", "--platform")),
-    List("list", takesId = false, TARGET_FLAGS + setOf("--json", "--limit", "--since")),
-    Tail("tail", takesId = false, TARGET_FLAGS + setOf("--json", "--since")),
-    Get("get", takesId = true, TARGET_FLAGS + "--json"),
-    Curl("curl", takesId = true, TARGET_FLAGS),
-    Clear("clear", takesId = false, TARGET_FLAGS + "--json"),
+/** How many positional ids a command takes. */
+internal enum class Ids { NONE, ONE, MANY }
+
+internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<String>) {
+    Devices("devices", Ids.NONE, setOf("--json", "--platform")),
+    List("list", Ids.NONE, TARGET_FLAGS + setOf("--json", "--limit", "--since")),
+    Tail("tail", Ids.NONE, TARGET_FLAGS + setOf("--json", "--since")),
+    Get("get", Ids.ONE, TARGET_FLAGS + "--json"),
+    Curl("curl", Ids.ONE, TARGET_FLAGS),
+    Clear("clear", Ids.NONE, TARGET_FLAGS + "--json"),
+    MockAdd("mock add", Ids.NONE, RULE_FLAGS + setOf("--status", "--header", "--body", "--from", "--delay")),
+    FailAdd("fail add", Ids.NONE, RULE_FLAGS + setOf("--with", "--after")),
+    DelayAdd("delay add", Ids.NONE, RULE_FLAGS + setOf("--before-request", "--before-response")),
+    EditAdd(
+        "edit add",
+        Ids.NONE,
+        RULE_FLAGS + REQUEST_EDIT_FLAGS + setOf("--status", "--set-response-header", "--add-response-header", "--remove-response-header", "--response-body"),
+    ),
+    RulesLs("rules ls", Ids.NONE, TARGET_FLAGS + "--json"),
+    RulesRm("rules rm", Ids.MANY, TARGET_FLAGS + "--json"),
+    RulesClear("rules clear", Ids.NONE, TARGET_FLAGS + "--json"),
+    RulesEnable("rules enable", Ids.MANY, TARGET_FLAGS + "--json"),
+    RulesDisable("rules disable", Ids.MANY, TARGET_FLAGS + "--json"),
+    RulesReset("rules reset", Ids.MANY, TARGET_FLAGS + "--json"),
+    Replay("replay", Ids.ONE, TARGET_FLAGS + REQUEST_EDIT_FLAGS + setOf("--json", "--wait")),
+    ;
+
+    val takesId: Boolean get() = ids != Ids.NONE
+
+    /** A command that changes the app's rules or sends a request: write lines go out only after `hello` was verified. */
+    val isRuleCommand: Boolean get() = ordinal >= MockAdd.ordinal
+
+    val isAdd: Boolean get() = this == MockAdd || this == FailAdd || this == DelayAdd || this == EditAdd
 }
+
+/** The nouns whose commands are two words (`mock add`, `rules ls`). */
+private val NOUNS = setOf("mock", "fail", "delay", "edit", "rules")
+
+/** Flags that may be given more than once; their values are kept in order. */
+internal val REPEATABLE: Set<String> = setOf(
+    "--header", "--query", "--match-header", "--set-query", "--remove-query", "--set-header", "--add-header",
+    "--remove-header", "--set-response-header", "--add-response-header", "--remove-response-header",
+)
+
+/** Flags without a value. */
+private val SWITCHES = setOf("--json", "--disabled", "--wait")
+
+private val RULE_FLAGS: Set<String>
+    get() = TARGET_FLAGS + setOf("--json", "--match", "--query", "--match-header", "--times", "--priority", "--source", "--label", "--disabled")
+
+private val REQUEST_EDIT_FLAGS: Set<String>
+    get() = setOf(
+        "--method", "--host", "--port", "--path", "--set-query", "--remove-query", "--set-header", "--add-header", "--remove-header", "--body",
+    )
 
 private val TARGET_FLAGS: Set<String> get() = setOf("--app", "--platform", "--device", "--bridge-file")
 
@@ -31,6 +77,14 @@ internal class CliArgs(
     val limit: Int,
     val since: Long,
     val id: Long,
+    /** Every positional id, for the commands that take several (`rules rm 3 4`). */
+    val ids: kotlin.collections.List<Long> = if (id > 0) listOf(id) else emptyList(),
+    /** The other single-valued flags, by name (`--status` → `500`). */
+    val values: Map<String, String> = emptyMap(),
+    /** The repeatable flags' values, in order. */
+    val lists: Map<String, kotlin.collections.List<String>> = emptyMap(),
+    /** The switches given (`--disabled`, `--wait`). */
+    val switches: Set<String> = emptySet(),
 )
 
 internal sealed interface Invocation {
@@ -51,33 +105,43 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
     if (argv.isEmpty() || argv.any { it == "-h" || it == "--help" || it == "help" && argv.size == 1 }) {
         return Invocation.Help
     }
-    val command = Command.entries.firstOrNull { it.wireName == argv[0] }
-        ?: throw usageError("unknown command '${argv[0]}'")
+    val twoWords = argv[0] in NOUNS
+    val name = if (twoWords) argv[0] + " " + (argv.getOrNull(1) ?: throw usageError("${argv[0]} needs a subcommand")) else argv[0]
+    val command = Command.entries.firstOrNull { it.wireName == name }
+        ?: throw usageError("unknown command '$name'")
     val values = HashMap<String, String>()
+    val lists = HashMap<String, MutableList<String>>()
+    val switches = HashSet<String>()
     var json = false
-    var id: String? = null
-    var i = 1
+    val positional = ArrayList<String>()
+    var i = if (twoWords) 2 else 1
     while (i < argv.size) {
         val arg = argv[i++]
         if (!arg.startsWith("--")) {
-            if (!command.takesId || id != null) throw usageError("unexpected argument '$arg' for ${command.wireName}")
-            id = arg
+            if (command.ids == Ids.NONE || command.ids == Ids.ONE && positional.isNotEmpty()) {
+                throw usageError("unexpected argument '$arg' for ${command.wireName}")
+            }
+            positional += arg
             continue
         }
-        val name = arg.substringBefore('=')
-        if (name !in command.flags) throw usageError("${command.wireName} does not take $name")
-        if (name == "--json") {
-            if (arg.contains('=')) throw usageError("--json takes no value")
-            json = true
+        val flag = arg.substringBefore('=')
+        if (flag !in command.flags) throw usageError("${command.wireName} does not take $flag")
+        if (flag in SWITCHES) {
+            if (arg.contains('=')) throw usageError("$flag takes no value")
+            if (flag == "--json") json = true else switches += flag
             continue
         }
         val value = if (arg.contains('=')) {
             arg.substringAfter('=')
         } else {
-            if (i >= argv.size) throw usageError("$name needs a value")
+            if (i >= argv.size) throw usageError("$flag needs a value")
             argv[i++]
         }
-        if (values.put(name, value) != null) throw usageError("$name given twice")
+        if (flag in REPEATABLE) {
+            lists.getOrPut(flag) { ArrayList() } += value
+        } else if (values.put(flag, value) != null) {
+            throw usageError("$flag given twice")
+        }
     }
 
     val bridgeFile = values["--bridge-file"]?.let {
@@ -106,13 +170,16 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
     val since = values["--since"]?.let {
         it.toLongOrNull()?.takeIf { n -> n >= 0 } ?: throw usageError("--since must be a transaction id ≥ 0")
     } ?: 0L
-    val transactionId = if (command.takesId) {
-        val raw = id ?: throw usageError("${command.wireName} needs a transaction id")
-        raw.toLongOrNull()?.takeIf { it >= 1 } ?: throw usageError("transaction id must be a number ≥ 1, not '$raw'")
-    } else {
-        0L
+    val ids = positional.map { raw ->
+        raw.toLongOrNull()?.takeIf { it >= 1 } ?: throw usageError("${if (command.isRuleCommand && command != Command.Replay) "rule" else "transaction"} id must be a number ≥ 1, not '$raw'")
     }
-    return Invocation.Run(CliArgs(command, app, platform, device, bridgeFile, json, limit, since, transactionId))
+    if (command.takesId && ids.isEmpty()) {
+        throw usageError("${command.wireName} needs a ${if (command.ids == Ids.MANY) "rule id" else "transaction id"}")
+    }
+    if (command.isAdd && values["--match"] == null) throw usageError("${command.wireName} needs --match '<METHODS> <URL-PATTERN>'")
+    return Invocation.Run(
+        CliArgs(command, app, platform, device, bridgeFile, json, limit, since, ids.firstOrNull() ?: 0L, ids, values, lists, switches),
+    )
 }
 
 internal val USAGE_TEXT: String = """
@@ -128,6 +195,23 @@ internal val USAGE_TEXT: String = """
     |  curl <id>               the request as a cURL command
     |  clear                   drop every recorded transaction
     |
+    |Rules (in the app's memory only; gone when it restarts):
+    |  mock add  --match M --status N [--header 'K: V']... [--body B] [--from <id>] [--delay D]
+    |  fail add  --match M --with timeout|reset|unknown-host|cancel [--after D]
+    |  delay add --match M [--before-request D] [--before-response D]
+    |  edit add  --match M [--method X] [--host H] [--port N] [--path P] [--set-query k=v]...
+    |            [--remove-query k]... [--set-header 'K: V']... [--add-header 'K: V']...
+    |            [--remove-header K]... [--body B] [--status N] [--set-response-header 'K: V']...
+    |            [--add-response-header 'K: V']... [--remove-response-header K]... [--response-body B]
+    |  rules ls | rm <id>... | clear | enable <id>... | disable <id>... | reset <id>...
+    |  replay <id> [request edits as for edit add] [--wait]
+    |
+    |  M is '[METHODS ]URL-PATTERN': GET or GET|POST or *, then [scheme://]host[:port]path[?query];
+    |  in a host * matches any run, in a path * one segment and ** any; ?page=2&debug&!trace adds
+    |  query predicates. Every add also takes --query, --match-header 'K: glob', --times N,
+    |  --priority N, --source ktor,okhttp,urlconnection,urlsession, --label TEXT and --disabled.
+    |  B is @file, @- (stdin) or the text itself. D is a duration: 500ms, 2s (at most 120s).
+    |
     |Options:
     |  --app <id>              applicationId (Android) or bundle id (iOS); required except for jvm
     |  --platform <p>          android, ios or jvm; inferred when only one of adb/simctl has a target
@@ -138,5 +222,6 @@ internal val USAGE_TEXT: String = """
     |  --since <id>            list, tail: only transactions with a greater id
     |  -h, --help              this help
     |
-    |Exit codes: 0 ok, 1 usage, 2 not reachable (no device, app not running, bridge off), 3 not found.
+    |Exit codes: 0 ok, 1 usage (or rejected by the app), 2 not reachable (no device, app not running,
+    |bridge off), 3 not found, 4 unsupported (rules off or absent in the app, a replay it refused).
 """.trimMargin()

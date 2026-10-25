@@ -1,0 +1,6 @@
+language = Objective-C
+package = dev.koga.hopi.urlsession.fixtures
+headers = hopi_fixtures.h
+headerFilter = hopi_fixtures.h
+staticLibraries = libhopi_fixtures.a
+linkerOpts = -framework Foundation -lz

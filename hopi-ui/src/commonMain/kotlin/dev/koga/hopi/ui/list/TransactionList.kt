@@ -50,6 +50,7 @@ import dev.koga.hopi.ui.component.FilterChip
 import dev.koga.hopi.ui.component.HairlineDivider
 import dev.koga.hopi.ui.component.Icon
 import dev.koga.hopi.ui.component.IconButton
+import dev.koga.hopi.ui.component.Tag
 import dev.koga.hopi.ui.theme.HopiColors
 import dev.koga.hopi.ui.theme.HopiIcons
 import dev.koga.hopi.ui.theme.HopiType
@@ -60,6 +61,7 @@ internal object ListTags {
     const val SEARCH = "Search URL"
     const val CLOSE = "Close Hopi"
     const val CLEAR = "Clear all requests"
+    const val RULES = "Rules"
 }
 
 @Composable
@@ -76,6 +78,8 @@ internal fun TransactionListPane(
     /** The row shown beside the list (desktop panes); null in the full-screen list. */
     selectedId: Long? = null,
     searchFocus: FocusRequester? = null,
+    /** Opens the rules list (the in-app screen); null hides the button. */
+    onRules: (() -> Unit)? = null,
 ) {
     val colors = LocalHopiColors.current
     Column(Modifier.fillMaxSize()) {
@@ -91,6 +95,7 @@ internal fun TransactionListPane(
                 BasicText(model.total.toString(), style = HopiType.meta.copy(color = colors.textFaint))
             }
             Spacer(Modifier.weight(1f))
+            if (onRules != null) IconButton(HopiIcons.Rules, ListTags.RULES, onRules)
             IconButton(HopiIcons.Trash, ListTags.CLEAR, onClear, enabled = model != null && model.total > 0)
             if (onClose != null) IconButton(HopiIcons.Close, ListTags.CLOSE, onClose)
         }
@@ -185,6 +190,10 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     BasicText(row.method, style = HopiType.monoStrong.copy(color = colors.text), maxLines = 1)
                     Spacer(Modifier.width(8.dp))
+                    for (tag in row.tags) {
+                        Tag(tag)
+                        Spacer(Modifier.width(6.dp))
+                    }
                     BasicText(
                         row.path,
                         modifier = Modifier.weight(1f),

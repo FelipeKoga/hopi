@@ -1,6 +1,7 @@
 package dev.koga.hopi.core.model
 
 import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.core.rules.ReplayTarget
 
 @HopiInternalApi
 public enum class TransactionState(public val wireName: String) {
@@ -97,6 +98,22 @@ public class CapturedBody(
     }
 }
 
+/** What recorded a transaction ([HttpTransaction.source]); null in a record from an older app. */
+@HopiInternalApi
+public object TransactionSource {
+    /** The Ktor client plugin. */
+    public const val KTOR: String = "ktor"
+
+    /** Automatic URLSession capture on iOS. */
+    public const val URL_SESSION: String = "urlsession"
+
+    /** Automatic OkHttp capture on Android. */
+    public const val OKHTTP: String = "okhttp"
+
+    /** Automatic `HttpURLConnection` capture on Android. */
+    public const val URL_CONNECTION: String = "urlconnection"
+}
+
 /** Immutable snapshot of one exchange. The store replaces snapshots by [id], never mutates them. */
 @HopiInternalApi
 public class HttpTransaction(
@@ -113,6 +130,21 @@ public class HttpTransaction(
     public val durationMs: Long?,
     public val error: String?,
     public val protocol: String?,
+    /** What recorded it ([TransactionSource]); null when unknown (a record from an older app). */
+    public val source: String? = null,
+    /** The URL the response came from when a redirect followed inside the client made it differ from [url]. */
+    public val finalUrl: String? = null,
+    /** The rule applied to this request, or null (docs/design/rules.md, "How records are marked"). */
+    public val ruleId: Long? = null,
+    /** What the rule did, comma-separated in [dev.koga.hopi.core.rules.RuleMark.ORDER]; null when no rule applied. */
+    public val ruleApplied: String? = null,
+    /** The record this request replays, or null. */
+    public val replayOf: Long? = null,
+    /**
+     * How to replay this request through the client that sent it; set by the recorder on records it
+     * can replay. In memory only: never serialized, never compared, dropped with the record.
+     */
+    public val replayTarget: ReplayTarget? = null,
 ) {
     /** Bytes this snapshot holds in memory; what the store's byte cap counts. */
     public val capturedBytes: Long
@@ -131,9 +163,16 @@ public class HttpTransaction(
         durationMs: Long? = this.durationMs,
         error: String? = this.error,
         protocol: String? = this.protocol,
+        source: String? = this.source,
+        finalUrl: String? = this.finalUrl,
+        ruleId: Long? = this.ruleId,
+        ruleApplied: String? = this.ruleApplied,
+        replayOf: Long? = this.replayOf,
+        replayTarget: ReplayTarget? = this.replayTarget,
     ): HttpTransaction = HttpTransaction(
         id, startedAtEpochMs, method, url, requestHeaders, requestBody, state, responseCode,
-        responseHeaders, responseBody, durationMs, error, protocol,
+        responseHeaders, responseBody, durationMs, error, protocol, source, finalUrl,
+        ruleId, ruleApplied, replayOf, replayTarget,
     )
 
     public fun completed(
@@ -154,6 +193,33 @@ public class HttpTransaction(
     public fun failed(error: String, durationMs: Long): HttpTransaction =
         copy(state = TransactionState.Failed, error = error, durationMs = durationMs)
 
+    /**
+     * [failed] after the response's status and headers arrived (a body read failed, the app closed
+     * the body early, the connection dropped): the status, headers and protocol are kept, and
+     * [responseBody] is what arrived of the body before the failure, a partial body (its
+     * `totalBytes` counts the bytes received). On the wire this is a failed transaction with a
+     * `code` and a response, fields every reader already knows, so older viewers parse it. They do
+     * not all show it as failed: a CLI from before this record (`hopi list`/`tail`) prints the
+     * status, say `200`, in the code column instead of `ERR`, and marks the failure only with the
+     * `(error)` after the URL. The current CLI and both viewers' detail read the state first.
+     */
+    public fun failedAfterResponse(
+        error: String,
+        durationMs: Long,
+        responseCode: Int,
+        responseHeaders: List<Pair<String, String>>,
+        responseBody: CapturedBody?,
+        protocol: String?,
+    ): HttpTransaction = copy(
+        state = TransactionState.Failed,
+        error = error,
+        durationMs = durationMs,
+        responseCode = responseCode,
+        responseHeaders = responseHeaders,
+        responseBody = responseBody,
+        protocol = protocol,
+    )
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is HttpTransaction) return false
@@ -169,7 +235,12 @@ public class HttpTransaction(
             responseBody == other.responseBody &&
             durationMs == other.durationMs &&
             error == other.error &&
-            protocol == other.protocol
+            protocol == other.protocol &&
+            source == other.source &&
+            finalUrl == other.finalUrl &&
+            ruleId == other.ruleId &&
+            ruleApplied == other.ruleApplied &&
+            replayOf == other.replayOf
     }
 
     override fun hashCode(): Int = id.hashCode()
@@ -185,10 +256,16 @@ public class HttpTransaction(
             url: String,
             requestHeaders: List<Pair<String, String>>,
             requestBody: CapturedBody?,
+            source: String? = null,
+            ruleId: Long? = null,
+            ruleApplied: String? = null,
+            replayOf: Long? = null,
+            replayTarget: ReplayTarget? = null,
         ): HttpTransaction = HttpTransaction(
             id, startedAtEpochMs, method, url, requestHeaders, requestBody, TransactionState.Pending,
             responseCode = null, responseHeaders = emptyList(), responseBody = null,
-            durationMs = null, error = null, protocol = null,
+            durationMs = null, error = null, protocol = null, source = source,
+            ruleId = ruleId, ruleApplied = ruleApplied, replayOf = replayOf, replayTarget = replayTarget,
         )
     }
 }

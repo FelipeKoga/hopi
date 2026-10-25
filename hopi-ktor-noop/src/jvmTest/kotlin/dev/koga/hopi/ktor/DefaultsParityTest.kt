@@ -43,7 +43,7 @@ class DefaultsParityTest {
                 val value = method.invoke(instance)
                 method.name to if (value is Enum<*>) "${value.declaringJavaClass.simpleName}.${value.name}" else value.toString()
             }
-        assertTrue(values.keys.containsAll(listOf("getEnabled", "getMaxEntries", "getMaxTotalBytes", "getMaxBodyBytes", "getLogSink", "getAgentBridge")), values.keys.toString())
+        assertTrue(values.keys.containsAll(listOf("getEnabled", "getMaxEntries", "getMaxTotalBytes", "getMaxBodyBytes", "getLogSink", "getAgentBridge", "getRules")), values.keys.toString())
         return values + ("annotations" to annotations(config).toString())
     }
 

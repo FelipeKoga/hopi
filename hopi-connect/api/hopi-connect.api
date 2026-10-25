@@ -15,6 +15,7 @@ public final class dev/koga/hopi/connect/BridgeClient : java/lang/AutoCloseable 
 	public final fun reply (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;
 	public static synthetic fun reply$default (Ldev/koga/hopi/connect/BridgeClient;Ljava/lang/String;ILjava/lang/Object;)Ldev/koga/hopi/connect/Reply;
 	public final fun send (Ljava/lang/String;)V
+	public final fun sendLines (Ljava/lang/CharSequence;)V
 	public final fun waitForever ()V
 }
 
@@ -67,6 +68,7 @@ public final class dev/koga/hopi/connect/ExitCode {
 	public static final field NOT_FOUND I
 	public static final field NOT_REACHABLE I
 	public static final field OK I
+	public static final field UNSUPPORTED I
 	public static final field USAGE I
 }
 
@@ -110,6 +112,36 @@ public final class dev/koga/hopi/connect/ProofCheck {
 	public final fun getMismatch ()Ljava/lang/String;
 }
 
+public final class dev/koga/hopi/connect/RemoteRule {
+	public static final field Companion Ldev/koga/hopi/connect/RemoteRule$Companion;
+	public fun <init> (JLjava/lang/String;ZILjava/lang/Long;JZLjava/lang/String;Ljava/lang/String;Ljava/util/List;)V
+	public final fun getAction ()Ljava/lang/String;
+	public final fun getEnabled ()Z
+	public final fun getExhausted ()Z
+	public final fun getHits ()J
+	public final fun getId ()J
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getMatch ()Ljava/lang/String;
+	public final fun getPriority ()I
+	public final fun getTimes ()Ljava/lang/Long;
+	public final fun getUnsupported ()Ljava/util/List;
+}
+
+public final class dev/koga/hopi/connect/RemoteRule$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemoteRule;
+}
+
+public final class dev/koga/hopi/connect/RemoteRules {
+	public static final field Companion Ldev/koga/hopi/connect/RemoteRules$Companion;
+	public fun <init> (ZLjava/util/List;)V
+	public final fun getRules ()Ljava/util/List;
+	public final fun getSupported ()Z
+}
+
+public final class dev/koga/hopi/connect/RemoteRules$Companion {
+	public final fun getNONE ()Ldev/koga/hopi/connect/RemoteRules;
+}
+
 public final class dev/koga/hopi/connect/RemoteSession : java/lang/AutoCloseable {
 	public static final field Companion Ldev/koga/hopi/connect/RemoteSession$Companion;
 	public static final field DEFAULT_MAX_ENTRIES I
@@ -117,14 +149,22 @@ public final class dev/koga/hopi/connect/RemoteSession : java/lang/AutoCloseable
 	public static final field DEFAULT_READ_TIMEOUT_MS I
 	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;)V
 	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun addRule (Lkotlin/jvm/functions/Function1;)Ljava/util/concurrent/CompletableFuture;
 	public final fun clear ()Ljava/util/concurrent/Future;
+	public final fun clearRules ()Ljava/util/concurrent/CompletableFuture;
 	public fun close ()V
 	public final fun connect ()V
 	public final fun fetch (J)Ldev/koga/hopi/core/model/HttpTransaction;
 	public final fun getDropped ()Lkotlinx/coroutines/flow/StateFlow;
+	public final fun getRules ()Lkotlinx/coroutines/flow/StateFlow;
 	public final fun getState ()Lkotlinx/coroutines/flow/StateFlow;
 	public final fun getStore ()Lkotlinx/coroutines/flow/StateFlow;
+	public final fun removeRule (J)Ljava/util/concurrent/CompletableFuture;
+	public final fun replay (JLkotlin/jvm/functions/Function1;)Ljava/util/concurrent/CompletableFuture;
+	public static synthetic fun replay$default (Ldev/koga/hopi/connect/RemoteSession;JLkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/concurrent/CompletableFuture;
 	public final fun select (Ljava/lang/Long;)V
+	public final fun updateRule (JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZ)Ljava/util/concurrent/CompletableFuture;
+	public static synthetic fun updateRule$default (Ldev/koga/hopi/connect/RemoteSession;JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZILjava/lang/Object;)Ljava/util/concurrent/CompletableFuture;
 }
 
 public final class dev/koga/hopi/connect/RemoteSession$Companion {
@@ -176,6 +216,25 @@ public final class dev/koga/hopi/connect/Reply {
 	public final fun getJson ()Lkotlinx/serialization/json/JsonObject;
 	public final fun getRaw ()Ljava/lang/String;
 	public final fun getType ()Ljava/lang/String;
+}
+
+public final class dev/koga/hopi/connect/RuleClient {
+	public static final field BLOB_WINDOW I
+	public static final field Companion Ldev/koga/hopi/connect/RuleClient$Companion;
+	public static final field MAX_INLINE_BODY_CHARS I
+	public fun <init> (Ldev/koga/hopi/connect/BridgeClient;)V
+	public final fun add (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;
+	public final fun body ([B)Ljava/lang/String;
+	public final fun clear ()J
+	public final fun list ()Ljava/util/List;
+	public final fun remove (J)V
+	public final fun replay (JLjava/lang/String;)Ldev/koga/hopi/connect/Reply;
+	public final fun update (JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZ)Ldev/koga/hopi/connect/Reply;
+	public static synthetic fun update$default (Ldev/koga/hopi/connect/RuleClient;JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZILjava/lang/Object;)Ldev/koga/hopi/connect/Reply;
+	public final fun uploadBlob (J[B)V
+}
+
+public final class dev/koga/hopi/connect/RuleClient$Companion {
 }
 
 public final class dev/koga/hopi/connect/RuntimeShutdownHooks : dev/koga/hopi/connect/ShutdownHooks {

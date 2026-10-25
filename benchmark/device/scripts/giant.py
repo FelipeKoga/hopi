@@ -92,7 +92,9 @@ def main():
         elif re.search(r"ANR in|OutOfMemory|FATAL EXCEPTION|has died|Process " + re.escape(PKG) + r".*(died|crash)|lowmemorykiller", line):
             problems.append(line)
             print("PROBLEM:", line, flush=True)
-            if "FATAL" in line or "has died" in line:
+            # Only the sample's own crash or death ends the run: the low-memory killer reaps other
+            # cached apps ("Process com.google.android.apps.photos ... has died") during big bodies.
+            if "FATAL" in line or ("has died" in line and PKG in line):
                 break
     logcat.terminate()
     after = meminfo() if done else None

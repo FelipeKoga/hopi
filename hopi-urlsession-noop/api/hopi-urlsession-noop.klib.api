@@ -1,0 +1,45 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <hopi:hopi-urlsession-noop>
+final class dev.koga.hopi.urlsession/HopiUrlSessionConfig { // dev.koga.hopi.urlsession/HopiUrlSessionConfig|null[0]
+    constructor <init>() // dev.koga.hopi.urlsession/HopiUrlSessionConfig.<init>|<init>(){}[0]
+
+    final var agentBridge // dev.koga.hopi.urlsession/HopiUrlSessionConfig.agentBridge|{}agentBridge[0]
+        final fun <get-agentBridge>(): kotlin/Boolean // dev.koga.hopi.urlsession/HopiUrlSessionConfig.agentBridge.<get-agentBridge>|<get-agentBridge>(){}[0]
+        final fun <set-agentBridge>(kotlin/Boolean) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.agentBridge.<set-agentBridge>|<set-agentBridge>(kotlin.Boolean){}[0]
+    final var enabled // dev.koga.hopi.urlsession/HopiUrlSessionConfig.enabled|{}enabled[0]
+        final fun <get-enabled>(): kotlin/Boolean // dev.koga.hopi.urlsession/HopiUrlSessionConfig.enabled.<get-enabled>|<get-enabled>(){}[0]
+        final fun <set-enabled>(kotlin/Boolean) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.enabled.<set-enabled>|<set-enabled>(kotlin.Boolean){}[0]
+    final var maxBodyBytes // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxBodyBytes|{}maxBodyBytes[0]
+        final fun <get-maxBodyBytes>(): kotlin/Long // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxBodyBytes.<get-maxBodyBytes>|<get-maxBodyBytes>(){}[0]
+        final fun <set-maxBodyBytes>(kotlin/Long) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxBodyBytes.<set-maxBodyBytes>|<set-maxBodyBytes>(kotlin.Long){}[0]
+    final var maxEntries // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxEntries|{}maxEntries[0]
+        final fun <get-maxEntries>(): kotlin/Int // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxEntries.<get-maxEntries>|<get-maxEntries>(){}[0]
+        final fun <set-maxEntries>(kotlin/Int) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxEntries.<set-maxEntries>|<set-maxEntries>(kotlin.Int){}[0]
+    final var maxTotalBytes // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxTotalBytes|{}maxTotalBytes[0]
+        final fun <get-maxTotalBytes>(): kotlin/Long // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxTotalBytes.<get-maxTotalBytes>|<get-maxTotalBytes>(){}[0]
+        final fun <set-maxTotalBytes>(kotlin/Long) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.maxTotalBytes.<set-maxTotalBytes>|<set-maxTotalBytes>(kotlin.Long){}[0]
+    final var rules // dev.koga.hopi.urlsession/HopiUrlSessionConfig.rules|{}rules[0]
+        final fun <get-rules>(): kotlin/Boolean // dev.koga.hopi.urlsession/HopiUrlSessionConfig.rules.<get-rules>|<get-rules>(){}[0]
+        final fun <set-rules>(kotlin/Boolean) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.rules.<set-rules>|<set-rules>(kotlin.Boolean){}[0]
+    final var summaryLog // dev.koga.hopi.urlsession/HopiUrlSessionConfig.summaryLog|{}summaryLog[0]
+        final fun <get-summaryLog>(): kotlin/Boolean // dev.koga.hopi.urlsession/HopiUrlSessionConfig.summaryLog.<get-summaryLog>|<get-summaryLog>(){}[0]
+        final fun <set-summaryLog>(kotlin/Boolean) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.summaryLog.<set-summaryLog>|<set-summaryLog>(kotlin.Boolean){}[0]
+
+    final fun redactHeaders(kotlin/Array<out kotlin/String>...) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.redactHeaders|redactHeaders(kotlin.Array<out|kotlin.String>...){}[0]
+    final fun redactQueryParameters(kotlin/Array<out kotlin/String>...) // dev.koga.hopi.urlsession/HopiUrlSessionConfig.redactQueryParameters|redactQueryParameters(kotlin.Array<out|kotlin.String>...){}[0]
+    final fun unsafeDisableRedaction() // dev.koga.hopi.urlsession/HopiUrlSessionConfig.unsafeDisableRedaction|unsafeDisableRedaction(){}[0]
+}
+
+final object dev.koga.hopi.urlsession/HopiUrlSession { // dev.koga.hopi.urlsession/HopiUrlSession|null[0]
+    final val isStarted // dev.koga.hopi.urlsession/HopiUrlSession.isStarted|{}isStarted[0]
+        final fun <get-isStarted>(): kotlin/Boolean // dev.koga.hopi.urlsession/HopiUrlSession.isStarted.<get-isStarted>|<get-isStarted>(){}[0]
+
+    final fun start() // dev.koga.hopi.urlsession/HopiUrlSession.start|start(){}[0]
+    final fun start(kotlin/Function1<dev.koga.hopi.urlsession/HopiUrlSessionConfig, kotlin/Unit>) // dev.koga.hopi.urlsession/HopiUrlSession.start|start(kotlin.Function1<dev.koga.hopi.urlsession.HopiUrlSessionConfig,kotlin.Unit>){}[0]
+}

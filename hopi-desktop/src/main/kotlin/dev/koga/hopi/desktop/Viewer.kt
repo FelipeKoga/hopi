@@ -202,6 +202,11 @@ internal class Viewer(
         }
     }
 
+    /** Shows [text] in the status bar, where exports report too (a replay's outcome). */
+    fun notify(text: String?) {
+        _notice.value = text
+    }
+
     override fun close() {
         if (closed) return
         closed = true

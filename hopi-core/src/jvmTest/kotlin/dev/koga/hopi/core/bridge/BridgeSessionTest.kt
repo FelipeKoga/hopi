@@ -97,14 +97,14 @@ class BridgeSessionTest {
     fun helloReportsAppPlatformCountAndDroppedTerminalWrites() {
         val store = store(terminalCapacity = 1)
         val gate = pauseStore()
-        // The first write goes straight to the parked consumer, the second fills the lane, two are dropped.
+        // The first write fills the lane (the consumer waits on its doorbell, not on the lane), three are dropped.
         for (id in 1L..4L) store.submit(complete(store.nextId()))
         gate.countDown()
-        store.awaitDropped(2)
-        store.awaitIds(1, 2)
+        store.awaitDropped(3)
+        store.awaitIds(1)
         val f = fields(serve(store).request("{\"cmd\":\"hello\"}"))
         assertEquals(
-            mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 2L, "dropped" to 2L),
+            mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 3L, "rules" to true),
             f,
         )
     }
@@ -127,6 +127,37 @@ class BridgeSessionTest {
         client.send("{\"cmd\":\"list\",\"since\":1,\"limit\":1}")
         assertEquals(2L, fields(client.nextLine())["id"])
         assertEquals(mapOf("type" to "end"), fields(client.nextLine()))
+    }
+
+    @Test
+    fun aListAndGetSentWithHelloSeeARequestThatEndedInTheStoresBatchWindow() {
+        // The store's own thread, dozing after a pass: an end with no viewer only marks the work.
+        val store = HopiStore(batchWindowMillis = 60_000)
+        try {
+            store.submit(complete(store.nextId()))
+            val deadline = System.nanoTime() + 10_000_000_000
+            while (store.get(1) == null || !store.consumerDozing) {
+                check(System.nanoTime() < deadline) { "the first request was not applied" }
+                Thread.onSpinWait()
+            }
+            val id = store.nextId()
+            // An end whose record takes a while to build: a reply that did not wait for the pass beats it.
+            store.submitDeferred(terminal = true) {
+                Thread.sleep(100)
+                complete(id)
+            }
+            assertNull(store.get(id))
+            val client = serve(store)
+            // As BridgeClient sends it: hello and the request in one write, right after connecting.
+            client.sendBytes("{\"cmd\":\"hello\"}\n{\"cmd\":\"list\"}\n{\"cmd\":\"get\",\"id\":$id}\n".encodeToByteArray())
+            assertEquals("hello", fields(client.nextLine())["type"])
+            assertEquals(listOf(1L, id), List(2) { fields(client.nextLine())["id"] })
+            assertEquals(mapOf("type" to "end"), fields(client.nextLine()))
+            val detail = client.nextLine()
+            assertTrue(detail.startsWith("{\"type\":\"transaction\",\"id\":$id,"), detail)
+        } finally {
+            store.close()
+        }
     }
 
     @Test
@@ -369,9 +400,9 @@ class BridgeSessionTest {
         val gate = pauseStore()
         for (n in 1..4) store.submit(complete(store.nextId()))
         gate.countDown()
-        val lines = List(3) { fields(client.nextLine()) }
-        assertTrue(mapOf("type" to "notice", "dropped" to 2L) in lines, lines.toString())
-        assertEquals(listOf(2L, 3L), lines.mapNotNull { it["id"] }, lines.toString())
+        val lines = List(2) { fields(client.nextLine()) }
+        assertTrue(mapOf("type" to "notice", "dropped" to 3L) in lines, lines.toString())
+        assertEquals(listOf(2L), lines.mapNotNull { it["id"] }, lines.toString())
     }
 
     @Test
@@ -484,12 +515,12 @@ class BridgeSessionTest {
         val gate = pauseStore()
         for (n in 1..4) store.submit(complete(store.nextId()))
         gate.countDown()
-        store.awaitDropped(2)
-        store.awaitIds(1, 2)
+        store.awaitDropped(3)
+        store.awaitIds(1)
         val client = serve(store)
         client.send("{\"cmd\":\"tail\"}")
-        assertEquals(mapOf("type" to "notice", "dropped" to 2L), fields(client.nextLine()))
-        assertEquals(listOf(1L, 2L), List(2) { fields(client.nextLine())["id"] })
+        assertEquals(mapOf("type" to "notice", "dropped" to 3L), fields(client.nextLine()))
+        assertEquals(1L, fields(client.nextLine())["id"])
     }
 
     @Test

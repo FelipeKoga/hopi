@@ -1,0 +1,63 @@
+--------- beginning of main
+{"hopi":1,"notice":"android capture started (okhttp instrumented, 21816 us)"}
+{"hopi":1,"id":1,"method":"POST","url":"http://127.0.0.1:8765/echo?sdk=enqueue","code":200,"ms":46,"reqBytes":20,"resBytes":315,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":2,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=execute","code":200,"ms":20,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":3,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=subclass","code":200,"ms":6,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":4,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=derived","code":200,"ms":16,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":5,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=urlconnection","code":200,"ms":43,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":6,"method":"POST","url":"http://127.0.0.1:8765/echo?sdk=urlconnection-post","code":200,"ms":16,"reqBytes":31,"resBytes":368,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":7,"method":"GET","url":"http://127.0.0.1:8765/missing?sdk=urlconnection-404","code":404,"ms":11,"reqBytes":0,"resBytes":64,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":8,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=openStream","code":200,"ms":1,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":9,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=methodref","code":200,"ms":3,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+okhttp enqueue POST 200 315 bytes
+okhttp execute GET 200 67 bytes
+okhttp subclass GET 200
+okhttp derived GET 200
+urlconnection GET 200 67 bytes
+urlconnection POST 200 368 bytes
+urlconnection 404 404 64 bytes
+url openStream 67 bytes
+url method reference 200 67 bytes
+kotlin URL.readText 67 chars
+capture: started=true okHttpInstrumented=true
+--------- beginning of main
+{"hopi":1,"notice":"android capture started (okhttp instrumented, 21816 us)"}
+{"hopi":1,"id":1,"method":"POST","url":"http://127.0.0.1:8765/echo?sdk=enqueue","code":200,"ms":46,"reqBytes":20,"resBytes":315,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":2,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=execute","code":200,"ms":20,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":3,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=subclass","code":200,"ms":6,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":4,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=derived","code":200,"ms":16,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":5,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=urlconnection","code":200,"ms":43,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":6,"method":"POST","url":"http://127.0.0.1:8765/echo?sdk=urlconnection-post","code":200,"ms":16,"reqBytes":31,"resBytes":368,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":7,"method":"GET","url":"http://127.0.0.1:8765/missing?sdk=urlconnection-404","code":404,"ms":11,"reqBytes":0,"resBytes":64,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":8,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=openStream","code":200,"ms":1,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":9,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=methodref","code":200,"ms":3,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+okhttp enqueue POST 200 315 bytes
+okhttp execute GET 200 67 bytes
+okhttp subclass GET 200
+okhttp derived GET 200
+urlconnection GET 200 67 bytes
+urlconnection POST 200 368 bytes
+urlconnection 404 404 64 bytes
+url openStream 67 bytes
+url method reference 200 67 bytes
+kotlin URL.readText 67 chars
+capture: started=true okHttpInstrumented=true
+{"hopi":1,"id":10,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=readText","code":200,"ms":9,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"giant":1,"build":"noop","capBytes":-1,"storeBytes":-1,"shape":"minified","chunked":false,"post":false,"start":true}
+{"hopi":1,"id":11,"method":"GET","url":"http://127.0.0.1:8765/giant?mb=1&shape=minified&chunked=0","code":200,"ms":77,"reqBytes":0,"resBytes":1048554,"state":"complete","source":"okhttp"}
+{"giant":1,"build":"noop","capBytes":-1,"storeBytes":-1,"shape":"minified","chunked":false,"post":false,"mb":1,"run":1,"fetchMs":97,"parseMs":301,"totalMs":398,"elements":50171,"gcCount":1,"gcCountAfter":2,"gcTimeMs":42,"gcTimeMsAfter":55,"blockingGcCount":0,"blockingGcCountAfter":1,"blockingGcTimeMs":0,"blockingGcTimeMsAfter":14,"javaHeapUsedKb":11785,"javaHeapUsedKbAfter":17062,"nativeHeapKb":67,"nativeHeapKbAfter":18367,"frames":13,"gapP50Ms":0.0,"gapP95Ms":83.33,"gapMaxMs":116.66,"gapsOver100Ms":1,"gapsOver33Ms":6}
+{"giant":1,"build":"noop","capBytes":-1,"storeBytes":-1,"shape":"minified","chunked":false,"post":false,"mb":1,"runs":1,"ok":1,"medianTotalMs":398,"minTotalMs":398,"maxTotalMs":398}
+--- dump ---
+--------- beginning of main
+{"hopi":1,"notice":"android capture started (okhttp instrumented, 21816 us)"}
+{"hopi":1,"id":1,"method":"POST","url":"http://127.0.0.1:8765/echo?sdk=enqueue","code":200,"ms":46,"reqBytes":20,"resBytes":315,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":2,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=execute","code":200,"ms":20,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":3,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=subclass","code":200,"ms":6,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":4,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=derived","code":200,"ms":16,"reqBytes":0,"resBytes":67,"state":"complete","source":"okhttp"}
+{"hopi":1,"id":5,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=urlconnection","code":200,"ms":43,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":6,"method":"POST","url":"http://127.0.0.1:8765/echo?sdk=urlconnection-post","code":200,"ms":16,"reqBytes":31,"resBytes":368,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":7,"method":"GET","url":"http://127.0.0.1:8765/missing?sdk=urlconnection-404","code":404,"ms":11,"reqBytes":0,"resBytes":64,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":8,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=openStream","code":200,"ms":1,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":9,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=methodref","code":200,"ms":3,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":10,"method":"GET","url":"http://127.0.0.1:8765/json?sdk=readText","code":200,"ms":9,"reqBytes":0,"resBytes":67,"state":"complete","source":"urlconnection"}
+{"hopi":1,"id":11,"method":"GET","url":"http://127.0.0.1:8765/giant?mb=1&shape=minified&chunked=0","code":200,"ms":77,"reqBytes":0,"resBytes":1048554,"state":"complete","source":"okhttp"}

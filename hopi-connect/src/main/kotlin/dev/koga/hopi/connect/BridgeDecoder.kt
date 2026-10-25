@@ -48,6 +48,14 @@ public object BridgeDecoder {
             durationMs = json.long("ms"),
             error = if (state == TransactionState.Failed) json.str("error") else null,
             protocol = null,
+            // Absent from an older app's lines: null, as both fields are additive.
+            source = json.str("source"),
+            // Possibly cut to fit the line (`finalUrlTruncated`); the detail carries it whole.
+            finalUrl = json.str("finalUrl"),
+            // The rule marks, additive like `source`: absent from an older app's lines.
+            ruleId = json.long("rule"),
+            ruleApplied = json.str("applied"),
+            replayOf = json.long("replayOf"),
         )
     }
 
@@ -71,6 +79,11 @@ public object BridgeDecoder {
             durationMs = json.long("ms"),
             error = json.str("error"),
             protocol = json.str("protocol"),
+            source = json.str("source"),
+            finalUrl = json.str("finalUrl"),
+            ruleId = json.long("rule"),
+            ruleApplied = json.str("applied"),
+            replayOf = json.long("replayOf"),
         )
     }
 

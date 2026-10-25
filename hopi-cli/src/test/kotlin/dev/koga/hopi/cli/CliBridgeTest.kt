@@ -109,7 +109,7 @@ class CliBridgeTest {
         assertEquals(2, run.lines.size, run.toString())
         val first = parse(run.lines[0])
         assertEquals(
-            listOf("type", "id", "method", "url", "code", "ms", "reqBytes", "resBytes", "state"),
+            listOf("type", "id", "method", "url", "code", "ms", "reqBytes", "resBytes", "state", "source"),
             first.keys.toList(),
         )
         assertEquals("transaction", first["type"]!!.jsonPrimitive.content)
@@ -163,7 +163,7 @@ class CliBridgeTest {
         assertEquals(1, run.lines.size)
         val detail = parse(run.lines.single())
         assertEquals(
-            listOf("type", "id", "startedAt", "method", "url", "state", "code", "ms", "protocol", "error", "request", "response"),
+            listOf("type", "id", "startedAt", "method", "url", "state", "source", "code", "ms", "protocol", "error", "request", "response"),
             detail.keys.toList(),
         )
         val request = detail["request"]!!.jsonObject

@@ -158,6 +158,13 @@ internal object SessionExport {
             .endObject()
         entryComment(tx)?.let { w.field("comment", it) }
         w.field("_hopiId", tx.id)
+        // HAR allows custom fields with a leading underscore.
+        tx.source?.let { w.field("_source", it) }
+        tx.finalUrl?.let { w.field("_finalUrl", redactor.url(it)) }
+        // What a Hopi rule did to the request, and the record a replay re-sent.
+        tx.ruleId?.let { w.field("_rule", it) }
+        tx.ruleApplied?.let { w.field("_ruleApplied", it) }
+        tx.replayOf?.let { w.field("_replayOf", it) }
         w.endObject()
     }
 

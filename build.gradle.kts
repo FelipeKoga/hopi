@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.compose.compiler) apply false
     alias(libs.plugins.compose.multiplatform) apply false
     alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
     alias(libs.plugins.android.kotlin.multiplatform.library) apply false
 }
 
@@ -39,6 +40,12 @@ abstract class NoopParityCheck : DefaultTask() {
         val noopFiles = dumpsByName(noopDumps.get().asFile, noop)
         val problems = mutableListOf<String>()
         if (realFiles.isEmpty()) problems += "$real has no API dump"
+        // The dev.koga.hopi plugin swaps the twins under code compiled against the other one, which
+        // is safe only while no body crosses the ABI: an inline function or a const would be copied
+        // from the side the caller was compiled against.
+        for ((name, file) in realFiles + noopFiles.mapKeys { "${it.key} ($noop)" }) {
+            file.readLines().filter { INLINED.containsMatchIn(it) }.forEach { problems += "$name declares an inlined body: ${it.trim()}" }
+        }
         for (name in (realFiles.keys + noopFiles.keys).sorted()) {
             val realFile = realFiles[name]
             val noopFile = noopFiles[name]
@@ -85,10 +92,17 @@ abstract class NoopParityCheck : DefaultTask() {
 
     private companion object {
         const val LIBRARY_NAME_LINE = "// Library unique name:"
+        val INLINED = Regex("\\b(inline|const)\\s+(fun|val)\\b")
     }
 }
 
-val noopTwins = listOf("hopi-ktor" to "hopi-ktor-noop", "hopi-ui" to "hopi-ui-noop")
+val noopTwins = listOf(
+    "hopi-ktor" to "hopi-ktor-noop",
+    "hopi-ui" to "hopi-ui-noop",
+    "hopi-urlsession" to "hopi-urlsession-noop",
+    "hopi-android" to "hopi-android-noop",
+    "hopi-rules" to "hopi-rules-noop",
+)
 
 val noopParityChecks = noopTwins.map { (real, noop) ->
     val taskName = "check" + noop.split('-').joinToString("") { it.replaceFirstChar(Char::uppercase) } + "Parity"
@@ -112,4 +126,8 @@ tasks.register("checkNoopParity") {
 
 tasks.named("check") {
     dependsOn("checkNoopParity")
+    // The included build of the dev.koga.hopi plugin: the rewriter's tests, the plugin's unit tests
+    // and its TestKit tests against a fixture Android app.
+    dependsOn(gradle.includedBuild("gradle-plugin").task(":hopi-instrument:check"))
+    dependsOn(gradle.includedBuild("gradle-plugin").task(":hopi-gradle-plugin:check"))
 }

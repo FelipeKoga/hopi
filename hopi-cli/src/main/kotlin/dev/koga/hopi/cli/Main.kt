@@ -4,8 +4,12 @@ import dev.koga.hopi.connect.BridgeClient
 import dev.koga.hopi.connect.CliException
 import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.connect.Platform
+import dev.koga.hopi.connect.RemoteRule
 import dev.koga.hopi.connect.Reply
+import dev.koga.hopi.connect.RuleClient
 import dev.koga.hopi.connect.long
+import dev.koga.hopi.connect.str
+import dev.koga.hopi.connect.usageError
 import dev.koga.hopi.connect.notReachable
 import dev.koga.hopi.connect.visible
 import dev.koga.hopi.core.bridge.BridgeSession
@@ -14,6 +18,9 @@ import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.redact.Redactor
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.NoSuchFileException
+import java.nio.file.Paths
 import kotlin.system.exitProcess
 
 public fun main(args: Array<String>) {
@@ -67,8 +74,130 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             Command.Get -> get()
             Command.Curl -> curl()
             Command.Clear -> clear()
+            Command.MockAdd, Command.FailAdd, Command.DelayAdd, Command.EditAdd -> addRule()
+            Command.RulesLs -> listRules()
+            Command.RulesRm -> removeRules()
+            Command.RulesClear -> clearRules()
+            Command.RulesEnable -> updateRules(enabled = true)
+            Command.RulesDisable -> updateRules(enabled = false)
+            Command.RulesReset -> updateRules(resetHits = true)
+            Command.Replay -> replay()
         }
     }
+
+    /** Validated before connecting; bodies are read now, uploaded (inline or as blobs) once connected. */
+    private fun addRule() {
+        val draft = RuleDraft.rule(args, ::readBody)
+        withRules { rules ->
+            val reply = rules.add(draft.json(rules::body))
+            val rule = RemoteRule.decode(reply.json) ?: throw notReachable("the bridge sent a malformed rule")
+            out.line(if (args.json) reply.raw else Render.ruleLine(rule))
+            out.flush()
+            for (entry in rule.unsupported) printError(environment.stderr, "hopi: warning: ${visible(entry)}")
+        }
+    }
+
+    private fun listRules() {
+        withRules { rules ->
+            val listed = rules.list()
+            if (args.json) {
+                listed.forEach { out.line(it.raw) }
+            } else if (listed.isEmpty()) {
+                out.line("no rules")
+            } else {
+                Render.rulesTable(listed.mapNotNull { RemoteRule.decode(it.json) }).forEach(out::line)
+            }
+        }
+    }
+
+    /** Removes each id in order; the first that is missing stops with exit 3, after the ones before it. */
+    private fun removeRules() {
+        withRules { rules ->
+            for (id in args.ids) {
+                try {
+                    rules.remove(id)
+                } catch (e: CliException) {
+                    if (e.exitCode == ExitCode.NOT_FOUND) throw CliException(ExitCode.NOT_FOUND, "rule $id not found (hopi rules ls shows the rules)")
+                    throw e
+                }
+                out.line(if (args.json) okLine(id) else "removed #$id")
+            }
+        }
+    }
+
+    private fun clearRules() {
+        withRules { rules ->
+            val removed = rules.clear()
+            out.line(if (args.json) JsonWriter().beginObject().field("type", "ok").field("removed", removed).endObject().toString() else "removed $removed rules")
+        }
+    }
+
+    private fun updateRules(enabled: Boolean? = null, resetHits: Boolean = false) {
+        withRules { rules ->
+            for (id in args.ids) {
+                val reply = try {
+                    rules.update(id, enabled = enabled, resetHits = resetHits)
+                } catch (e: CliException) {
+                    if (e.exitCode == ExitCode.NOT_FOUND) throw CliException(ExitCode.NOT_FOUND, "rule $id not found (hopi rules ls shows the rules)")
+                    throw e
+                }
+                val rule = RemoteRule.decode(reply.json) ?: throw notReachable("the bridge sent a malformed rule")
+                out.line(if (args.json) reply.raw else Render.ruleLine(rule))
+            }
+        }
+    }
+
+    /** Prints the new record's id; with `--wait`, tails until that record is terminal and prints it (exit 0 whatever its status). */
+    private fun replay() {
+        val draft = RuleDraft.replayEdit(args, ::readBody)
+        withRules { rules, client ->
+            val reply = try {
+                rules.replay(args.id, draft?.json(rules::body))
+            } catch (e: CliException) {
+                if (e.exitCode == ExitCode.NOT_FOUND) {
+                    throw CliException(ExitCode.NOT_FOUND, "transaction ${args.id} not found: cleared, evicted, or never recorded (hopi list shows what is retained)")
+                }
+                throw e
+            }
+            val newId = reply.json.long("id") ?: throw notReachable("the bridge sent a malformed replay reply")
+            if ("--wait" !in args.switches) {
+                out.line(if (args.json) reply.raw else newId.toString())
+                return@withRules
+            }
+            client.waitForever()
+            client.send(BridgeClient.request("tail").field("since", newId - 1).endObject().toString())
+            while (true) {
+                val line = client.reply(closedMessage = "the app closed the bridge connection before replay $newId ended (app stopped?)")
+                if (line.type != "transaction" || line.json.long("id") != newId || line.json.str("state") == "pending") continue
+                if (args.json) {
+                    out.line(line.raw)
+                } else {
+                    Render.table(listOf(Render.SUMMARY_HEADER, Render.summaryCells(line.json))).forEach(out::line)
+                }
+                return@withRules
+            }
+        }
+    }
+
+    private fun okLine(id: Long) = JsonWriter().beginObject().field("type", "ok").field("removed", id).endObject().toString()
+
+    /** `@file` (a host file), `@-` (stdin) or the literal text, as curl reads `--data`. */
+    private fun readBody(value: String): ByteArray = when {
+        value == "@-" -> environment.stdin.readAllBytes()
+        value.startsWith("@") -> try {
+            Files.readAllBytes(Paths.get(value.substring(1)))
+        } catch (_: NoSuchFileException) {
+            throw usageError("no such file: ${value.substring(1)}")
+        } catch (e: IOException) {
+            throw usageError("cannot read ${value.substring(1)}: ${e.message}")
+        }
+        else -> value.encodeToByteArray()
+    }
+
+    /** Rule commands send nothing before `hello` was verified: no request is pipelined with it. */
+    private inline fun withRules(block: (RuleClient) -> Unit) = withBridge(request = null) { client -> block(RuleClient(client)) }
+
+    private inline fun withRules(block: (RuleClient, BridgeClient) -> Unit) = withBridge(request = null) { client -> block(RuleClient(client), client) }
 
     private fun devices() {
         val targets = Targets(environment)

@@ -108,9 +108,82 @@ so the app pays no extra cost.
 - Open questions: whether the in-app screen becomes optional (noop-by-default UI artifact, with the
   desktop as the main viewer); physical iOS devices (no bridge in v1).
 
+### Automatic platform capture (every request, third-party SDKs included)
+- **iOS, URLSession (built).** `hopi-urlsession` / `-noop`: `HopiUrlSession.start()` records every
+  URLSession request of the process, observe only, with no per-client setup (architecture doc,
+  "URLSession capture"; design in `docs/design/urlsession-capture.md`). Ktor's Darwin engine
+  defers to it (one record per request). Tested on iOS 18.2 and 27.0 simulators; per-hook cost
+  and a per-request A/B measured on the simulator only. Open: a physical device run, background
+  sessions beyond metadata, WebSocket tasks.
+- **Android, OkHttp and `HttpURLConnection` (built).** The `dev.koga.hopi` Gradle plugin
+  (`gradle-plugin/`) and `hopi-android` / `-noop`: one plugin line records every OkHttp call and
+  every `HttpURLConnection` of the app and its dependencies, observe only, debuggable variants only
+  (architecture doc, "Android capture"; design and measurements in `docs/design/android-capture.md`).
+  Ktor's OkHttp and Android engines defer to it, except a request Ktor itself decodes
+  (`ContentEncoding`), which the Ktor plugin keeps. OkHttp 3.14 is recorded, 3.12/3.13 are left
+  alone. Verified end to end and measured on the API 35 emulator only.
+  Open: the per-request cost after the speed fixes (2026-10-25, debuggable emulator, small
+  request, capture minus noop): calling-thread CPU +16 to +26 µs on OkHttp and +26 to +31 µs on
+  `HttpURLConnection` (the 30 µs target is met on OkHttp, at its limit on `HttpURLConnection`),
+  median wall still 10 to 30 µs above the noop-vs-noop noise on both (about the calling thread's
+  own CPU, so the wall target needs the CPU itself lower: the two kotlinx `Channel` lanes, profile
+  item 2, and the `HttpURLConnection` response-header read, item 4, are the next levers); 10
+  non-matching rules add about 7 µs on `HttpURLConnection` and 7 to 19 µs of process CPU on
+  URLSession against a 3 µs target; a phone run of the same `captureBench` (on the emulator a
+  futex wake is a VM exit, so the ranking may differ on hardware); the provider's startup (5.4 ms median on a debuggable emulator, target 1 ms); OkHttp 3.12/3.13; HTTPS through the
+  wrapper on a device; a physical device run; Cronet and WebView.
+
+### Rules: mock, edit, replay (built)
+- **Built** (architecture doc, "Rules"; design in `docs/design/rules.md`): **mock**, **fail**
+  (timeout, reset, unknown host, cancel, each source's own error), **delay** (before request and/or
+  response), **edit** (request method, URL parts, headers, body; response status, headers, body)
+  and **replay** through the app's own client, on every source (Ktor plugin, OkHttp,
+  `HttpURLConnection`, URLSession) as far as each can without weakening the app's TLS, pinning or
+  challenge handling; unsupported pieces are reported when a rule is added (URLSession: response
+  edits, a before-response delay on a real request, body edits of file and stream uploads,
+  background sessions, sessions created before `start()` other than `shared`; OkHttp 3.14
+  replay). First match wins, one recorder applies it, every touched record is marked.
+- Zero cost with no rule: one volatile read and a reference comparison per request (one
+  `canInitWithTask:` answer per task on a URLSession session created after `start()`). Rules live
+  in memory for the session only, never persisted, and exist only in the real artifacts
+  (`hopi-core`); `hopi-rules-noop` has the same API and does nothing; the release checks cover it.
+  `rules = false` on every recorder (Ktor, `HopiUrlSession`, `hopi { }`).
+- Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
+  bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
+  `rules ls|rm|clear|enable|disable|reset`, `replay [--wait]`, exit code 4); `HopiRules` (Kotlin,
+  Swift `HopiRules.shared`); the desktop Rules panel (⌘L), "Mock this response", "Replay", "Edit and
+  replay…"; the in-app rules list, "Mock this response", "Replay". The sample's rules self-test and
+  host targets (`--es rulesVerify all`, `-verifyRules`) drive every action on every source.
+- Open:
+  - Device verification ran on the API 35 emulator and the iPhone 17 (iOS 27.0) and
+    iPhone 16 (iOS 18.2) simulators (rules self-test 44/44 and 32/32), and the desktop panel was
+    checked against both through a composed `ViewerContent` test (41/41, 42/42); driving the real
+    window needs Screen Recording and Accessibility grants this machine lacks.
+  - The performance plan: 10 non-matching rules are measured (design, "Performance"; not met on
+    `HttpURLConnection` and URLSession, unresolvable at 3 µs on OkHttp) and idle with rules set is
+    0 wakes on both platforms; 1 and 64 rules and mock latency are still unmeasured.
+  - The review pass over the whole feature and the "As built" notes in the design.
+  - Pinning on device uses a public HTTPS host (the dev server has no TLS port); a background
+    URLSession check and Ktor Darwin's delegate handling a challenge for a replayed HTTPS task
+    are untested.
+  - From the desktop rules check (2026-10-25, `build/evidence/speed/desktop/`): the shared list
+    (`hopi-ui`, so probably the in-app screen too) keeps its first visible row in place, so new
+    rows arriving on an untouched list land above the visible area (3 of 13 in one burst) — it
+    needs "stay on newest" while the user has not scrolled; Android rule rows show URLSession's
+    "unsupported" warnings for a rule with no sources set (by design, noise on Android); on iOS a
+    response-edit rule never applies yet looks enabled apart from its warning line; `RulesPanel`'s
+    Update sets `busy` before `form.ruleId ?: return` (unreachable today, a stuck panel if it
+    ever were).
+  - The desktop's rule "edit" changes only priority, times and hits (`rules.update` supports
+    nothing else); the desktop form has no field for header predicates; a hit counted from a
+    summary that arrives just after a re-list can be counted twice until the next one.
+  - No Ktor-plugin rule source exists on iOS while URLSession capture runs (the Darwin engine is
+    ruled by URLSession); sessions created before `start()` cannot be mocked.
+  - Later: live breakpoints (pause and edit a request in flight), matching on the request body,
+    stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
+
 ### Later candidates (from DebugSwift's feature set)
 - Console / log capture (app logs alongside HTTP).
 - WebSocket and SSE inspection for Ktor.
-- Mock / edit-and-replay requests from the inspector or the CLI.
 - App info: build, device, environment, feature flags.
 - Physical iOS device support for the CLI.

@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -155,4 +157,49 @@ internal fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing:
             BasicText(trailing, style = HopiType.meta.copy(color = colors.textFaint), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
+}
+
+/**
+ * An on/off switch in monochrome: a filled track with the knob at the end when on, an outlined one
+ * at the start when off. [description] names what it switches, for screen readers and tests.
+ */
+@Composable
+internal fun Switch(checked: Boolean, description: String, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    val colors = LocalHopiColors.current
+    val track = RoundedCornerShape(50)
+    Box(
+        modifier = modifier
+            .size(TouchTarget)
+            .semantics { contentDescription = description }
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(width = 36.dp, height = 20.dp)
+                .clip(track)
+                .then(if (checked) Modifier.background(colors.text) else Modifier.border(1.5.dp, colors.textFaint, track))
+                .padding(3.dp),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(Modifier.size(14.dp).clip(CircleShape).background(if (checked) colors.onText else colors.textFaint))
+        }
+    }
+}
+
+/** A small outlined label in capitals (`MOCK`, `REPLAY`): what a rule did to a request. */
+@Composable
+internal fun Tag(text: String, modifier: Modifier = Modifier) {
+    val colors = LocalHopiColors.current
+    val shape = RoundedCornerShape(4.dp)
+    BasicText(
+        text,
+        modifier = modifier
+            .border(1.dp, colors.textFaint, shape)
+            .padding(horizontal = 4.dp, vertical = 1.dp)
+            .clearAndSetSemantics { contentDescription = text.lowercase() },
+        style = HopiType.section.copy(color = colors.textMuted),
+        maxLines = 1,
+        softWrap = false,
+    )
 }

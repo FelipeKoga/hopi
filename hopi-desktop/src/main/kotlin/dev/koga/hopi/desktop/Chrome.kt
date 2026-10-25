@@ -3,6 +3,10 @@ package dev.koga.hopi.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.ui.desktop.HopiDesktopType
 import dev.koga.hopi.ui.desktop.hopiDesktopColors
@@ -55,16 +61,16 @@ internal fun ChromeChip(text: String, selected: Boolean, onClick: () -> Unit, mo
     }
 }
 
-/** A one-line text field with [placeholder] shown while empty. */
+/** A text field with [placeholder] shown while empty; one line unless [multiline] (a body). */
 @Composable
-internal fun ChromeTextField(state: TextFieldState, placeholder: String, modifier: Modifier = Modifier) {
+internal fun ChromeTextField(state: TextFieldState, placeholder: String, modifier: Modifier = Modifier, multiline: Boolean = false) {
     val colors = hopiDesktopColors
     BasicTextField(
         state = state,
-        modifier = modifier,
+        modifier = if (multiline) modifier.heightIn(min = 72.dp) else modifier,
         textStyle = HopiDesktopType.mono.copy(color = colors.text),
         cursorBrush = SolidColor(colors.text),
-        lineLimits = TextFieldLineLimits.SingleLine,
+        lineLimits = if (multiline) TextFieldLineLimits.MultiLine(minHeightInLines = 3, maxHeightInLines = 10) else TextFieldLineLimits.SingleLine,
         decorator = { field ->
             Box(
                 Modifier.background(colors.surface, Shape).border(1.dp, colors.border, Shape).padding(horizontal = 10.dp, vertical = 7.dp),
@@ -75,4 +81,29 @@ internal fun ChromeTextField(state: TextFieldState, placeholder: String, modifie
             }
         },
     )
+}
+
+/** An on/off switch: a filled track with the knob at the end when on; [description] names it for tests and screen readers. */
+@Composable
+internal fun ChromeSwitch(checked: Boolean, description: String, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    val colors = hopiDesktopColors
+    val track = RoundedCornerShape(50)
+    Box(
+        modifier
+            .semantics { contentDescription = description }
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(width = 30.dp, height = 16.dp)
+                .background(if (checked) colors.text else colors.background, track)
+                .border(1.dp, if (checked) colors.text else colors.textFaint, track)
+                .padding(2.dp),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(Modifier.size(12.dp).background(if (checked) colors.onText else colors.textFaint, CircleShape))
+        }
+    }
 }

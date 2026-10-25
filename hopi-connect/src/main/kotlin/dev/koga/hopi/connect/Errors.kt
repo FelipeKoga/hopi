@@ -9,6 +9,9 @@ public object ExitCode {
     public const val USAGE: Int = 1
     public const val NOT_REACHABLE: Int = 2
     public const val NOT_FOUND: Int = 3
+
+    /** The app cannot do it: rules off or absent in its Hopi, or a replay it refused. */
+    public const val UNSUPPORTED: Int = 4
 }
 
 /** Ends the command with [exitCode]; [message] is the one line printed to stderr. */

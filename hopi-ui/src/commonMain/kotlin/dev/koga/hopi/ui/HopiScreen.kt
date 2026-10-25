@@ -9,9 +9,11 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -42,10 +44,14 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import dev.koga.hopi.core.rules.RuleEngine
+import dev.koga.hopi.core.rules.RulePatch
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.detail.BodyView
 import dev.koga.hopi.ui.detail.DetailActions
@@ -65,6 +71,11 @@ import dev.koga.hopi.ui.platform.MAX_SHARE_CHARS
 import dev.koga.hopi.ui.platform.SystemBarIcons
 import dev.koga.hopi.ui.platform.cutAt
 import dev.koga.hopi.ui.platform.rememberShareSheet
+import dev.koga.hopi.ui.rules.InAppOutcome
+import dev.koga.hopi.ui.rules.RuleActions
+import dev.koga.hopi.ui.rules.RulesPane
+import dev.koga.hopi.ui.rules.inAppRuleActions
+import dev.koga.hopi.ui.rules.rememberRuleRows
 import dev.koga.hopi.ui.theme.HopiTheme
 import dev.koga.hopi.ui.theme.HopiType
 import dev.koga.hopi.ui.theme.LocalHopiColors
@@ -76,6 +87,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -111,18 +123,46 @@ internal fun HopiScreen(
         val rowCache = remember(store) { RowModelCache() }
         val formatter = remember(store) { DetailFormatter() }
         var toast by remember { mutableStateOf<Toast?>(null) }
+        var showRules by rememberSaveable { mutableStateOf(false) }
+        // A replay's record exists once its recorder writes it: opened then, not before.
+        var openWhenRecorded by remember { mutableStateOf<Long?>(null) }
 
         // The store is collected here, while the screen is composed, never before.
         val list by rememberListModel(store, query, { filter }, rowCache, formatDispatcher)
         val detail by rememberDetailState(store, selectedId, formatter, formatDispatcher)
         val model = (detail as? DetailState.Ready)?.model
-        val actions = rememberDetailActions(store, model, formatDispatcher) { toast = it }
+        val rules = remember(store, model) {
+            model?.let { m ->
+                inAppRuleActions(store, m.transaction) { outcome ->
+                    toast = when (outcome) {
+                        is InAppOutcome.Mocked -> Toast("Mock rule #${outcome.ruleId} added", action = "Undo") { RuleEngine.remove(outcome.ruleId) }
+                        is InAppOutcome.Replaying -> {
+                            openWhenRecorded = outcome.id
+                            Toast("Replaying as #${outcome.id}")
+                        }
+                        is InAppOutcome.Refused -> Toast(outcome.message.replaceFirstChar { it.uppercase() })
+                    }
+                }
+            }
+        }
+        val actions = rememberDetailActions(store, model, formatDispatcher, rules) { toast = it }
+        LaunchedEffect(store, openWhenRecorded) {
+            val id = openWhenRecorded ?: return@LaunchedEffect
+            store.transactions.first { list -> list.any { it.id == id } }
+            tab = DetailTab.Overview
+            selectedId = id
+            openWhenRecorded = null
+        }
 
         // ui-backhandler's BackHandler: the system back gesture on Android, the edge swipe on iOS.
         // Deprecated in favor of navigationevent's handler, which would add a dependency.
         @Suppress("DEPRECATION")
         BackHandler(enabled = true) {
-            if (selectedId != null) selectedId = null else onClose()
+            when {
+                selectedId != null -> selectedId = null
+                showRules -> showRules = false
+                else -> onClose()
+            }
         }
 
         Box(
@@ -134,7 +174,8 @@ internal fun HopiScreen(
         ) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 AnimatedContent(
-                    targetState = selectedId,
+                    // The rules list sits above the request list, like a detail; a detail above both.
+                    targetState = selectedId ?: if (showRules) RULES_PANE else null,
                     transitionSpec = {
                         val forward = targetState != null
                         val enter = fadeIn(tween(160)) + slideInHorizontally(tween(200)) { if (forward) it / 8 else -it / 8 }
@@ -143,7 +184,20 @@ internal fun HopiScreen(
                     },
                     label = "hopi-pane",
                 ) { id ->
-                    if (id == null) {
+                    if (id == RULES_PANE) {
+                        val rows by rememberRuleRows(store, formatDispatcher)
+                        RulesPane(
+                            rows = rows,
+                            rulesOff = !RuleEngine.rulesAvailable,
+                            onBack = { showRules = false },
+                            onToggle = { ruleId, enabled -> RuleEngine.update(ruleId, RulePatch(enabled = enabled)) },
+                            onRemove = { ruleId -> RuleEngine.remove(ruleId) },
+                            onRemoveAll = {
+                                val removed = RuleEngine.clear()
+                                toast = Toast(if (removed == 1) "1 rule removed" else "$removed rules removed")
+                            },
+                        )
+                    } else if (id == null) {
                         TransactionListPane(
                             model = list,
                             query = query,
@@ -156,6 +210,7 @@ internal fun HopiScreen(
                             },
                             onClear = { store.clear() },
                             onClose = onClose,
+                            onRules = { showRules = true },
                         )
                     } else {
                         val shown = detail
@@ -166,6 +221,10 @@ internal fun HopiScreen(
                             onTab = { tab = it },
                             onBack = { selectedId = null },
                             actions = actions,
+                            onOpen = {
+                                tab = DetailTab.Overview
+                                selectedId = it
+                            },
                         )
                     }
                 }
@@ -196,15 +255,21 @@ internal fun rememberListModel(
     formatDispatcher: CoroutineDispatcher,
 ): State<ListModel?> =
     produceState<ListModel?>(null, store, formatDispatcher) {
-        val rows = store.transactions
-            .map { rowCache.rowsFor(it, store.redactor) }
-            .conflate()
-            .flowOn(formatDispatcher)
-        val criteria = snapshotFlow { query.text.toString() to filter() }.distinctUntilChanged()
-        combine(rows, criteria) { all, (text, status) -> filterRows(all, text, status) }
-            .conflate()
-            .flowOn(formatDispatcher)
-            .collect { value = it }
+        // The list on screen is a viewer: requests in flight show as pending the moment they start.
+        val detachViewer = store.attachViewer()
+        try {
+            val rows = store.transactions
+                .map { rowCache.rowsFor(it, store.redactor) }
+                .conflate()
+                .flowOn(formatDispatcher)
+            val criteria = snapshotFlow { query.text.toString() to filter() }.distinctUntilChanged()
+            combine(rows, criteria) { all, (text, status) -> filterRows(all, text, status) }
+                .conflate()
+                .flowOn(formatDispatcher)
+                .collect { value = it }
+        } finally {
+            detachViewer()
+        }
     }
 
 /** The detail of [selectedId] in [store], formatted off the main thread; null while formatting. */
@@ -232,12 +297,13 @@ internal fun rememberDetailState(
         }
 }
 
-/** Copy and share for the detail of [model]; [onToast] shows the confirmation. */
+/** Copy and share for the detail of [model], plus [rules] when given; [onToast] shows the confirmation. */
 @Composable
 internal fun rememberDetailActions(
     store: HopiStore,
     model: DetailModel?,
     formatDispatcher: CoroutineDispatcher,
+    rules: RuleActions? = null,
     onToast: (Toast) -> Unit,
 ): DetailActions {
     val scope = rememberCoroutineScope()
@@ -245,7 +311,7 @@ internal fun rememberDetailActions(
     @Suppress("DEPRECATION") // The text-only clipboard API is the one common to every target.
     val clipboard = LocalClipboardManager.current
     val shareSheet = rememberShareSheet()
-    return remember(model, clipboard, shareSheet) {
+    return remember(model, clipboard, shareSheet, rules) {
         // The clip crosses a binder transaction on Android: it is cut like the share text, and a
         // clipboard that still refuses it shows a toast instead of crashing the app.
         fun copy(label: String, cutInside: (String) -> Boolean = { false }, text: suspend () -> String) {
@@ -288,12 +354,16 @@ internal fun rememberDetailActions(
                     }
                 }
             },
+            rules = rules,
         )
     }
 }
 
-/** A short confirmation; each instance is shown once. */
-internal class Toast(val text: String)
+/** A short confirmation; each instance is shown once. [action] (Undo) runs [onAction] and dismisses it. */
+internal class Toast(val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
+
+/** The [AnimatedContent] key of the rules list; transaction ids start at 1. */
+private const val RULES_PANE = -1L
 
 @Composable
 internal fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {
@@ -301,26 +371,47 @@ internal fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {
     // Keeps the last text while the toast fades out; plain memory, not state, so it never recomposes.
     val last = remember { arrayOfNulls<String>(1) }
     if (toast != null) last[0] = toast.text
+    val action = remember { arrayOfNulls<Toast>(1) }
+    if (toast != null) action[0] = toast
     LaunchedEffect(toast) {
         if (toast != null) {
-            delay(TOAST_MS)
+            // Long enough to reach an Undo.
+            delay(if (toast.action != null) ACTION_TOAST_MS else TOAST_MS)
             onShown(toast)
         }
     }
     Box(Modifier.fillMaxSize().padding(bottom = 24.dp), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(visible = toast != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(160))) {
-            BasicText(
-                last[0] ?: "",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.text)
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-                    // Announced by TalkBack and VoiceOver: focus stays on the button that copied.
-                    .semantics { liveRegion = LiveRegionMode.Polite },
-                style = HopiType.label.copy(color = colors.onText),
-            )
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(colors.text).padding(start = 16.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(
+                    last[0] ?: "",
+                    modifier = Modifier
+                        .padding(end = 10.dp, top = 10.dp, bottom = 10.dp)
+                        // Announced by TalkBack and VoiceOver: focus stays on the button that copied.
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    style = HopiType.label.copy(color = colors.onText),
+                )
+                val shown = action[0]
+                if (shown?.action != null) {
+                    BasicText(
+                        shown.action,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(role = Role.Button) {
+                                shown.onAction?.invoke()
+                                onShown(shown)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        style = HopiType.label.copy(color = colors.onText, textDecoration = TextDecoration.Underline),
+                    )
+                }
+            }
         }
     }
 }
 
 private const val TOAST_MS = 1_600L
+private const val ACTION_TOAST_MS = 4_000L

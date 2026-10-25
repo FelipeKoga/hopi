@@ -1,5 +1,6 @@
 package dev.koga.hopi.ktor
 
+import dev.koga.hopi.core.model.CapturedBody
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.InternalAPI
 import kotlinx.coroutines.CoroutineScope
@@ -159,7 +160,9 @@ internal class TeedBody(
     private fun settle(failure: Throwable?) {
         if (settled.load() || !settled.compareAndSet(false, true)) return
         when {
-            failure != null -> exchange.fail(channelFailureOrigin(failure))
+            // The part of the body that arrived stays in the failed record, joined as a complete one would be.
+            failure != null && capture.joinSize > INLINE_JOIN -> exchange.failLater(joinScope, channelFailureOrigin(failure)) { capture.body(contentType) }
+            failure != null -> exchange.fail(channelFailureOrigin(failure), partialBodyOrNull())
             capture.joinSize > INLINE_JOIN -> exchange.completeLater(joinScope) { capture.body(contentType) }
             else -> {
                 val body = try {
@@ -172,6 +175,12 @@ internal class TeedBody(
                 exchange.complete(body)
             }
         }
+    }
+
+    private fun partialBodyOrNull(): CapturedBody? = try {
+        capture.body(contentType)
+    } catch (_: Throwable) {
+        null
     }
 
     private companion object {

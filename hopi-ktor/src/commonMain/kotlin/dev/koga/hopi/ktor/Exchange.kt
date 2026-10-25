@@ -39,6 +39,8 @@ internal class Exchange(
     private val pending: HttpTransaction,
     private val started: TimeSource.Monotonic.ValueTimeMark,
     private val streamedRequest: StreamedRequestBody?,
+    /** The rule applied to this request, or null: then nothing below differs from a request without rules. */
+    val application: RuleApplication? = null,
 ) {
     private val finished = AtomicBoolean(false)
 
@@ -54,7 +56,8 @@ internal class Exchange(
     fun recordResponse(response: HttpResponse) {
         responseCode = response.status.value
         responseHeaders = flatten(response)
-        protocol = response.version.toString()
+        // A response Hopi built crossed no protocol.
+        protocol = if (application?.mocked == true) null else response.version.toString()
     }
 
     fun ready(body: CapturedBody?) {
@@ -108,9 +111,39 @@ internal class Exchange(
         )
     }
 
-    fun fail(cause: Throwable) {
+    /**
+     * Fails the transaction. After the response arrived, its status, headers and protocol stay in
+     * the record, with [partialBody] (what the app read of the body before the failure) or the body
+     * already known (a skipped one).
+     */
+    fun fail(cause: Throwable, partialBody: CapturedBody? = null) {
+        fail(cause, partialBody, elapsedMs())
+    }
+
+    /** [fail] with a partial body built later, off the reader's thread, timed as of now. */
+    fun failLater(scope: CoroutineScope, cause: Throwable, partialBody: () -> CapturedBody?) {
+        val elapsed = elapsedMs()
+        scope.launch {
+            val built = try {
+                partialBody()
+            } catch (_: Throwable) {
+                null
+            }
+            fail(cause, built, elapsed)
+        }
+    }
+
+    private fun fail(cause: Throwable, partialBody: CapturedBody?, elapsedMs: Long) {
         if (!finished.compareAndSet(false, true)) return
-        store.submit(withRequestBody().failed(describe(cause), elapsedMs()))
+        val request = withRequestBody()
+        val error = describe(cause)
+        store.submit(
+            if (responseCode == 0) {
+                request.failed(error, elapsedMs)
+            } else {
+                request.failedAfterResponse(error, elapsedMs, responseCode, responseHeaders, partialBody ?: responseBody, protocol)
+            },
+        )
     }
 
     private fun withRequestBody(): HttpTransaction =

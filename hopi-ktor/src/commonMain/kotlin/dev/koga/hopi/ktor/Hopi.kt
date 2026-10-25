@@ -1,14 +1,18 @@
 package dev.koga.hopi.ktor
 
-import dev.koga.hopi.core.bridge.AgentBridgeHook
-import dev.koga.hopi.core.json.JsonWriter
-import dev.koga.hopi.core.log.emitPlatformLogLine
-import dev.koga.hopi.core.log.launchSummaryLogSink
+import dev.koga.hopi.core.capture.CaptureInstallation
+import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
-import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.core.rules.FailKind
+import dev.koga.hopi.core.rules.ReplayTarget
+import dev.koga.hopi.core.rules.RuleEngine
+import dev.koga.hopi.core.rules.RuleSource
+import dev.koga.hopi.core.rules.RuleState
 import io.ktor.client.HttpClient
+import io.ktor.client.call.HttpClientCall
 import io.ktor.client.call.replaceResponse
 import io.ktor.client.plugins.api.ClientHook
 import io.ktor.client.plugins.api.ClientPlugin
@@ -30,7 +34,6 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ClosedByteChannelException
 import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.cancel
-import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.TimeSource
 import kotlinx.coroutines.launch
@@ -43,57 +46,58 @@ public val Hopi: ClientPlugin<HopiConfig> = createClientPlugin("Hopi", ::HopiCon
     val config = pluginConfig
     if (!config.enabled) return@createClientPlugin
 
-    require(config.maxEntries > 0) { "maxEntries must be positive" }
-    require(config.maxTotalBytes > 0) { "maxTotalBytes must be positive" }
-    require(config.maxBodyBytes in 0..Int.MAX_VALUE) { "maxBodyBytes must be in 0..${Int.MAX_VALUE}" }
-
-    val injectedStore = config.store
-    val store = injectedStore ?: HopiStore.configureDefault(config.maxEntries, config.maxTotalBytes)
-    store.includeRedaction(
-        Redactor.create(
-            extraHeaders = config.redactedHeaders.toList(),
-            queryParameters = config.redactedQueryParameters.toList(),
-            enabled = !config.redactionDisabled,
-        ),
+    val installed = CaptureInstallation.install(
+        maxEntries = config.maxEntries,
+        maxTotalBytes = config.maxTotalBytes,
+        maxBodyBytes = config.maxBodyBytes,
+        redactedHeaders = config.redactedHeaders.toList(),
+        redactedQueryParameters = config.redactedQueryParameters.toList(),
+        redactionDisabled = config.redactionDisabled,
+        summaryLog = config.logSink == HopiLogSink.Summary,
+        agentBridge = config.agentBridge,
+        injectedStore = config.store,
     )
-    if (config.logSink == HopiLogSink.Summary && !store.redactor.enabled) announceRedactionDisabled()
-    if (injectedStore == null) {
-        if (config.logSink == HopiLogSink.Summary) startProcessSummarySink(store)
-        if (config.agentBridge) AgentBridgeHook.requestStart(store)
-    }
-
-    val maxBodyBytes = minOf(config.maxBodyBytes, store.maxTotalBytes / 2).toInt()
-    val recorder = Recorder(client, store, maxBodyBytes)
+    val store = installed.store
+    val maxBodyBytes = installed.maxBodyBytes
+    // Read once: an engine a platform recorder covers (Darwin under URLSession capture) is
+    // recorded there, and the plugin defers to it request by request (see Recorder.send).
+    val engineClassName = client.engine::class.qualifiedName
+    RuleEngine.recorderStarted(config.rules)
+    val recorder = Recorder(client, store, maxBodyBytes, engineClassName, config.rules)
     on(MonitoringHook) { request, content -> recorder.send(this, request, content) }
     on(RawResponseHook) { response -> recorder.rawResponse(this, response) }
     on(SavedResponseHook) { response -> recorder.savedResponse(this, response) }
     on(DecodedResponseHook) { response -> recorder.decodedResponse(this, response) }
 }
 
-private val summarySinkStarted = AtomicBoolean(false)
-private val redactionNoticeEmitted = AtomicBoolean(false)
-
-private fun announceRedactionDisabled() {
-    if (redactionNoticeEmitted.compareAndSet(false, true)) emitPlatformLogLine(redactionDisabledNotice())
-}
-
-private fun startProcessSummarySink(store: HopiStore) {
-    if (summarySinkStarted.compareAndSet(false, true)) launchSummaryLogSink(store)
-}
-
-private fun redactionDisabledNotice(): String = JsonWriter().beginObject()
-    .field("hopi", 1)
-    .field("notice", "redaction disabled by unsafeDisableRedaction()")
-    .endObject()
-    .toString()
-
 private class Recorder(
     private val client: HttpClient,
     private val store: HopiStore,
     private val maxBodyBytes: Int,
+    private val engineClassName: String?,
+    private val rules: Boolean,
 ) {
+    /**
+     * Set on every record this installation writes: one per installation, never per request; none
+     * with rules off, where [send] never reads a replay's hand-off.
+     */
+    private val replayTarget: ReplayTarget? = if (rules) KtorReplayTarget(client) else null
+
     suspend fun send(context: MonitoringHook.Context, request: HttpRequestBuilder, content: Any) {
         if (content !is OutgoingContent) return
+        // One record per request: the platform recorder has this one. Without an exchange in the
+        // call's attributes, every response hook below passes the call through untouched too.
+        // Except when the request names its own Accept-Encoding: the platform stack then hands the
+        // body over encoded and Ktor decodes it (ContentEncoding), so this plugin records what the
+        // app reads, and marks the request for a recorder that honors the marker to let it pass.
+        // The recorder of a request is the only layer that applies rules to it, so a covered
+        // request returns here before the rule state is read too.
+        val covered = PlatformCapture.covers(engineClassName)
+        if (covered && (request.headers[HttpHeaders.AcceptEncoding] == null || !PlatformCapture.honorsPassThrough(engineClassName))) return
+        // One volatile read and a reference comparison: with no rule and no replay in flight the
+        // request takes exactly the path it took before rules existed.
+        val state = if (rules) RuleEngine.state else RuleState.EMPTY
+        if (state !== RuleState.EMPTY) return sendRuled(context, request, content, covered, state)
         val started = TimeSource.Monotonic.markNow()
         val capture = captureRequest(content, maxBodyBytes)
         val pending = HttpTransaction.pending(
@@ -103,7 +107,14 @@ private class Recorder(
             url = request.url.buildString(),
             requestHeaders = requestHeaders(request, content),
             requestBody = capture.body,
+            source = TransactionSource.KTOR,
+            replayTarget = replayTarget,
         )
+        // Added after the snapshot: the marker is Hopi's, never part of the record.
+        if (covered) {
+            PlatformCapture.markPassThrough()
+            request.headers.append(PlatformCapture.PASS_THROUGH_HEADER, "1")
+        }
         val exchange = Exchange(store, pending, started, capture.streamed)
         request.attributes.put(ExchangeKey, exchange)
         store.submit(pending)
@@ -116,21 +127,97 @@ private class Recorder(
         exchange.callReturned()
     }
 
+    /**
+     * [send] with rules (docs/design/rules.md, "Ktor plugin"): the replay hand-off is taken, the
+     * first matching rule claimed, its request edit applied before the record's snapshot, then the
+     * before-request delay, and the mock, the fail or the real send. The response side of the rule
+     * (its delay and edit) runs in [rawResponse].
+     */
+    @OptIn(InternalAPI::class)
+    private suspend fun sendRuled(context: MonitoringHook.Context, request: HttpRequestBuilder, content: OutgoingContent, covered: Boolean, state: RuleState) {
+        val started = TimeSource.Monotonic.markNow()
+        val handoff = request.attributes.getOrNull(ReplayHandoffKey)?.takeIf { it.take() }
+        if (handoff != null) request.attributes.getOrNull(ReplayHeadersKey)?.let { dropReappendedHeaders(request, it) }
+        val rule = state.firstMatch(RuleSource.KTOR, KtorRuleRequest(request, content))
+        val sent = rule?.requestEdit?.let { applyRequestEdit(request, content, it, store.redactor) } ?: content
+        val capture = captureRequest(sent, maxBodyBytes)
+        val pending = HttpTransaction.pending(
+            id = handoff?.id ?: store.nextId(),
+            startedAtEpochMs = getTimeMillis(),
+            method = request.method.value,
+            url = request.url.buildString(),
+            requestHeaders = requestHeaders(request, sent),
+            requestBody = capture.body,
+            source = TransactionSource.KTOR,
+            ruleId = rule?.id,
+            ruleApplied = rule?.applied,
+            replayOf = handoff?.replayOf,
+            replayTarget = replayTarget,
+        )
+        if (covered) {
+            PlatformCapture.markPassThrough()
+            request.headers.append(PlatformCapture.PASS_THROUGH_HEADER, "1")
+        }
+        val application = rule?.let { RuleApplication(it, mocked = it.mock != null, request.executionContext) }
+        val exchange = Exchange(store, pending, started, capture.streamed, application)
+        request.attributes.put(ExchangeKey, exchange)
+        store.submit(pending)
+        try {
+            rule?.delay?.let { ruleDelay(it.beforeRequestMs, request.executionContext) }
+            val mock = rule?.mock
+            val fail = rule?.fail
+            when {
+                mock != null -> {
+                    // The engine is never called: the app's body is drained for the record, and the
+                    // call runs through the receive pipeline as an engine's call does at `Receive`.
+                    drainUnsent(capture.outgoing)
+                    val call = mockCall(client, request, capture.outgoing, mock)
+                    call.replaceWith(client.receivePipeline.execute(Unit, call.response))
+                    context.finishWith(call)
+                }
+                fail != null -> {
+                    rule.delay?.let { ruleDelay(it.beforeResponseMs, request.executionContext) }
+                    if (fail == FailKind.CANCEL) drainUnsent(capture.outgoing)
+                    throw failure(fail, client, request)
+                }
+                else -> context.proceedWith(capture.outgoing)
+            }
+        } catch (cause: Throwable) {
+            exchange.fail(cause)
+            throw cause
+        }
+        exchange.callReturned()
+    }
+
     /** Before `SaveBody` reads the body: the only point where a large body can be teed instead of copied. */
     suspend fun rawResponse(context: ResponseContext, response: HttpResponse) {
         val exchange = response.call.attributes.getOrNull(ExchangeKey) ?: return
         if (exchange.plan != ResponsePlan.None) return
-        exchange.recordResponse(response)
-        val contentType = response.headers[HttpHeaders.ContentType]
-        val contentLength = response.contentLength()
+        // A rule's response side: its delay, then its edit, before anything below reads the response.
+        val received = exchange.application?.let { applyResponseRule(it, response) } ?: response
+        exchange.recordResponse(received)
+        val contentType = received.headers[HttpHeaders.ContentType]
+        val contentLength = received.contentLength()
         val skipReason = responseSkipReason(contentType)
         when {
-            !hasBody(exchange.method, response.status) -> exchange.ready(null)
+            !hasBody(exchange.method, received.status) -> exchange.ready(null)
             skipReason != null -> exchange.ready(CapturedBody.skipped(skipReason, contentType, contentLength))
-            isEncoded(response.headers[HttpHeaders.ContentEncoding]) -> exchange.decoded()
+            isEncoded(received.headers[HttpHeaders.ContentEncoding]) -> exchange.decoded()
             contentLength != null && contentLength <= maxBodyBytes -> exchange.afterSave()
-            else -> context.proceedWith(tee(response, exchange, contentType, contentLength))
+            else -> {
+                context.proceedWith(tee(received, exchange, contentType, contentLength))
+                return
+            }
         }
+        if (received !== response) context.proceedWith(received)
+    }
+
+    /** The before-response delay and the response edit of [application]'s rule; [response] itself when it has neither. */
+    private suspend fun applyResponseRule(application: RuleApplication, response: HttpResponse): HttpResponse {
+        val rule = application.rule
+        rule.delay?.let { ruleDelay(it.beforeResponseMs, application.execution) }
+        val edit = rule.responseEdit ?: return response
+        return editedResponse(client, response, edit)
     }
 
     /** Right after `SaveBody`, before `BodyProgress` wraps the response at `After`. */
@@ -150,7 +237,7 @@ private class Recorder(
         } catch (cause: CancellationException) {
             throw cause
         } catch (cause: Throwable) {
-            exchange.fail(cause)
+            exchange.fail(cause, buffer.body(contentType))
             return
         }
         exchange.ready(buffer.body(contentType))
@@ -181,7 +268,7 @@ private class Recorder(
             try {
                 buffer.drain(own)
             } catch (cause: Throwable) {
-                exchange.fail(cause)
+                exchange.fail(cause, buffer.body(contentType))
                 if (cause is CancellationException) throw cause
                 return@launch
             }
@@ -224,6 +311,15 @@ private class Recorder(
 private object MonitoringHook : ClientHook<suspend MonitoringHook.Context.(HttpRequestBuilder, Any) -> Unit> {
     class Context(private val context: PipelineContext<Any, HttpRequestBuilder>) {
         suspend fun proceedWith(content: Any): Any = context.proceedWith(content)
+
+        /**
+         * Ends the send pipeline with [call], a call Hopi built: `proceedWith` would hand it to the
+         * `Engine` phase, which takes only an `OutgoingContent`; the pipeline returns its subject.
+         */
+        fun finishWith(call: HttpClientCall) {
+            context.subject = call
+            context.finish()
+        }
     }
 
     override fun install(client: HttpClient, handler: suspend Context.(HttpRequestBuilder, Any) -> Unit) {

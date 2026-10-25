@@ -35,6 +35,9 @@ public class HopiConfig {
     /** Accepted and ignored: the noop starts no agent bridge. */
     public var agentBridge: Boolean = false
 
+    /** Accepted and ignored: the noop applies no rules. */
+    public var rules: Boolean = true
+
     /** Accepted and ignored: nothing is captured, so nothing needs redacting. */
     public fun redactHeaders(vararg names: String) {}
 

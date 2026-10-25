@@ -1,0 +1,17 @@
+{
+  "problems": [],
+  "status": {
+    "capture": [
+      "capture: started=true okHttpInstrumented=true",
+      "capture: started=true okHttpInstrumented=true"
+    ],
+    "noop": [
+      "capture: started=false okHttpInstrumented=false",
+      "capture: started=false okHttpInstrumented=false"
+    ]
+  },
+  "records": {
+    "capture": 11,
+    "noop": 0
+  }
+}

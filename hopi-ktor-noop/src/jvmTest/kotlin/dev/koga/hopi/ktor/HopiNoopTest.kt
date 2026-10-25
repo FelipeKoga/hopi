@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 
 class HopiNoopTest {
@@ -66,8 +67,11 @@ class HopiNoopTest {
         assertEquals(256L * 1024, config.maxBodyBytes)
         assertEquals(HopiLogSink.Summary, config.logSink)
         assertFalse(config.agentBridge)
+        assertTrue(config.rules)
 
         config.maxEntries = 7
+        config.rules = false
+        assertFalse(config.rules)
         config.agentBridge = true
         assertEquals(7, config.maxEntries)
         assertEquals(true, config.agentBridge)

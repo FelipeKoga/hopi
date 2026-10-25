@@ -38,6 +38,9 @@ final class dev.koga.hopi.ktor/HopiConfig { // dev.koga.hopi.ktor/HopiConfig|nul
     final var maxTotalBytes // dev.koga.hopi.ktor/HopiConfig.maxTotalBytes|{}maxTotalBytes[0]
         final fun <get-maxTotalBytes>(): kotlin/Long // dev.koga.hopi.ktor/HopiConfig.maxTotalBytes.<get-maxTotalBytes>|<get-maxTotalBytes>(){}[0]
         final fun <set-maxTotalBytes>(kotlin/Long) // dev.koga.hopi.ktor/HopiConfig.maxTotalBytes.<set-maxTotalBytes>|<set-maxTotalBytes>(kotlin.Long){}[0]
+    final var rules // dev.koga.hopi.ktor/HopiConfig.rules|{}rules[0]
+        final fun <get-rules>(): kotlin/Boolean // dev.koga.hopi.ktor/HopiConfig.rules.<get-rules>|<get-rules>(){}[0]
+        final fun <set-rules>(kotlin/Boolean) // dev.koga.hopi.ktor/HopiConfig.rules.<set-rules>|<set-rules>(kotlin.Boolean){}[0]
 
     final fun redactHeaders(kotlin/Array<out kotlin/String>...) // dev.koga.hopi.ktor/HopiConfig.redactHeaders|redactHeaders(kotlin.Array<out|kotlin.String>...){}[0]
     final fun redactQueryParameters(kotlin/Array<out kotlin/String>...) // dev.koga.hopi.ktor/HopiConfig.redactQueryParameters|redactQueryParameters(kotlin.Array<out|kotlin.String>...){}[0]

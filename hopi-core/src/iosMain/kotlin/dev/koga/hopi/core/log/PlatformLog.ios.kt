@@ -1,13 +1,24 @@
 package dev.koga.hopi.core.log
 
 import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.core.internal.oslog.hopi_os_log_bytes
 import dev.koga.hopi.core.internal.oslog.hopi_os_log_line
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
 
 @OptIn(ExperimentalForeignApi::class)
 @HopiInternalApi
 public actual fun emitPlatformLogLine(line: String) {
     hopi_os_log_line(line)
+}
+
+@OptIn(ExperimentalForeignApi::class)
+internal actual fun emitPlatformLogLine(line: StringBuilder) {
+    // The runtime's encoder is native; a Kotlin loop into a reused buffer measured slower here.
+    val bytes = line.toString().encodeToByteArray()
+    if (bytes.isEmpty()) return
+    bytes.usePinned { hopi_os_log_bytes(it.addressOf(0), bytes.size) }
 }
 
 /**

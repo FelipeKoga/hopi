@@ -1,17 +1,22 @@
 package dev.koga.hopi.core.store
 
 import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.core.concurrent.BlockingSemaphore
+import dev.koga.hopi.core.concurrent.newBlockingSemaphore
+import dev.koga.hopi.core.concurrent.startBackgroundThread
+import dev.koga.hopi.core.concurrent.WakeSignal
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.redact.Redactor
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicLong
+import kotlin.concurrent.atomics.decrementAndFetch
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.incrementAndFetch
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -21,45 +26,108 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.selects.select
 
 /**
  * Ring buffer of transactions, ordered by id, bounded by [maxEntries] and by [maxTotalBytes] of
  * captured body bytes (oldest evicted first, strictly within both caps, except that the entry
  * just written is evicted last). One entry keeps at most three quarters of [maxTotalBytes].
  *
- * Writers call [submit], which never suspends, and a single consumer coroutine in [scope] applies
- * the writes. Pending snapshots go through a bounded channel that drops the oldest under flood
- * (harmless: the terminal snapshot carries everything). Terminal snapshots go through their own,
- * larger bounded channel that drops nothing silently: a terminal write that does not fit is
- * rejected and counted in [droppedTerminalWrites]. Reads ([transactions], [get], [since]) see the
- * last published snapshot and take no lock.
+ * Writers call [submit] or [submitDeferred], which never suspend, and a single consumer applies
+ * the writes: a thread of the store's own (`hopi-store`) that blocks with no timer while nothing is
+ * queued, or, when a [scope] is given (tests, a host viewer that wants it), a coroutine in it.
+ * Pending snapshots go through a bounded channel that drops the oldest under flood (harmless: the
+ * terminal snapshot carries everything). Terminal snapshots go through their own, larger bounded
+ * channel that drops nothing silently: a terminal write that does not fit is rejected and counted
+ * in [droppedTerminalWrites]. While a viewer is attached ([attachViewer]) every write wakes the
+ * consumer, so a request shows the moment it starts and the moment it ends. While none is, a
+ * pending write wakes nothing, and a terminal one wakes the consumer only when it sleeps with no
+ * timer: after a pass the consumer dozes for [batchWindowMillis], and the terminal writes that
+ * arrive meanwhile only mark the work (no system call on the request thread), applied together
+ * when the doze ends; a doze with nothing marked ends in the untimed sleep. So with nobody watching,
+ * a burst of requests costs its threads one wake in all, and a record shows at most
+ * [batchWindowMillis] after its end, unless someone calls [awaitApplied] (a bridge client as it
+ * connects, the process as it dies), which applies what waited before it returns. Reads ([transactions], [get], [since]) see the last published
+ * snapshot and take no lock. A published snapshot shares all but the changed chunks of entries
+ * with the one before it, so an update costs the same whether the store holds 5 entries or 500.
  */
 @HopiInternalApi
 public class HopiStore(
     public val maxEntries: Int = DEFAULT_MAX_ENTRIES,
     public val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
-    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    scope: CoroutineScope? = null,
     channelCapacity: Int = DEFAULT_CHANNEL_CAPACITY,
     eventBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
     terminalChannelCapacity: Int = DEFAULT_TERMINAL_CHANNEL_CAPACITY,
+    /**
+     * Thread mode: how long the consumer dozes after a pass, while terminal writes with no viewer
+     * attached only mark the work; 0 wakes it for every terminal write, as before 2026-10-25.
+     */
+    public val batchWindowMillis: Long = DEFAULT_BATCH_WINDOW_MS,
 ) {
     init {
         require(maxEntries > 0) { "maxEntries must be positive" }
         require(maxTotalBytes > 0) { "maxTotalBytes must be positive" }
         require(channelCapacity > 0) { "channelCapacity must be positive" }
         require(terminalChannelCapacity > 0) { "terminalChannelCapacity must be positive" }
+        require(batchWindowMillis >= 0) { "batchWindowMillis must not be negative" }
     }
 
     private val lastId = AtomicLong(0)
     private val clearedThrough = AtomicLong(0)
 
-    /** Pending snapshots, and null wake-ups that only apply a [clear] or publish the drop count. */
-    private val writes = Channel<HttpTransaction?>(channelCapacity, BufferOverflow.DROP_OLDEST)
-    private val terminalWrites = Channel<HttpTransaction>(terminalChannelCapacity)
+    /** Pending writes: an [HttpTransaction] or a [DeferredRecord] (or [Deferred]) that builds one. */
+    private val writes = Channel<Any>(channelCapacity, BufferOverflow.DROP_OLDEST)
+    private val terminalWrites = Channel<Any>(terminalChannelCapacity)
+
+    /**
+     * What wakes the consumer after a write, a [clear] or a lost terminal write: the thread's
+     * signal, or the coroutine's conflated doorbell. A producer that finds the consumer awake
+     * pays one atomic exchange (thread) or one conflated send (coroutine), nothing more.
+     */
+    private val signal: WakeSignal? = if (scope == null) WakeSignal() else null
+    private val doorbell: Channel<Unit>? = if (scope == null) null else Channel(Channel.CONFLATED)
+
+    @kotlin.concurrent.Volatile
+    private var closed = false
+
+    /** Thread mode: how many times the consumer slept and was woken (tests: none while idle). */
+    internal val consumerWakeups: Long get() = signal?.wakeups ?: 0
+
+    /** Thread mode: true while the consumer blocks with nothing queued, with no timer. */
+    internal val consumerSleeping: Boolean get() = signal?.sleeping ?: false
+
+    /** Thread mode: true while the consumer dozes after a pass (tests). */
+    internal val consumerDozing: Boolean get() = signal?.dozing ?: false
+
+    /** Thread mode: how many of the consumer's dozes ran their whole window (tests). */
+    internal val consumerDozeTimeouts: Long get() = signal?.dozeTimeouts ?: 0
+
+    private val windowNanos = batchWindowMillis * 1_000_000
+
+    /**
+     * Terminal writes queued without a wake since the consumer's last pass began: at [forceWakeAt]
+     * a write wakes the consumer out of its doze, so a flood never waits a whole window against
+     * the lane's capacity.
+     */
+    private val marked = AtomicInt(0)
+    private val forceWakeAt = maxOf(1, terminalChannelCapacity / 2)
     private val batchLimit = channelCapacity
     private val terminalBatchLimit = terminalChannelCapacity
     private val lostTerminalWrites = AtomicLong(0)
+
+    /**
+     * Thread mode: callers of [awaitApplied] not yet taken by a pass. The consumer takes them before
+     * a pass and releases [applied] once for each when the lanes are drained, so a caller returns
+     * after a pass that began after its call. Read by the consumer only between passes.
+     */
+    private val applyWaiters = AtomicInt(0)
+    private val applied: BlockingSemaphore? = if (scope == null) newBlockingSemaphore() else null
+
+    /** How many viewers are attached ([attachViewer]): while none is, a pending write wakes nothing. */
+    private val viewers = AtomicInt(0)
+
+    /** How many viewers are attached (tests). */
+    internal val attachedViewers: Int get() = viewers.load()
 
     /**
      * The most body bytes one entry keeps: three quarters of [maxTotalBytes], so at least a
@@ -134,7 +202,7 @@ public class HopiStore(
         }
     }
 
-    private val buffer = ArrayDeque<HttpTransaction>()
+    private val buffer = ChunkedTransactions()
     private var bufferBytes = 0L
     private var appliedClearedThrough = 0L
     /**
@@ -144,7 +212,18 @@ public class HopiStore(
      */
     private var evictedThrough = 0L
 
-    private val consumer: Job = scope.launch { consume() }
+    // Consumer only (declared before it starts): the events of the current pass.
+    private val pendingEvents = ArrayList<TransactionEvent>()
+
+    // Consumer only: what a pass drained, so the loop knows whether a lane may hold more.
+    private var drainedToLimit = false
+
+    // Everything the consumer reads is declared above: it may start before the constructor returns.
+    private val consumer: Job? = scope?.launch { consumeOnDoorbell() }
+
+    init {
+        if (scope == null) startBackgroundThread("hopi-store") { consumeOnThread() }
+    }
 
     /** Allocates the next transaction id: monotonic, starting at 1. */
     public fun nextId(): Long = lastId.incrementAndFetch()
@@ -154,14 +233,125 @@ public class HopiStore(
      * false when the store is closed, or when a terminal snapshot is rejected and counted in
      * [droppedTerminalWrites].
      */
-    public fun submit(transaction: HttpTransaction): Boolean {
-        if (!transaction.state.isTerminal) return writes.trySend(transaction).isSuccess
-        val result = terminalWrites.trySend(transaction)
-        if (result.isSuccess || result.isClosed) return result.isSuccess
+    public fun submit(transaction: HttpTransaction): Boolean = enqueue(transaction, transaction.state.isTerminal)
+
+    /**
+     * [submit] for a snapshot that [build] makes on the store's consumer, so the producer's thread
+     * (an app's request thread) only queues it: no record building and no hand-off to a thread of
+     * its own first. [terminal] says which lane, so what [build] returns must agree with it. [build]
+     * must return at once and must not block; a throw drops the write. A recorder submits a
+     * request's start before its end, so the start is built first.
+     */
+    public fun submitDeferred(terminal: Boolean, build: () -> HttpTransaction): Boolean = enqueue(Deferred(build), terminal)
+
+    /**
+     * Queues [record]'s start: its [DeferredRecord.pendingSnapshot], built on the consumer. Like
+     * [submitDeferred], with no allocation: the record object itself is what is queued.
+     */
+    public fun submitStart(record: DeferredRecord): Boolean = enqueue(record, terminal = false)
+
+    /**
+     * Queues [record]'s end: its [DeferredRecord.terminalSnapshot], built on the consumer. Submitted
+     * once per record, after [submitStart], with every field it reads written before this call.
+     */
+    public fun submitEnd(record: DeferredRecord): Boolean = enqueue(record, terminal = true)
+
+    private fun enqueue(write: Any, terminal: Boolean): Boolean {
+        if (!terminal) {
+            val sent = writes.trySend(write).isSuccess
+            // Nobody shows a request in flight: its start waits in the lane for the next wake (its
+            // own end, at the latest), and the request thread pays no second wake.
+            if (sent && viewers.load() > 0) wake()
+            return sent
+        }
+        val result = terminalWrites.trySend(write)
+        if (result.isSuccess) {
+            // Nobody watching: the end waits for the doze to end, or wakes a consumer asleep with no timer.
+            if (viewers.load() > 0 || marked.incrementAndFetch() >= forceWakeAt) wake() else mark()
+            return true
+        }
+        if (result.isClosed) return false
         lostTerminalWrites.incrementAndFetch()
-        // The consumer may have read the count just before this increment and gone idle.
-        writes.trySend(null)
+        // The consumer publishes the count on its next pass.
+        wake()
         return false
+    }
+
+    private fun wake() {
+        signal?.wake() ?: doorbell?.trySend(Unit)
+    }
+
+    private fun mark() {
+        signal?.mark() ?: doorbell?.trySend(Unit)
+    }
+
+    /**
+     * Attaches a viewer of requests in flight (a bridge connection, the UI on screen): while at
+     * least one is attached, every pending write wakes the consumer, so a request shows as pending
+     * the moment it starts; while none is, pending writes wait in their lane and the next wake (a
+     * terminal write, a clear, an attach) applies them, so a request's start costs its thread no
+     * wake. Attaching wakes the consumer at once, which applies what waited on its next pass
+     * ([awaitApplied] waits for that pass). With nobody attached, more
+     * than the pending lane's capacity of requests started and not ended loses the oldest starts
+     * (as under any flood): those requests appear when they end. Returns the function that
+     * detaches the viewer; calling it again does nothing.
+     */
+    public fun attachViewer(): () -> Unit {
+        viewers.incrementAndFetch()
+        wake()
+        val attached = AtomicBoolean(true)
+        return { if (attached.compareAndSet(true, false)) viewers.decrementAndFetch() }
+    }
+
+    /**
+     * Thread mode: wakes the consumer, also out of its doze, and waits at most [timeoutMillis] for a
+     * pass that began after this call to drain the lanes, its events and listeners (the summary log
+     * line) included. So what was queued before the call, the ends that waited in the doze among it,
+     * is in [transactions] and logged when this returns true. False on timeout, when called after
+     * [close], and in coroutine mode (whose consumer is never in a doze), where it returns at once; a
+     * caller still waiting when the store closes is released with true. A caller that times out while
+     * another waits can hand that one its permit (it may then return after an earlier pass): only
+     * under a flood that outlasts the timeout, and the guarantee then is the timeout's. Never called
+     * on a request's path: a bridge client calls it as it connects, the process as it dies. Called on
+     * the consumer itself (a listener), it waits out [timeoutMillis] and returns false.
+     */
+    public fun awaitApplied(timeoutMillis: Long): Boolean {
+        val done = applied ?: return false
+        if (closed) return false
+        applyWaiters.incrementAndFetch()
+        wake()
+        val nanos = timeoutMillis * 1_000_000
+        if (done.tryAcquire(nanos)) return true
+        while (true) {
+            val waiting = applyWaiters.load()
+            if (waiting > 0) {
+                // Not taken by a pass yet: withdrawn, so no permit is released for this call.
+                if (applyWaiters.compareAndSet(waiting, waiting - 1)) return false
+            } else {
+                // A pass took it and releases its permit as it ends: take that one, not a later caller's.
+                return done.tryAcquire(nanos)
+            }
+        }
+    }
+
+    private fun releaseAppliedWaiters(count: Int) {
+        val done = applied ?: return
+        repeat(count) { done.release() }
+    }
+
+    private class Deferred(val build: () -> HttpTransaction)
+
+    /**
+     * A record whose snapshots the consumer builds ([submitStart], [submitEnd]): the request thread
+     * queues the object itself, so a hand-off allocates nothing. Both functions run on the
+     * consumer, must return at once and must not block; a throw drops that write.
+     */
+    @HopiInternalApi
+    public interface DeferredRecord {
+        public fun pendingSnapshot(): HttpTransaction
+
+        /** Must return a terminal snapshot. */
+        public fun terminalSnapshot(): HttpTransaction
     }
 
     /**
@@ -180,7 +370,7 @@ public class HopiStore(
             val current = clearedThrough.load()
             if (current >= through || clearedThrough.compareAndSet(current, through)) break
         }
-        writes.trySend(null)
+        wake()
         return through
     }
 
@@ -206,48 +396,99 @@ public class HopiStore(
 
     /** Stops the consumer. Later submissions are rejected. */
     public fun close() {
+        closed = true
         writes.close()
         terminalWrites.close()
-        consumer.cancel()
+        doorbell?.close()
+        signal?.wake()
+        consumer?.cancel()
     }
 
-    private suspend fun consume() {
-        val pendingEvents = ArrayList<TransactionEvent>(batchLimit)
-        while (true) {
-            val first = select {
-                writes.onReceiveCatching { it }
-                terminalWrites.onReceiveCatching { it }
+    private fun consumeOnThread() {
+        val signal = signal ?: return
+        var waiters = 0
+        try {
+            while (true) {
+                signal.await()
+                do {
+                    if (closed) return
+                    // Callers of awaitApplied so far; one who calls during the pass is taken by the next.
+                    waiters = takeAppliedWaiters()
+                    while (pass()) {
+                        if (closed) return
+                        waiters += takeAppliedWaiters()
+                    }
+                    releaseAppliedWaiters(waiters)
+                    waiters = 0
+                    // A doze with nothing marked (or a window of 0) ends here, in the untimed sleep.
+                } while (windowNanos > 0 && signal.doze(windowNanos))
             }
-            if (first.isClosed) return
-            var dirty = apply(first.getOrNull(), pendingEvents)
-            // Pending snapshots first: a terminal snapshot queued later must not be overtaken.
-            dirty = drain(writes, batchLimit, pendingEvents) || dirty
-            dirty = drain(terminalWrites, terminalBatchLimit, pendingEvents) || dirty
-            if (dirty) _transactions.value = buffer.toList()
+        } finally {
+            // Closed (or failed): nobody waits for a pass that will not come.
+            releaseAppliedWaiters(waiters + applyWaiters.exchange(0))
+        }
+    }
+
+    private fun takeAppliedWaiters(): Int = if (applyWaiters.load() == 0) 0 else applyWaiters.exchange(0)
+
+    private suspend fun consumeOnDoorbell() {
+        val doorbell = doorbell ?: return
+        for (ignored in doorbell) {
+            @Suppress("ControlFlowWithEmptyBody")
+            while (pass()) {
+            }
+        }
+    }
+
+    /**
+     * Applies what the lanes hold, at most one batch of each, then publishes the snapshot and the
+     * events. Returns true when a lane held a full batch, so more may be queued without a wake.
+     */
+    private fun pass(): Boolean {
+        drainedToLimit = false
+        marked.store(0)
+        var dirty = applyClear()
+        // Pending snapshots first: a terminal snapshot queued later must not be overtaken.
+        dirty = drain(writes, batchLimit, terminal = false) || dirty
+        dirty = drain(terminalWrites, terminalBatchLimit, terminal = true) || dirty
+        if (dirty) _transactions.value = buffer.snapshot()
+        if (pendingEvents.isNotEmpty()) {
             val subscribed = listeners.load()
             for (event in pendingEvents) {
                 _events.tryEmit(event)
                 for (listener in subscribed) listener(event)
             }
             pendingEvents.clear()
-            _droppedTerminalWrites.value = lostTerminalWrites.load()
         }
+        _droppedTerminalWrites.value = lostTerminalWrites.load()
+        return drainedToLimit
     }
 
-    private fun drain(lane: Channel<out HttpTransaction?>, limit: Int, events: MutableList<TransactionEvent>): Boolean {
+    private fun drain(lane: Channel<Any>, limit: Int, terminal: Boolean): Boolean {
         var dirty = false
         repeat(limit) {
-            val next = lane.tryReceive()
-            if (!next.isSuccess) return dirty
-            dirty = apply(next.getOrNull(), events) || dirty
+            val next = lane.tryReceive().getOrNull() ?: return dirty
+            dirty = apply(next, terminal) || dirty
         }
+        drainedToLimit = true
         return dirty
     }
 
-    /** Returns true when [buffer] changed. A null write only applies a pending [clear]. */
-    private fun apply(write: HttpTransaction?, events: MutableList<TransactionEvent>): Boolean {
+    /** Returns true when [buffer] changed. */
+    private fun apply(queued: Any, terminalLane: Boolean): Boolean {
         val changed = applyClear()
-        if (write == null) return changed
+        val write = try {
+            when (queued) {
+                is HttpTransaction -> queued
+                is DeferredRecord -> if (terminalLane) queued.terminalSnapshot() else queued.pendingSnapshot()
+                is Deferred -> queued.build()
+                else -> return changed
+            }
+        } catch (_: Throwable) {
+            // A record lost to a bug in its recorder; the store and the app go on.
+            return changed
+        }
+        val events = pendingEvents
         val existing = buffer.binarySearchById(write.id)
         if (!write.state.isTerminal) {
             // The lanes can deliver a pending snapshot after its terminal one, which was kept or evicted.
@@ -326,6 +567,9 @@ public class HopiStore(
         public const val DEFAULT_CHANNEL_CAPACITY: Int = 256
         public const val DEFAULT_TERMINAL_CHANNEL_CAPACITY: Int = 4096
 
+        /** [batchWindowMillis] by default: how late a record may show while no viewer is attached. */
+        public const val DEFAULT_BATCH_WINDOW_MS: Long = 50
+
         /** [CapturedBody.skippedReason] of a body dropped because its entry alone exceeded the store's byte cap. */
         public const val SKIPPED_OVER_STORE_CAP: String = "over store byte cap"
         public const val DEFAULT_EVENT_BUFFER_CAPACITY: Int = 1024
@@ -350,12 +594,16 @@ public class HopiStore(
     }
 }
 
-private fun List<HttpTransaction>.binarySearchById(id: Long): Int {
+private fun List<HttpTransaction>.binarySearchById(id: Long): Int = binarySearchById(size, id) { this[it].id }
+
+private fun ChunkedTransactions.binarySearchById(id: Long): Int = binarySearchById(size, id) { this[it].id }
+
+private inline fun binarySearchById(size: Int, id: Long, idAt: (Int) -> Long): Int {
     var low = 0
     var high = size - 1
     while (low <= high) {
         val mid = (low + high) ushr 1
-        val midId = this[mid].id
+        val midId = idAt(mid)
         when {
             midId < id -> low = mid + 1
             midId > id -> high = mid - 1

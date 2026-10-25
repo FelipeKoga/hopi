@@ -1,5 +1,6 @@
 package dev.koga.hopi.cli
 
+import dev.koga.hopi.connect.RemoteRule
 import dev.koga.hopi.connect.bool
 import dev.koga.hopi.connect.long
 import dev.koga.hopi.connect.notReachable
@@ -28,18 +29,28 @@ internal object Render {
 
     fun summaryCells(summary: JsonObject): List<String> {
         val state = summary.str("state")
-        val code = summary.long("code")?.toString() ?: when (state) {
-            "pending" -> "..."
-            "failed" -> "ERR"
-            else -> "-"
+        val code = when {
+            state == "failed" -> "ERR"
+            else -> summary.long("code")?.toString() ?: if (state == "pending") "..." else "-"
         }
         val time = summary.long("ms")?.let { "$it ms" } ?: "-"
         val size = if (state == "pending") "-" else formatBytes(summary.long("resBytes") ?: 0)
         val url = buildString {
             append(visible(summary.str("url").orEmpty()))
             if (summary.bool("urlTruncated") == true) append('…')
+            summary.str("finalUrl")?.let { final ->
+                append("  -> ").append(visible(final))
+                if (summary.bool("finalUrlTruncated") == true) append('…')
+            }
+            // The Ktor plugin's records (and an older app's, without the field) carry no tag.
+            summary.str("source")?.takeIf { it != "ktor" }?.let { append("  [").append(visible(it)).append(']') }
+            ruleMark(summary)?.let { append("  [").append(it).append(']') }
+            summary.long("replayOf")?.let { append("  [replay of ").append(it).append(']') }
             if (state == "failed") {
-                append("  (").append(visible(summary.str("error") ?: "failed"))
+                append("  (")
+                // A failure after the response arrived keeps its status; the code column still says ERR.
+                summary.long("code")?.let { append("HTTP ").append(it).append(", then ") }
+                append(visible(summary.str("error") ?: "failed"))
                 if (summary.bool("errorTruncated") == true) append('…')
                 append(')')
             }
@@ -68,6 +79,53 @@ internal object Render {
         }
     }.trimEnd()
 
+    /** `mock #3`, `delay,mock #3`: what a rule did to the record, by rule id; null when no rule applied. */
+    private fun ruleMark(summary: JsonObject): String? {
+        val id = summary.long("rule") ?: return null
+        return (summary.str("applied")?.let { visible(it) } ?: "rule") + " #" + id
+    }
+
+    /** One rule, as `add`, `enable` and `disable` print it: id, match, action, then the limit and state. */
+    fun ruleLine(rule: RemoteRule): String = buildString {
+        append('#').append(rule.id).append("  ").append(visible(rule.match)).append("  ").append(visible(rule.action))
+        rule.times?.let { append("  times ").append(it) }
+        if (!rule.enabled) append("  (disabled)")
+        if (rule.exhausted) append("  (exhausted)")
+        rule.label?.let { append("  \"").append(visible(it)).append('"') }
+    }
+
+    /** `rules ls`: `ID ON PRI HITS MATCH ACTION`, hits as `n/times` when the rule has a limit. */
+    fun rulesTable(rules: List<RemoteRule>): List<String> {
+        val header = listOf("ID", "ON", "PRI", "HITS", "MATCH", "ACTION")
+        val rows = rules.map { rule ->
+            listOf(
+                rule.id.toString(),
+                if (rule.exhausted) "done" else if (rule.enabled) "yes" else "no",
+                rule.priority.toString(),
+                rule.times?.let { "${rule.hits}/$it" } ?: rule.hits.toString(),
+                visible(rule.match),
+                visible(rule.action) + (rule.label?.let { "  \"${visible(it)}\"" } ?: ""),
+            )
+        }
+        val all = listOf(header) + rows
+        val widths = IntArray(header.size - 1) { column -> all.maxOf { it[column].length } }
+        return all.map { cells ->
+            buildString {
+                cells.forEachIndexed { column, cell ->
+                    if (column == cells.lastIndex) {
+                        append(cell)
+                    } else {
+                        val pad = widths[column] - cell.length
+                        if (column == 0 || column == 2 || column == 3) repeat(pad) { append(' ') }
+                        append(cell)
+                        if (!(column == 0 || column == 2 || column == 3)) repeat(pad) { append(' ') }
+                        append("  ")
+                    }
+                }
+            }.trimEnd()
+        }
+    }
+
     fun droppedNotice(dropped: Long): String =
         "! the app's store has dropped $dropped transactions so far (it could not keep up); they stay pending here"
 
@@ -88,18 +146,25 @@ internal object Render {
     fun detail(detail: JsonObject): String = buildString {
         appendLine("${visible(detail.str("method").orEmpty())} ${visible(detail.str("url").orEmpty())}")
         val overview = buildList {
+            detail.str("finalUrl")?.let { add("Final URL" to visible(it)) }
             add("ID" to (detail.long("id")?.toString() ?: "?"))
             add("State" to visible(detail.str("state").orEmpty()))
             add("Code" to (detail.long("code")?.toString() ?: "-"))
             add("Duration" to (detail.long("ms")?.let { "$it ms" } ?: "-"))
             add("Protocol" to visible(detail.str("protocol") ?: "-"))
+            detail.str("source")?.let { add("Source" to visible(it)) }
+            detail.long("rule")?.let { id ->
+                add("Rule" to "#$id" + (detail.str("applied")?.let { ": " + visible(it).replace(",", ", ") } ?: ""))
+            }
+            detail.long("replayOf")?.let { add("Replay of" to "#$it") }
             detail.long("startedAt")?.let { add("Started" to Instant.ofEpochMilli(it).toString()) }
             detail.str("error")?.let { add("Error" to visible(it)) }
         }
         val width = overview.maxOf { it.first.length }
         overview.forEach { (key, value) -> appendLine("  ${key.padEnd(width)}  $value") }
         exchange("Request", detail["request"] as? JsonObject)
-        exchange("Response", detail["response"] as? JsonObject)
+        // A failed exchange's response is what arrived before the failure.
+        exchange(if (detail.str("state") == "failed") "Response (partial)" else "Response", detail["response"] as? JsonObject)
     }.trimEnd()
 
     private fun StringBuilder.exchange(title: String, exchange: JsonObject?) {

@@ -1,0 +1,4 @@
+hook cost, 1024-byte bodies, 300+100 requests: resume 31575 ns x 400, data 8934 ns x 807, finish 17184 ns x 401
+hook cost, 65536-byte bodies, 300+100 requests: resume 5653 ns x 400, data 2745 ns x 1194, finish 12570 ns x 400
+hook cost, 1048576-byte bodies, 60+20 requests: resume 3998 ns x 80, data 10339 ns x 324, finish 12355 ns x 80
+retained high water: 262144 bytes for an 8 MB body with a 256 KB cap

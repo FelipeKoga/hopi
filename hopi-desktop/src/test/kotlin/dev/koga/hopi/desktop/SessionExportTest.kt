@@ -92,6 +92,24 @@ class SessionExportTest {
     }
 
     @Test
+    fun harMarksWhatARuleDidAndWhatAReplayReSent() {
+        val marked = listOf(
+            completeTx(1).copy(ruleId = 3, ruleApplied = "delay,mock"),
+            completeTx(2).copy(replayOf = 1),
+            completeTx(3),
+        )
+        val (text, _) = export(ExportFormat.Har, marked)
+        assertEquals(emptyList(), validateHar(har(text)))
+        val entries = har(text)["log"]!!.jsonObject["entries"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(3L, entries[0]["_rule"]!!.jsonPrimitive.long)
+        assertEquals("delay,mock", entries[0].string("_ruleApplied"))
+        assertNull(entries[0]["_replayOf"])
+        assertEquals(1L, entries[1]["_replayOf"]!!.jsonPrimitive.long)
+        assertNull(entries[1]["_rule"])
+        assertTrue(listOf("_rule", "_ruleApplied", "_replayOf").none { it in entries[2] })
+    }
+
+    @Test
     fun summariesAreFetchedWithinTheBudgetAndTheRestKeepsSizes() {
         val small = completeTx(1, responseBody = textBody("small"))
         val giant = completeTx(2, responseBody = textBody("g".repeat(4096)))

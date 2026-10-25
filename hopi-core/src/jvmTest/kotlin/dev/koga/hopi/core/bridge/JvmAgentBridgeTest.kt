@@ -140,7 +140,7 @@ class JvmAgentBridgeTest {
         val clients = List(3) { Client(bridge) }
         for (client in clients) {
             val hello = client.request("{\"cmd\":\"hello\"}")
-            assertEquals(mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 0L), hello)
+            assertEquals(mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 0L, "rules" to true), hello)
         }
         for (client in clients) {
             client.send("{\"cmd\":\"list\"}")

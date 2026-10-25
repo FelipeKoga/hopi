@@ -44,12 +44,16 @@ tasks.jar {
 tasks.test {
     // The UI test composes a real window's content and writes its screenshot here.
     systemProperty("hopi.desktop.screenshots", layout.buildDirectory.dir("reports/screenshots").get().asFile.absolutePath)
-    // DeviceViewerUiTest runs only with -Phopi.desktop.device=android|ios (a real emulator or simulator).
+    // DeviceViewerUiTest and DeviceRulesPanelUiTest run only with -Phopi.desktop.device=android|ios (a real emulator or simulator).
     val device = providers.gradleProperty("hopi.desktop.device").orNull
     if (device != null) {
         systemProperty("hopi.desktop.device", device)
-        systemProperty("hopi.desktop.evidence", rootProject.layout.buildDirectory.dir("evidence/desktop").get().asFile.absolutePath)
+        // -Phopi.desktop.evidence=<dir> writes the checks and screenshots elsewhere.
+        val evidence = providers.gradleProperty("hopi.desktop.evidence").orNull ?: rootProject.layout.buildDirectory.dir("evidence/desktop").get().asFile.absolutePath
+        systemProperty("hopi.desktop.evidence", evidence)
         systemProperty("hopi.repo", rootProject.layout.projectDirectory.asFile.absolutePath)
+        // runTest's own limit (60 s by default), which the device runs outlast.
+        systemProperty("kotlinx.coroutines.test.default_timeout", "30m")
         outputs.upToDateWhen { false }
         testLogging { showStandardStreams = true }
     }

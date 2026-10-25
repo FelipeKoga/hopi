@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class TransactionRowsTest {
     @Test
@@ -24,6 +25,13 @@ class TransactionRowsTest {
         assertEquals("2.0 KB", row.size)
         assertNull(row.error)
         assertEquals("api.example.com  ·  ${row.time}", row.subtitle)
+    }
+
+    @Test
+    fun aSourceOtherThanKtorIsTagged() {
+        val captured = buildRow(complete(1).copy(source = "urlsession"), Redactor.Default)
+        assertEquals("api.example.com  ·  ${captured.time}  ·  URLSession", captured.subtitle)
+        assertEquals("api.example.com  ·  ${captured.time}", buildRow(complete(2).copy(source = "ktor"), Redactor.Default).subtitle)
     }
 
     @Test
@@ -159,5 +167,25 @@ class TransactionRowsTest {
         assertEquals(listOf(1L), searched.rows.map { it.id })
         assertEquals(7, searched.total)
         assertEquals(listOf(5, 1, 1, 1, 1, 0, 1), searched.counts.toList())
+    }
+
+    @Test
+    fun aRedirectThatChangedTheHostIsShownAndSearchable() {
+        val moved = buildRow(complete(1).copy(finalUrl = "https://cdn.example.org/a.json"), Redactor.Default)
+        assertEquals("api.example.com → cdn.example.org  ·  ${moved.time}", moved.subtitle)
+        assertTrue("cdn.example.org" in moved.searchKey)
+        val sameHost = buildRow(complete(2).copy(finalUrl = "https://api.example.com/v2/users"), Redactor.Default)
+        assertEquals("api.example.com → redirected  ·  ${sameHost.time}", sameHost.subtitle)
+    }
+
+    @Test
+    fun aRuledOrReplayedRequestIsTagged() {
+        assertEquals(emptyList(), buildRow(complete(1), Redactor.Default).tags)
+        assertEquals(listOf("MOCK"), buildRow(complete(1).copy(ruleId = 3, ruleApplied = "delay,mock"), Redactor.Default).tags)
+        assertEquals(listOf("FAIL"), ruleTags(failed(1).copy(ruleId = 3, ruleApplied = "delay,fail")))
+        assertEquals(listOf("EDIT"), ruleTags(complete(1).copy(ruleId = 3, ruleApplied = "delay,edit-request")))
+        assertEquals(listOf("DELAY"), ruleTags(complete(1).copy(ruleId = 3, ruleApplied = "delay")))
+        assertEquals(listOf("REPLAY"), ruleTags(complete(2).copy(replayOf = 1)))
+        assertEquals(listOf("REPLAY", "MOCK"), ruleTags(complete(2).copy(replayOf = 1, ruleId = 3, ruleApplied = "mock")))
     }
 }

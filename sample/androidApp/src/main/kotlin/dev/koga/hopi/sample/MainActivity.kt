@@ -8,7 +8,12 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import dev.koga.fakesdk.FakeSdk
+import dev.koga.hopi.android.HopiAndroid
+import dev.koga.hopi.rules.HopiRules
+import dev.koga.hopi.rules.HopiSource
 import java.io.IOException
+import java.net.URL
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,6 +38,36 @@ private const val MAX_BODY_BYTES_EXTRA = "maxBodyBytes"
 /** `--el maxTotalBytes N`: Hopi's store byte cap (the body cap is clamped to half of it). */
 private const val MAX_TOTAL_BYTES_EXTRA = "maxTotalBytes"
 private const val GIANT_EXTRA = "giant"
+
+/** `--es capture all` runs [captureAction] at launch: the fake SDK's requests and `URL.readText()`. */
+private const val CAPTURE_EXTRA = "capture"
+
+/**
+ * `--es captureBench 'kinds=okhttp,urlconnection;path=/json;n=300;warmup=50;gapUs=2000'` runs
+ * [captureBench] at launch: the capture A/B workload (benchmark/android-capture/), one JSON line per
+ * kind. `gapUs` (default 0, back to back) idles the thread that long before each request.
+ */
+private const val CAPTURE_BENCH_EXTRA = "captureBench"
+
+/**
+ * `--es verify all` runs [verifyAction] at launch: the end-to-end capture check
+ * (benchmark/android-capture/e2e), Ktor then the fake SDK's OkHttp and HttpURLConnection scenarios.
+ * `--es verifyHttps <url>` names the public HTTPS URL its HTTPS scenarios fetch.
+ */
+private const val VERIFY_EXTRA = "verify"
+private const val VERIFY_HTTPS_EXTRA = "verifyHttps"
+private const val DEFAULT_VERIFY_HTTPS = "https://example.com/"
+
+/**
+ * `--es rulesVerify all` runs [rulesVerifyAction] at launch: the rules self-test on every Android
+ * source, then the pinned client. `--es rulesTargets all` runs [rulesTargetsAction] instead: the
+ * requests the host's own rules (`hopi mock add …`) are checked against. Both take `verifyHttps`.
+ */
+private const val RULES_VERIFY_EXTRA = "rulesVerify"
+private const val RULES_TARGETS_EXTRA = "rulesTargets"
+
+/** The host dev server, through `adb reverse tcp:8765 tcp:8765`. */
+private const val DEV_SERVER_URL = "http://127.0.0.1:8765"
 
 /**
  * Hosts the shared sample UI (`sample/shared`, which also owns the HTTP client and Hopi) and
@@ -60,9 +95,149 @@ class MainActivity : ComponentActivity() {
         val runSelfCheckNow = intent.hasExtra(SELF_CHECK_EXTRA)
         // `am start … --es squat <process name>` from a second install: the CLI must refuse it.
         intent.getStringExtra(SQUAT_EXTRA)?.let(::squat)
-        val launchAction = intent.getStringExtra(GIANT_EXTRA)?.let(::giantJsonAction) ?: selfCheck.takeIf { runSelfCheckNow }
+        val capture = captureAction()
+        val https = intent.getStringExtra(VERIFY_HTTPS_EXTRA) ?: DEFAULT_VERIFY_HTTPS
+        val rulesVerify = rulesVerifyAction(https)
+        val rulesTargets = rulesTargetsAction()
+        val launchAction = intent.getStringExtra(GIANT_EXTRA)?.let(::giantJsonAction)
+            ?: intent.getStringExtra(CAPTURE_BENCH_EXTRA)?.let(::captureBench)
+            ?: verifyAction(https).takeIf { intent.hasExtra(VERIFY_EXTRA) }
+            ?: rulesVerify.takeIf { intent.hasExtra(RULES_VERIFY_EXTRA) }
+            ?: rulesTargets.takeIf { intent.hasExtra(RULES_TARGETS_EXTRA) }
+            ?: capture.takeIf { intent.hasExtra(CAPTURE_EXTRA) }
+            ?: selfCheck.takeIf { runSelfCheckNow }
         setContent {
-            SampleApp(platformActions = listOf(selfCheck), launchAction = launchAction)
+            SampleApp(platformActions = listOf(selfCheck, capture, rulesVerify, rulesTargets), launchAction = launchAction)
+        }
+    }
+}
+
+/**
+ * Requests Hopi records with no Ktor and no setup: the fake third-party SDK's OkHttp client and
+ * HttpURLConnection calls (`sample/fakesdk`, which knows nothing of Hopi) and Kotlin's
+ * `URL.readText()`. The debug build records each of them once, through the dev.koga.hopi plugin's
+ * instrumentation; the release build sends the same requests and records nothing. Logged under
+ * `HopiSample`, one line per request, then the capture status.
+ */
+private fun captureAction() = PlatformAction("Third-party SDK and URL.readText()") {
+    withContext(Dispatchers.IO) {
+        val lines = try {
+            FakeSdk.run(DEV_SERVER_URL) + "kotlin URL.readText ${URL("$DEV_SERVER_URL/json?sdk=readText").readText().length} chars"
+        } catch (e: Exception) {
+            listOf("capture: ${e::class.simpleName}: ${e.message}")
+        }
+        val status = "capture: started=${HopiAndroid.isStarted} okHttpInstrumented=${HopiAndroid.okHttpInstrumented}"
+        (lines + status).forEach { Log.i("HopiSample", it) }
+        (lines + status).joinToString("\n")
+    }
+}
+
+/**
+ * One request of each shape through Ktor, the fake SDK's OkHttp client and HttpURLConnection, one
+ * `{"verify":…}` line each under `HopiSample` (status, bytes read, SHA-256), then
+ * `{"verify":"done",…}` with the capture status. The host matches the lines to Hopi's records and
+ * compares them with a noop build's.
+ */
+private fun verifyAction(https: String) = PlatformAction("Capture verify") {
+    withContext(Dispatchers.IO) {
+        val ktorFailed = runKtorVerify(https)
+        val lines = FakeSdk.verify(DEV_SERVER_URL, https)
+        lines.forEach { Log.i("HopiSample", it) }
+        val done = "{\"verify\":\"done\",\"ktorFailed\":$ktorFailed,\"started\":${HopiAndroid.isStarted},\"okHttpInstrumented\":${HopiAndroid.okHttpInstrumented}}"
+        Log.i("HopiSample", done)
+        done
+    }
+}
+
+/**
+ * Every Android source the rules scenarios drive: the Ktor plugin (a request that names its own
+ * `Accept-Encoding`, which the plugin keeps), Ktor's OkHttp engine (ruled by the instrumented
+ * interceptor, not the plugin), and the fake SDK's own OkHttp client and HttpURLConnection, which
+ * know nothing of Hopi.
+ */
+private val RULES_TARGETS = listOf(
+    ktorRulesTarget("ktor", HopiSource.Ktor, passThrough = true),
+    ktorRulesTarget("ktor-okhttp", HopiSource.OkHttp),
+    fakeSdkTarget("sdk-okhttp", "okhttp", HopiSource.OkHttp),
+    fakeSdkTarget("sdk-urlconnection", "urlconnection", HopiSource.UrlConnection),
+)
+
+private fun fakeSdkTarget(name: String, engine: String, source: HopiSource) = RulesTarget(name, source) { call ->
+    withContext(Dispatchers.IO) {
+        val headers = call.headers.flatMap { listOf(it.first, it.second) }.toTypedArray()
+        val result = FakeSdk.call(engine, call.method, call.url, headers, call.body, RULES_HEADER)
+        RulesOutcome(result.status, result.body, result.header, result.error)
+    }
+}
+
+/**
+ * The rules self-test ([runRulesVerify]) on [RULES_TARGETS], then the pinned client: the fake
+ * SDK's client that pins [https]'s host to a key no server has fails the pin without a rule and
+ * still fails it under a request edit (a rule never weakens the app's TLS), and a mock answers it
+ * without any connection. Needs the emulator's network for the pinned part.
+ */
+private fun rulesVerifyAction(https: String) = PlatformAction("Rules self-test") {
+    val verify = runRulesVerify(RULES_TARGETS)
+    val host = java.net.URL(https).host
+    val match = "GET https://$host/**"
+    val pinned = withContext(Dispatchers.IO) {
+        val plain = FakeSdk.pinned(https)
+        val editId = HopiRules.edit(match) {
+            request { setHeader("X-Hopi-Rule", "edited") }
+            sources(HopiSource.OkHttp)
+        }
+        val edited = try {
+            FakeSdk.pinned(https)
+        } finally {
+            HopiRules.remove(editId)
+        }
+        val mockId = HopiRules.mock(match) {
+            status = 200
+            body("pinned host, mocked")
+            sources(HopiSource.OkHttp)
+        }
+        val mocked = try {
+            FakeSdk.pinned(https)
+        } finally {
+            HopiRules.remove(mockId)
+        }
+        val pinFailure = "SSLPeerUnverifiedException"
+        val ok = plain.error.orEmpty().startsWith(pinFailure) && edited.error.orEmpty().startsWith(pinFailure) && mocked.status == 200
+        fun seen(result: FakeSdk.Result) = (result.error ?: result.status.toString()).replace('"', '\'')
+        "{\"rules\":\"pinned\",\"ok\":$ok,\"plain\":\"${seen(plain)}\",\"edited\":\"${seen(edited)}\",\"mocked\":\"${seen(mocked)}\"}"
+            .also { Log.i("HopiSample", it) }
+    }
+    "$verify\n$pinned"
+}
+
+/** [runRulesTargets] on [RULES_TARGETS]: the requests the host's own rules act on. */
+private fun rulesTargetsAction() = PlatformAction("Rules targets (for host rules)") {
+    runRulesTargets(RULES_TARGETS)
+}
+
+/**
+ * Sequential requests through the fake SDK's OkHttp client and HttpURLConnection, on one worker
+ * thread: per kind, the median and p90 wall time per request (call to body end) and the thread's
+ * CPU per request (`Debug.threadCpuTimeNanos`), after `warmup` requests that are not counted.
+ * Logged under `HopiSample` as `{"captureBench":…}`.
+ */
+private fun captureBench(spec: String) = PlatformAction("Capture benchmark") {
+    val fields = spec.split(';').mapNotNull { part -> part.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
+    val kinds = fields["kinds"]?.split(',') ?: listOf("okhttp", "urlconnection")
+    val path = fields["path"] ?: "/json"
+    val count = fields["n"]?.toInt() ?: 300
+    val warmup = fields["warmup"]?.toInt() ?: 50
+    val gapUs = fields["gapUs"]?.toLong() ?: 0L
+    withContext(Dispatchers.IO) {
+        kinds.joinToString("\n") { kind ->
+            FakeSdk.bench(DEV_SERVER_URL, kind, path, warmup, gapUs)
+            val cpuBefore = android.os.Debug.threadCpuTimeNanos()
+            val nanos = FakeSdk.bench(DEV_SERVER_URL, kind, path, count, gapUs).sorted()
+            val cpuPerRequest = (android.os.Debug.threadCpuTimeNanos() - cpuBefore) / count
+            val line = "{\"captureBench\":\"$kind\",\"path\":\"$path\",\"n\":$count,\"gapUs\":$gapUs,\"capture\":${HopiAndroid.isStarted}," +
+                "\"medianUs\":${nanos[count / 2] / 1000},\"p90Us\":${nanos[count * 9 / 10] / 1000},\"cpuUs\":${cpuPerRequest / 1000}}"
+            Log.i("HopiSample", line)
+            line
         }
     }
 }

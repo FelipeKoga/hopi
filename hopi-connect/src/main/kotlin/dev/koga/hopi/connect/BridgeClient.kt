@@ -85,6 +85,9 @@ public class BridgeClient private constructor(
 
     public fun send(request: String): Unit = write(StringBuilder(request.length + 1).append(request).append('\n'))
 
+    /** Sends [lines], each already ending in `\n`, in one write (a pipelined window of requests). */
+    public fun sendLines(lines: CharSequence): Unit = write(lines)
+
     /** Lets `tail` wait for events as long as it takes. */
     public fun waitForever() {
         socket.soTimeout = 0
@@ -101,7 +104,8 @@ public class BridgeClient private constructor(
             val message = visible(reply.json.str("message").orEmpty())
             throw when (code) {
                 "NOT_FOUND" -> CliException(ExitCode.NOT_FOUND, message)
-                "BAD_REQUEST" -> usageError("the bridge rejected the request: $message")
+                "BAD_REQUEST", "LIMIT" -> usageError("the bridge rejected the request: $message")
+                "UNSUPPORTED" -> CliException(ExitCode.UNSUPPORTED, message)
                 "SLOW_CLIENT" -> reply.json.long("since").let { since ->
                     SlowClientException(
                         since,

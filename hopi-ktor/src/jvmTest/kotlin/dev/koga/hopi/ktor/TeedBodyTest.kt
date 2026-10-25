@@ -652,13 +652,20 @@ class TeedBodyTest {
      * failure wrapped once per channel it crossed, where only the app's own read of the copy may
      * add a closed-read layer. A copy that failed on a read error of its own shows that error inside.
      */
+    /**
+     * What a copy of a failed source shows the app: the copy's end, or the source's own failure
+     * wrapped once per channel it crossed. Each wrapping layer is a closed channel or a closed-read
+     * one, depending on whether that copy closed before or after the next reader's check, so the
+     * kind varies per layer from run to run (BodyProgress's copy and bodyAsChannel's run on their
+     * own dispatchers); what may not vary is the source's failure at the root.
+     */
     private fun assertCopiedFailure(e: Throwable?, label: String) {
         val links = generateSequence(e) { it.cause }.map { it::class to it.message }.toList()
         val ended = links == listOf(EOFException::class to "Channel is already closed")
+        val closed = setOf(ClosedByteChannelException::class, ClosedReadChannelException::class)
         val wrapped = links.size >= 2 &&
             links.last() == (IOException::class to "connection reset") &&
-            links.first().first in setOf(ClosedByteChannelException::class, ClosedReadChannelException::class) &&
-            links.subList(1, links.size - 1).all { it.first == ClosedByteChannelException::class }
+            links.dropLast(1).all { it.first in closed }
         assertTrue(ended || wrapped, "$label: $links")
     }
 

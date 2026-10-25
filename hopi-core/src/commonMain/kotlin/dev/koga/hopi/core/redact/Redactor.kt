@@ -15,8 +15,15 @@ public class Redactor private constructor(
     public fun isRedactedHeader(name: String): Boolean =
         enabled && name.lowercase() in headerNames
 
+    /** The lowercased header names [isRedactedHeader] answers true for; empty when disabled. */
+    public val redactedHeaderNames: Set<String> get() = if (enabled) headerNames else emptySet()
+
     public fun headerValue(name: String, value: String): String =
         if (isRedactedHeader(name)) REDACTED else value
+
+    /** The value of the (decoded) query parameter [name], or [REDACTED] when the parameter is redacted. */
+    public fun queryValue(name: String, value: String): String =
+        if (enabled && name.lowercase() in queryParameterNames) REDACTED else value
 
     public fun headers(headers: List<Pair<String, String>>): List<Pair<String, String>> {
         if (!enabled || headers.none { isRedactedHeader(it.first) }) return headers

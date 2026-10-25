@@ -117,7 +117,7 @@ class IosAgentBridgeTest {
             val client = Client(bridge.port)
             client.send(token)
             assertEquals(
-                mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.hopi.test", "platform" to "ios", "count" to 1L, "dropped" to 0L),
+                mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.hopi.test", "platform" to "ios", "count" to 1L, "dropped" to 0L, "rules" to true),
                 client.request("{\"cmd\":\"hello\"}"),
             )
             assertEquals(1L, client.request("{\"cmd\":\"list\"}")["id"])

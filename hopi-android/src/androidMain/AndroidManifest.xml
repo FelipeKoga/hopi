@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into debuggable variants only: only they depend on this module (the dev.koga.hopi plugin
+     gives the other variants hopi-android-noop, which has no manifest entry). The highest initOrder
+     runs it before other SDKs' providers, which may already make requests. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider
+            android:name="dev.koga.hopi.android.internal.HopiInitProvider"
+            android:authorities="${applicationId}.hopi-init"
+            android:exported="false"
+            android:initOrder="2147483647" />
+    </application>
+</manifest>

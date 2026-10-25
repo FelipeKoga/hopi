@@ -8,5 +8,9 @@ public actual fun emitPlatformLogLine(line: String) {
     System.err.println(line)
 }
 
+internal actual fun emitPlatformLogLine(line: StringBuilder) {
+    System.err.println(line)
+}
+
 @HopiInternalApi
 public actual val platformLogLineMaxBytes: Int = TransactionJson.MAX_SUMMARY_LINE_BYTES

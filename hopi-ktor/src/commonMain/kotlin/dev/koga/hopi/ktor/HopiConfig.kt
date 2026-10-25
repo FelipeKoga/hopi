@@ -41,6 +41,12 @@ public class HopiConfig {
     /** Starts the device-local agent bridge. */
     public var agentBridge: Boolean = false
 
+    /**
+     * Applies Hopi rules (mock, delay, fail, edit, replay) to the requests this plugin records. With
+     * no rule set a request pays one read of the rule state; false makes the plugin never read it.
+     */
+    public var rules: Boolean = true
+
     internal val redactedHeaders = mutableListOf<String>()
     internal val redactedQueryParameters = mutableListOf<String>()
     internal var redactionDisabled = false

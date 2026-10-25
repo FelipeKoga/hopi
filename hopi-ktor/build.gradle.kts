@@ -38,6 +38,8 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)
+            // Rules: a response body edit under the real ContentEncoding plugin.
+            implementation(libs.ktor.client.encoding)
             // A real socket engine for the giant-body benchmark (the sample's Android engine).
             implementation(libs.ktor.client.okhttp)
         }

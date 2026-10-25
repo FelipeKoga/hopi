@@ -1,7 +1,8 @@
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.BuiltArtifactsLoader
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import dev.koga.hopi.instrument.DexReader
+import dev.koga.hopi.instrument.DexReader.MethodRef
+import dev.koga.hopi.instrument.HookDescriptors
 import java.util.zip.ZipFile
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
@@ -10,6 +11,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
+    // The one line an Android app needs for automatic capture (docs/design/android-capture.md).
+    id("dev.koga.hopi")
 }
 
 android {
@@ -49,25 +52,39 @@ kotlin {
     compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
+// `-Psample.hopiCapture=false` builds the debug variant as release is built (`hopi { enabled = false }`:
+// the noop runtime, the noop twins, no instrumentation), the control arm of the capture A/B.
+hopi {
+    enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
+    // The CLI and the desktop viewer reach the app through its bridge.
+    agentBridge.set(true)
+}
+
 dependencies {
-    // Hopi comes with the shared module, which selects the real modules or the noop twins by
-    // the `hopi.enabled` Gradle property, for every build type (docs/ARCHITECTURE.md,
-    // "Selecting real vs noop"). This module names neither, so the two are never both packaged.
+    // Hopi's Ktor plugin and UI come with the shared module, which names the real modules or the
+    // noop twins by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs
+    // noop"). The dev.koga.hopi plugin then resolves them per variant: real in debug, noop in
+    // release, whatever the property said, so the two are never both packaged. It also adds the
+    // capture runtime (hopi-android, or hopi-android-noop in release).
     implementation(project(":sample:shared"))
+    // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
+    implementation(project(":sample:fakesdk"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.compose.runtime)
 }
 
 /**
- * Proves which Hopi a release APK packages. It lists every class in the APK's dex files and
- * compares the Hopi ones (`dev.koga.hopi.*` outside the sample's own package) with the
- * classes of the Hopi projects on the release runtime classpath:
+ * Proves which Hopi a release APK packages, and that none of it, and no instrumentation, is in it.
+ * It reads the APK's dex files (classes, referenced types and methods, and each class's invoke
+ * instructions, with the plugin's own `DexReader`, no SDK tool) and the merged manifest:
  *
- * - noop expected: the classpath holds exactly the noop twins, the APK no `dev.koga.hopi.core`
- *   class, and every Hopi class in the APK is one the noop twins compiled, and all of them are;
- * - real expected: the classpath holds the real modules and core, and the APK exactly their classes.
- *
- * Dex files are read directly (header, string ids, type ids, class defs), so no SDK tool runs.
+ * - the release runtime classpath holds exactly the noop twins, and the APK's Hopi classes are
+ *   exactly the classes their jars hold;
+ * - no type of `dev.koga.hopi.core` or `dev.koga.hopi.android.internal` is defined or even
+ *   referenced (an instrumented call site would reference a hook type), and no class calls a hook;
+ * - the negative control: OkHttp's `RealCall` still calls `OkHttpClient.interceptors()` and the fake
+ *   SDK still calls `URL.openConnection()`, so the check is known to look at the right code;
+ * - the merged manifest declares no Hopi provider.
  */
 abstract class VerifyHopiSelection : DefaultTask() {
     @get:InputFiles
@@ -77,8 +94,9 @@ abstract class VerifyHopiSelection : DefaultTask() {
     @get:Internal
     abstract val builtArtifactsLoader: Property<BuiltArtifactsLoader>
 
-    @get:Input
-    abstract val expectReal: Property<Boolean>
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val mergedManifest: RegularFileProperty
 
     /** Paths of the Hopi projects on the release runtime classpath. */
     @get:Input
@@ -96,47 +114,51 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val builtArtifacts = builtArtifactsLoader.get().load(apkDirectory.get())
             ?: throw GradleException("No release APK in ${apkDirectory.get().asFile}")
         val apk = File(builtArtifacts.elements.single().outputFile)
-        val real = expectReal.get()
         val problems = mutableListOf<String>()
 
         val projects = hopiProjects.get()
-        val expectedProjects = if (real) {
-            setOf(":hopi-core", ":hopi-ktor", ":hopi-ui")
-        } else {
-            setOf(":hopi-ktor-noop", ":hopi-ui-noop")
-        }
+        val expectedProjects = setOf(":hopi-ktor-noop", ":hopi-ui-noop", ":hopi-rules-noop", ":hopi-android-noop")
         if (projects != expectedProjects) {
             problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
         }
 
+        val dex = DexReader.ofApk(apk)
         val libraryClasses = hopiJars.files.flatMapTo(sortedSetOf()) { classesInJar(it) }
-        val apkClasses = classesInApk(apk).filterTo(sortedSetOf()) {
+        val apkClasses = dex.definedClasses.map { it.replace('/', '.') }.filterTo(sortedSetOf()) {
             it.startsWith("dev.koga.hopi.") && !it.startsWith("dev.koga.hopi.sample.")
         }
         // D8 may add synthetic classes next to a library's own (`…$$ExternalSyntheticLambda0`).
         val apkOwnClasses = apkClasses.mapTo(sortedSetOf()) { it.substringBefore("\$\$ExternalSynthetic") }
-        val coreClasses = apkClasses.filter { it.startsWith("dev.koga.hopi.core.") }
-
         if (libraryClasses.isEmpty()) problems += "the Hopi projects' jars hold no class"
         val unexpected = apkOwnClasses - libraryClasses
         if (unexpected.isNotEmpty()) problems += "classes of no selected Hopi project: ${unexpected.take(20)}"
         val missing = libraryClasses - apkOwnClasses
         if (missing.isNotEmpty()) problems += "classes of the selected projects missing from the APK: ${missing.take(20)}"
-        if (real && coreClasses.isEmpty()) problems += "no dev.koga.hopi.core class, but the real modules need core"
-        if (!real && coreClasses.isNotEmpty()) problems += "${coreClasses.size} dev.koga.hopi.core classes, e.g. ${coreClasses.take(5)}"
+
+        val forbidden = dex.referencedTypes.filter { type -> FORBIDDEN_PACKAGES.any { type.startsWith(it) } }
+        if (forbidden.isNotEmpty()) problems += "${forbidden.size} referenced capture or core types, e.g. ${forbidden.take(5)}"
+        val hookCalls = dex.invokesByClass.filterValues { calls -> calls.any { it.owner == HookDescriptors.OKHTTP_HOOKS || it.owner == HookDescriptors.URL_HOOKS } }.keys
+        if (hookCalls.isNotEmpty()) problems += "classes that call a Hopi hook: ${hookCalls.take(10)}"
+        val realCallCalls = dex.callersOf(INTERCEPTORS)
+        if (HookDescriptors.REAL_CALL_CLASSES.none { it in realCallCalls }) problems += "RealCall does not call OkHttpClient.interceptors() (the negative control found nothing)"
+        val sdkCalls = dex.callersOf(OPEN_CONNECTION).filter { it.startsWith("dev/koga/fakesdk/") }
+        if (sdkCalls.isEmpty()) problems += "the fake SDK does not call URL.openConnection() (the negative control found nothing)"
+        val manifest = mergedManifest.get().asFile.readText()
+        if (PROVIDER in manifest) problems += "the merged manifest declares $PROVIDER"
 
         val summary = buildString {
             appendLine("apk: ${apk.name}")
-            appendLine("expected: ${if (real) "the real modules" else "the noop twins"}")
+            appendLine("expected: the noop twins, no capture code, no instrumentation")
             appendLine("hopi projects on the release classpath: ${projects.sorted().joinToString()}")
-            appendLine("hopi classes in the apk: ${apkClasses.size}, of which dev.koga.hopi.core: ${coreClasses.size}")
+            appendLine("hopi classes in the apk: ${apkClasses.size}; referenced core/capture types: ${forbidden.size}; classes calling a hook: ${hookCalls.size}")
+            appendLine("negative control: RealCall calls OkHttpClient.interceptors(): ${realCallCalls.filter { it in HookDescriptors.REAL_CALL_CLASSES }}; fake SDK classes calling URL.openConnection(): $sdkCalls")
             apkClasses.forEach { appendLine("  $it") }
         }
         if (problems.isNotEmpty()) {
             throw GradleException("The release APK does not package the expected Hopi:\n- " + problems.joinToString("\n- ") + "\n" + summary)
         }
         report.get().asFile.writeText(summary)
-        logger.lifecycle(summary.lineSequence().take(4).joinToString("\n"))
+        logger.lifecycle(summary.lineSequence().take(5).joinToString("\n"))
     }
 
     private fun classesInJar(jar: File): List<String> = ZipFile(jar).use { zip ->
@@ -147,39 +169,88 @@ abstract class VerifyHopiSelection : DefaultTask() {
             .toList()
     }
 
-    private fun classesInApk(apk: File): List<String> = ZipFile(apk).use { zip ->
-        val dexEntries = zip.entries().asSequence().filter { DEX_ENTRY.matches(it.name) }.toList()
-        if (dexEntries.isEmpty()) throw GradleException("${apk.name} has no classes*.dex")
-        dexEntries.flatMap { entry -> classesInDex(zip.getInputStream(entry).use { it.readAllBytes() }, entry.name) }
-    }
-
-    /** The class names a dex file defines, from its header's string ids, type ids and class defs. */
-    private fun classesInDex(bytes: ByteArray, name: String): List<String> {
-        if (bytes.size < 0x70 || String(bytes, 0, 4, Charsets.US_ASCII) != "dex\n") throw GradleException("$name is not a dex file")
-        val dex = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        val stringIdsOff = dex.getInt(0x3C)
-        val typeIdsOff = dex.getInt(0x44)
-        val classDefsSize = dex.getInt(0x60)
-        val classDefsOff = dex.getInt(0x64)
-        return (0 until classDefsSize).map { index ->
-            val typeIndex = dex.getInt(classDefsOff + index * 32)
-            val stringIndex = dex.getInt(typeIdsOff + typeIndex * 4)
-            var offset = dex.getInt(stringIdsOff + stringIndex * 4)
-            // string_data_item: the length in UTF-16 units as uleb128, then MUTF-8 bytes up to a NUL.
-            while (bytes[offset].toInt() and 0x80 != 0) offset++
-            offset++
-            var end = offset
-            while (bytes[end].toInt() != 0) end++
-            String(bytes, offset, end - offset, Charsets.UTF_8).removePrefix("L").removeSuffix(";").replace('/', '.')
-        }
-    }
-
     private companion object {
-        val DEX_ENTRY = Regex("classes\\d*\\.dex")
+        val FORBIDDEN_PACKAGES = listOf("dev/koga/hopi/core/", "dev/koga/hopi/android/internal/", "dev/koga/hopi/android/generated/")
+        val INTERCEPTORS = MethodRef(HookDescriptors.OKHTTP_CLIENT, HookDescriptors.INTERCEPTORS, HookDescriptors.INTERCEPTORS_DESCRIPTOR)
+        val OPEN_CONNECTION = MethodRef(HookDescriptors.URL, "openConnection", "()Ljava/net/URLConnection;")
+        const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
     }
 }
 
-val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
+/**
+ * The positive control on the debug APK: the instrumentation is there. OkHttp's `RealCall` calls
+ * Hopi's interceptors hook and no longer `OkHttpClient.interceptors()`; no class outside Hopi's own
+ * runtime still opens a `URL` connection directly; the fake SDK's classes and Kotlin's
+ * `kotlin.io.TextStreamsKt` (the sample's `URL.readText()`, inlined into a call of its
+ * `readBytes()`) call the URL hooks; the merged manifest
+ * declares the provider; the rule engine is packaged (the release check's absent core, seen from
+ * the other side); and the debug runtime classpath holds the real modules.
+ */
+abstract class VerifyDebugCapture : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val apkDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val builtArtifactsLoader: Property<BuiltArtifactsLoader>
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val mergedManifest: RegularFileProperty
+
+    @get:Input
+    abstract val hopiProjects: SetProperty<String>
+
+    @get:OutputFile
+    abstract val report: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        val apk = File(builtArtifactsLoader.get().load(apkDirectory.get())?.elements?.single()?.outputFile ?: throw GradleException("No debug APK"))
+        val dex = DexReader.ofApk(apk)
+        val problems = mutableListOf<String>()
+        val projects = hopiProjects.get()
+        val required = setOf(":hopi-android", ":hopi-core", ":hopi-ktor", ":hopi-ui", ":hopi-rules")
+        if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
+
+        val hookCallers = dex.callersOf(OKHTTP_HOOK)
+        val realCalls = HookDescriptors.REAL_CALL_CLASSES.filter { it in dex.definedClasses }
+        if (realCalls.isEmpty()) problems += "no RealCall in the APK"
+        realCalls.filter { it !in hookCallers }.forEach { problems += "$it does not call ${OKHTTP_HOOK}" }
+        val stillDirect = dex.callersOf(INTERCEPTORS).filter { it in HookDescriptors.REAL_CALL_CLASSES }
+        if (stillDirect.isNotEmpty()) problems += "$stillDirect still call OkHttpClient.interceptors()"
+
+        val urlMethods = HookDescriptors.URL_HOOK_METHODS.map { MethodRef(HookDescriptors.URL, it.name, it.descriptor) }.toSet()
+        val direct = dex.invokesByClass.filter { (owner, calls) -> !owner.startsWith(HookDescriptors.RUNTIME_PACKAGE) && calls.any { it in urlMethods } }.keys
+        if (direct.isNotEmpty()) problems += "classes that still open URL connections directly: ${direct.take(10)}"
+        val urlHookCallers = dex.invokesByClass.filterValues { calls -> calls.any { it.owner == HookDescriptors.URL_HOOKS } }.keys
+        for (prefix in listOf("dev/koga/fakesdk/", "kotlin/io/TextStreamsKt")) {
+            if (urlHookCallers.none { it.startsWith(prefix) }) problems += "no class $prefix* calls a URL hook"
+        }
+        val manifest = mergedManifest.get().asFile.readText()
+        if (PROVIDER !in manifest) problems += "the merged manifest does not declare $PROVIDER"
+        val ruleEngine = RULE_ENGINE in dex.definedClasses
+        if (!ruleEngine) problems += "the debug APK holds no $RULE_ENGINE"
+
+        val summary = buildString {
+            appendLine("apk: ${apk.name}")
+            appendLine("hopi projects on the debug classpath: ${projects.sorted().joinToString()}")
+            appendLine("RealCall calling the interceptors hook: ${realCalls.filter { it in hookCallers }}")
+            appendLine("classes calling a URL hook: ${urlHookCallers.size}, e.g. ${urlHookCallers.filter { !it.startsWith("dev/koga/hopi/android/") }.take(8)}")
+            appendLine("classes still opening URL connections directly: ${direct.size}; provider declared: ${PROVIDER in manifest}; rule engine packaged: $ruleEngine")
+        }
+        if (problems.isNotEmpty()) throw GradleException("The debug APK is not instrumented as expected:\n- " + problems.joinToString("\n- ") + "\n" + summary)
+        report.get().asFile.writeText(summary)
+        logger.lifecycle(summary.trimEnd())
+    }
+
+    private companion object {
+        val OKHTTP_HOOK = MethodRef(HookDescriptors.OKHTTP_HOOKS, HookDescriptors.INTERCEPTORS, HookDescriptors.OKHTTP_HOOK_DESCRIPTOR)
+        val INTERCEPTORS = MethodRef(HookDescriptors.OKHTTP_CLIENT, HookDescriptors.INTERCEPTORS, HookDescriptors.INTERCEPTORS_DESCRIPTOR)
+        const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
+        const val RULE_ENGINE = "dev/koga/hopi/core/rules/RuleEngine"
+    }
+}
 
 // An object, not a script function: the configuration cache stores the provider mapping that
 // uses it, and a script function would capture the script.
@@ -198,24 +269,29 @@ object HopiGraph {
     }
 }
 
-fun VerifyHopiSelection.configureSelectionCheck(real: Boolean, reportName: String) {
+fun VerifyHopiSelection.configureSelectionCheck(reportName: String) {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    expectReal.set(real)
     report.set(layout.buildDirectory.file("reports/hopi/$reportName.txt"))
 }
 
-// The default every consumer relies on: built without the flag, the release APK ships the noop
-// twins and no hopi-core. With -Phopi.enabled=true this task fails, as it should.
+// The default every consumer relies on: the release APK ships the noop twins, no hopi-core and no
+// instrumentation.
 val verifyReleaseUsesNoop = tasks.register<VerifyHopiSelection>("verifyReleaseUsesNoop") {
-    description = "Checks that the release APK ships only the noop twins (the build without -Phopi.enabled=true)."
-    configureSelectionCheck(real = false, reportName = "release-uses-noop")
+    description = "Checks that the release APK ships only the noop twins and holds no capture code and no instrumentation."
+    configureSelectionCheck(reportName = "release-uses-noop")
 }
 
-// Follows the flag, so it proves both directions: run it once without and once with
-// -Phopi.enabled=true.
+// The same check, kept for -Phopi.enabled=true: with the dev.koga.hopi plugin the property no longer
+// reaches an Android release build (the plugin resolves the twins per variant), which this proves.
 val verifyHopiSelection = tasks.register<VerifyHopiSelection>("verifyHopiSelection") {
-    description = "Checks that the release APK ships the Hopi modules -Phopi.enabled selects."
-    configureSelectionCheck(real = hopiEnabled, reportName = "release-selection")
+    description = "Checks that the release APK ships the noop twins whatever -Phopi.enabled says."
+    configureSelectionCheck(reportName = "release-selection")
+}
+
+val verifyDebugCapture = tasks.register<VerifyDebugCapture>("verifyDebugCapture") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Checks that the debug APK is instrumented: RealCall and every URL call site go to Hopi's hooks."
+    report.set(layout.buildDirectory.file("reports/hopi/debug-capture.txt"))
 }
 
 androidComponents {
@@ -224,6 +300,7 @@ androidComponents {
             task.configure {
                 apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
                 builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
+                mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
                 val classpath = variant.runtimeConfiguration
                 hopiProjects.set(classpath.incoming.resolutionResult.rootComponent.map(HopiGraph::projectsIn))
                 hopiJars.from(
@@ -235,8 +312,18 @@ androidComponents {
             }
         }
     }
+    onVariants(selector().withBuildType("debug")) { variant ->
+        verifyDebugCapture.configure {
+            apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+            builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
+            mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+            hopiProjects.set(variant.runtimeConfiguration.incoming.resolutionResult.rootComponent.map(HopiGraph::projectsIn))
+        }
+    }
 }
 
 tasks.named("check") {
     dependsOn(verifyHopiSelection)
+    // The positive control needs instrumentation, which -Psample.hopiCapture=false turns off.
+    if (providers.gradleProperty("sample.hopiCapture").orNull != "false") dependsOn(verifyDebugCapture)
 }

@@ -160,6 +160,22 @@ class DetailFormatterTest {
     }
 
     @Test
+    fun theSourceAndTheFinalUrlAreShownWhenKnown() = runTest {
+        val redactor = Redactor.create(queryParameters = listOf("token"))
+        val captured = complete(1).copy(source = "urlsession", finalUrl = "https://api.example.com/final?token=s3cret")
+        val model = DetailFormatter().model(captured, redactor)
+        assertEquals("URLSession", model.overview.single { it.label == "Source" }.value)
+        assertEquals("https://api.example.com/final?token=<redacted>", model.overview.single { it.label == "Final URL" }.value)
+        assertEquals("183 ms (network)", model.overview.single { it.label == "Duration" }.value)
+        // The plugin's records keep the plain duration; an older app's records have no source row.
+        val ktor = DetailFormatter().model(complete(2).copy(source = "ktor"), redactor)
+        assertEquals("Ktor", ktor.overview.single { it.label == "Source" }.value)
+        assertEquals("183 ms", ktor.overview.single { it.label == "Duration" }.value)
+        val old = DetailFormatter().model(complete(3), redactor)
+        assertEquals(null, old.overview.firstOrNull { it.label == "Source" || it.label == "Final URL" })
+    }
+
+    @Test
     fun userinfoIsNeverShownCopiedOrShared() = runTest {
         val transaction = complete(1, url = "https://alice:s3cret@api.example.com/v1")
         val model = DetailFormatter().model(transaction, Redactor.Default)
@@ -180,6 +196,16 @@ class DetailFormatterTest {
         assertEquals("404 Not Found", model.overview.single { it.label == "Status" }.value)
         assertEquals("183 ms", model.overview.single { it.label == "Duration" }.value)
         assertEquals("—", model.overview.single { it.label == "Request size" }.value)
+    }
+
+    @Test
+    fun aFailureAfterTheResponseShowsTheStatusAndThePartialBody() = runTest {
+        val partial = textBody("{\"items\":[1,", contentType = "application/json")
+        val transaction = complete(1).copy(state = dev.koga.hopi.core.model.TransactionState.Failed, error = "IOException: reset", responseBody = partial)
+        val model = DetailFormatter().model(transaction, Redactor.Default)
+        assertEquals("Failed after 200 OK", model.overview.single { it.label == "Status" }.value)
+        assertTrue(model.overview.single { it.label == "Response received" }.value.endsWith("(partial)"))
+        assertTrue(model.overview.none { it.label == "Response size" })
     }
 
     @Test
@@ -229,5 +255,16 @@ class DetailFormatterTest {
         val share = shareTextOf(model, Redactor.Default)
         assertTrue(share.startsWith("GET https://api.example.com/users?page=2\nStatus: 200 OK\nDuration: 5 ms\n\n"), share)
         assertTrue(share.endsWith(curl))
+    }
+
+    @Test
+    fun theOverviewNamesTheRuleAndLinksTheReplayedRecord() = runTest {
+        val model = DetailFormatter().model(complete(2).copy(ruleId = 3, ruleApplied = "delay,mock", replayOf = 1), Redactor.Default)
+        assertEquals("#3: delay, mock", model.overview.single { it.label == "Rule" }.value)
+        val replay = model.overview.single { it.label == "Replay of" }
+        assertEquals("#1", replay.value)
+        assertEquals(1L, replay.opens)
+        val plain = DetailFormatter().model(complete(1), Redactor.Default)
+        assertTrue(plain.overview.none { it.label == "Rule" || it.label == "Replay of" })
     }
 }

@@ -2,10 +2,13 @@ package dev.koga.hopi.ui.list
 
 import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.core.rules.RuleMark
 import dev.koga.hopi.ui.format.cutForDisplay
 import dev.koga.hopi.ui.format.formatDuration
+import dev.koga.hopi.ui.format.sourceLabel
 import dev.koga.hopi.ui.format.splitUrl
 import dev.koga.hopi.ui.platform.formatTimeOfDay
 
@@ -53,8 +56,14 @@ internal class TransactionRow(
     val size: String,
     /** First line of the error, URL redacted; null unless failed. */
     val error: String?,
+    /** The recorder when it is not the Ktor plugin (`URLSession`, `OkHttp`, …), else null. */
+    val sourceTag: String?,
+    /** `→ <host>` when a redirect inside the client ended on another host, `→ redirected` on the same one; else null. */
+    val redirect: String?,
     /** The redacted URL, lowercased, for the substring search. */
     val searchKey: String,
+    /** What a rule did (`MOCK`, `FAIL`, `EDIT`, `DELAY`) and `REPLAY`; empty for most rows. */
+    val tags: List<String> = emptyList(),
 ) {
     /** What a screen reader says for the badge, whose glyphs (`···`, `ERR`) read poorly. */
     val badgeDescription: String = when (status) {
@@ -63,8 +72,13 @@ internal class TransactionRow(
         else -> "Status $badge"
     }
 
-    /** The second line: the error when failed, else host and start time. */
-    val subtitle: String = error ?: "$host  ·  $time"
+    /** The second line: the error when failed, else host and start time (and a source other than Ktor). */
+    val subtitle: String = error ?: buildString {
+        append(host)
+        redirect?.let { append(' ').append(it) }
+        append("  ·  ").append(time)
+        sourceTag?.let { append("  ·  ").append(it) }
+    }
 
     val id: Long get() = transaction.id
 }
@@ -72,6 +86,8 @@ internal class TransactionRow(
 internal fun buildRow(transaction: HttpTransaction, redactor: Redactor): TransactionRow {
     val url = redactor.url(transaction.url)
     val parts = splitUrl(url)
+    val finalUrl = transaction.finalUrl?.let(redactor::url)
+    val finalHost = finalUrl?.let { splitUrl(it).host }
     val status = statusOf(transaction)
     return TransactionRow(
         transaction = transaction,
@@ -92,9 +108,36 @@ internal fun buildRow(transaction: HttpTransaction, redactor: Redactor): Transac
         },
         size = transaction.responseBody?.let { formatBytes(it.reportedBytes) } ?: "",
         error = transaction.error?.let { cutForDisplay(redactor.textMentioning(it, transaction.url).substringBefore('\n'), MAX_ROW_TEXT_CHARS) },
-        searchKey = url.lowercase(),
+        sourceTag = transaction.source?.takeIf { it != TransactionSource.KTOR }?.let(::sourceLabel),
+        redirect = when {
+            finalHost == null -> null
+            finalHost != parts.host -> "→ " + cutForDisplay(finalHost, MAX_ROW_TEXT_CHARS)
+            else -> "→ redirected"
+        },
+        // A search finds a transaction by where it ended too.
+        searchKey = if (finalUrl == null) url.lowercase() else (url + "\n" + finalUrl).lowercase(),
+        tags = ruleTags(transaction),
     )
 }
+
+/**
+ * The row's marks: `REPLAY` for a replayed request, then the one word for what its rule did, the
+ * strongest first (a mock or a fail decides the response; an edit changes it; a delay only waits).
+ */
+internal fun ruleTags(transaction: HttpTransaction): List<String> {
+    val applied = transaction.ruleApplied?.split(',').orEmpty()
+    val rule = when {
+        RuleMark.MOCK in applied -> "MOCK"
+        RuleMark.FAIL in applied -> "FAIL"
+        RuleMark.EDIT_REQUEST in applied || RuleMark.EDIT_RESPONSE in applied -> "EDIT"
+        RuleMark.DELAY in applied -> "DELAY"
+        else -> null
+    }
+    if (transaction.replayOf == null) return if (rule == null) NO_TAGS else listOf(rule)
+    return listOfNotNull("REPLAY", rule)
+}
+
+private val NO_TAGS = emptyList<String>()
 
 /** Far more than a row's one line shows. */
 private const val MAX_ROW_TEXT_CHARS = 1_024

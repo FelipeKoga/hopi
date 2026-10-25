@@ -16,6 +16,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * The app's rules as a [RemoteSession] last listed them ([rules]), with [RemoteRule.hits] counted
+ * up locally from the `rule` mark of the summaries its tail brought since. [supported] is false
+ * while not connected and for an app whose `hello` did not say `"rules":true`.
+ */
+@HopiInternalApi
+public class RemoteRules(public val supported: Boolean, public val rules: List<RemoteRule>) {
+    public companion object {
+        public val NONE: RemoteRules = RemoteRules(supported = false, rules = emptyList())
+    }
+}
+
 /** Where a [RemoteSession] stands. */
 @HopiInternalApi
 public sealed interface RemoteState {
@@ -43,6 +55,10 @@ public sealed interface RemoteState {
  * both, and the endpoint (its adb forward), and reports [RemoteState.Disconnected]: the caller
  * decides when to [connect] again (an event: adb's device list, `bridge.json` changing).
  *
+ * Rules (docs/design/rules.md, "Desktop viewer"): for an app whose `hello` said `"rules":true`,
+ * the tail asks for rules notices, [rules] is listed on connect and again on each notice, and the
+ * rule commands run on the request connection, after its verified `hello` ([RuleClient]).
+ *
  * Nothing here polls: the tail is one thread blocked on its socket, requests run on one thread
  * blocked on its queue, and both sit idle while the app is quiet, as the app's side does.
  */
@@ -53,9 +69,10 @@ public class RemoteSession(
     private val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : AutoCloseable {
-    private val _store = MutableStateFlow(newStore())
+    private val _store = MutableStateFlow(mirrorStore())
     private val _state = MutableStateFlow<RemoteState>(RemoteState.Idle)
     private val _dropped = MutableStateFlow(0L)
+    private val _rules = MutableStateFlow(RemoteRules.NONE)
 
     /** The current app process's transactions, newest last; replaced when the app restarted. */
     public val store: StateFlow<HopiStore> = _store.asStateFlow()
@@ -63,6 +80,9 @@ public class RemoteSession(
 
     /** Terminal writes the app's store has lost so far (its `notice` lines), for the current process. */
     public val dropped: StateFlow<Long> = _dropped.asStateFlow()
+
+    /** The app's rules; [RemoteRules.NONE] while not connected or when the app has none to offer. */
+    public val rules: StateFlow<RemoteRules> = _rules.asStateFlow()
 
     private val requests: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "hopi-remote-request").apply { isDaemon = true }
@@ -94,6 +114,12 @@ public class RemoteSession(
     @Volatile
     private var selected: Long? = null
     private val fetchQueued = AtomicBoolean(false)
+    private val relistQueued = AtomicBoolean(false)
+
+    // Local hit counting since the last list: the highest id seen when it was read, and the ids
+    // above it already counted (a pending and a terminal summary of one request count once).
+    private var rulesBaseline = 0L
+    private val counted = HashSet<Long>()
 
     /**
      * Opens both connections and starts the tail; blocks until both answered `hello` (call it off
@@ -107,6 +133,7 @@ public class RemoteSession(
             if (closed) return
             link?.let(::closeLink)
             link = null
+            _rules.value = RemoteRules.NONE
             _state.value = RemoteState.Connecting
         }
         var endpoint: BridgeEndpoint? = null
@@ -121,8 +148,10 @@ public class RemoteSession(
                 adopt(fingerprint(endpoint, hello))
             }
             val since = if (sameProcess) synchronized(lock) { resumeSince() } else 0L
-            tail = openTail(endpoint, since)
-            val next = Link(endpoint, request, tail)
+            // Never sent before this connection's `hello` was verified (RuleClient checks `rules`).
+            val rules = if (hello.json.bool("rules") == true) RuleClient(request) else null
+            tail = openTail(endpoint, since, rules != null)
+            val next = Link(endpoint, request, tail, rules)
             synchronized(lock) {
                 if (closed) throw CliException(ExitCode.NOT_REACHABLE, "the session was closed")
                 link = next
@@ -131,6 +160,7 @@ public class RemoteSession(
             startTailThread(next)
             // The selection survives a reconnect: fetch it again if the new link has not got it.
             fetchSelectedSoon()
+            if (rules != null) relistSoon()
         } catch (e: CliException) {
             // A close() between the tail's handshake and adopting the link leaves the tail here.
             tail?.close()
@@ -193,6 +223,134 @@ public class RemoteSession(
         }
     }
 
+    /**
+     * `rules.add` of the rule object [rule] writes; its `body` argument turns bytes into a body
+     * object (inline, or a blob of this connection uploaded first). Runs in order with `get`s.
+     * Fails with the app's refusal ([CliException]); the connection stays up for those.
+     */
+    public fun addRule(rule: (body: (ByteArray) -> String) -> String): CompletableFuture<RemoteRule> = ruleCommand { client ->
+        decoded(client.add(rule(client::body))).also { replaceRule(it.id, it, append = true) }
+    }
+
+    /** `rules.update`; null fields stay as they are. */
+    public fun updateRule(
+        id: Long,
+        enabled: Boolean? = null,
+        priority: Int? = null,
+        times: Int? = null,
+        clearTimes: Boolean = false,
+        resetHits: Boolean = false,
+    ): CompletableFuture<RemoteRule> = ruleCommand { client ->
+        decoded(client.update(id, enabled, priority, times, clearTimes, resetHits)).also { replaceRule(id, it, append = false) }
+    }
+
+    public fun removeRule(id: Long): CompletableFuture<Unit> = ruleCommand { client ->
+        client.remove(id)
+        replaceRule(id, null, append = false)
+    }
+
+    /** Returns how many rules the app removed. */
+    public fun clearRules(): CompletableFuture<Long> = ruleCommand { client ->
+        client.clear().also { synchronized(lock) { if (_rules.value.supported) _rules.value = RemoteRules(true, emptyList()) } }
+    }
+
+    /**
+     * Replays record [id] through the app's own client, with the edit object [edit] writes (null,
+     * or an [edit] that writes null: none). Returns the new record's id, which the tail brings
+     * once the replay is recorded.
+     */
+    public fun replay(id: Long, edit: ((body: (ByteArray) -> String) -> String?)? = null): CompletableFuture<Long> = ruleCommand { client ->
+        client.replay(id, edit?.invoke(client::body)).json.long("id") ?: throw notReachable("the bridge sent a malformed replay reply")
+    }
+
+    /**
+     * Runs [command] on the request thread over the current link's [RuleClient]. A reply the app
+     * refused (bad request, limit, not found, unsupported) fails only the future; anything else
+     * lost the connection.
+     */
+    private fun <T> ruleCommand(command: (RuleClient) -> T): CompletableFuture<T> {
+        val future = CompletableFuture<T>()
+        try {
+            requests.execute {
+                val current = synchronized(lock) { link }
+                val client = current?.rules
+                if (current == null || client == null) {
+                    future.completeExceptionally(
+                        if (current == null) notReachable("not connected") else CliException(ExitCode.UNSUPPORTED, RULES_UNSUPPORTED),
+                    )
+                    return@execute
+                }
+                try {
+                    future.complete(command(client))
+                } catch (e: CliException) {
+                    if (e.exitCode == ExitCode.NOT_REACHABLE) lost(current, e.message.orEmpty())
+                    future.completeExceptionally(e)
+                } catch (e: RuntimeException) {
+                    // The caller's writer refused its own input; nothing reached the app but blobs, which die with the session.
+                    future.completeExceptionally(e)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            future.completeExceptionally(notReachable("the session was closed"))
+        }
+        return future
+    }
+
+    private fun decoded(reply: Reply): RemoteRule = RemoteRule.decode(reply.json) ?: throw notReachable("the bridge sent a malformed rule")
+
+    /** Applies a command's own reply at once; the notice that follows lists them all again. */
+    private fun replaceRule(id: Long, rule: RemoteRule?, append: Boolean) {
+        synchronized(lock) {
+            val shown = _rules.value
+            if (!shown.supported) return
+            val index = shown.rules.indexOfFirst { it.id == id }
+            _rules.value = RemoteRules(
+                true,
+                when {
+                    index >= 0 && rule != null -> shown.rules.toMutableList().also { it[index] = rule }
+                    index >= 0 -> shown.rules.filterIndexed { i, _ -> i != index }
+                    rule != null && append -> shown.rules + rule
+                    else -> shown.rules
+                },
+            )
+        }
+    }
+
+    /** Lists the rules again on the request thread; notices arriving meanwhile coalesce into one. */
+    private fun relistSoon() {
+        if (!relistQueued.compareAndSet(false, true)) return
+        try {
+            requests.execute {
+                relistQueued.set(false)
+                val current = synchronized(lock) { link } ?: return@execute
+                val client = current.rules ?: return@execute
+                val listed = try {
+                    client.list().map(::decoded)
+                } catch (e: CliException) {
+                    if (e.exitCode == ExitCode.NOT_REACHABLE) lost(current, e.message.orEmpty())
+                    return@execute
+                }
+                synchronized(lock) {
+                    if (link !== current) return@synchronized
+                    rulesBaseline = highestSeen
+                    counted.clear()
+                    _rules.value = RemoteRules(true, listed)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // Closed.
+        }
+    }
+
+    /** Under [lock]: the summary of [id] carries rule [ruleId]'s mark; count it once, if it is newer than the list. */
+    private fun countHit(id: Long, ruleId: Long) {
+        val shown = _rules.value
+        if (!shown.supported || id <= rulesBaseline || !counted.add(id)) return
+        val index = shown.rules.indexOfFirst { it.id == ruleId }
+        if (index < 0) return
+        _rules.value = RemoteRules(true, shown.rules.toMutableList().also { it[index] = it[index].withHit() })
+    }
+
     /** Closes both connections and the endpoint, stops the request thread and closes [store]. */
     override fun close() {
         synchronized(lock) {
@@ -206,10 +364,13 @@ public class RemoteSession(
         _store.value.close()
     }
 
-    private fun openTail(endpoint: BridgeEndpoint, since: Long): BridgeClient {
+    /** [rules]: ask for rules notices, only of an app whose `hello` said `"rules":true`. */
+    private fun openTail(endpoint: BridgeEndpoint, since: Long, rules: Boolean): BridgeClient {
         val tail = BridgeClient.connect(endpoint, readTimeoutMs)
         try {
-            tail.handshake(BridgeClient.request("tail").field("since", since).endObject().toString())
+            val request = BridgeClient.request("tail").field("since", since)
+            if (rules) request.field("rules", true)
+            tail.handshake(request.endObject().toString())
             tail.waitForever()
             return tail
         } catch (e: Throwable) {
@@ -231,7 +392,7 @@ public class RemoteSession(
                 val since = e.since ?: synchronized(lock) { resumeSince() }
                 current.tail.close()
                 try {
-                    current.tail = openTail(current.endpoint, since)
+                    current.tail = openTail(current.endpoint, since, current.rules != null)
                 } catch (again: CliException) {
                     lost(current, again.message.orEmpty())
                     return
@@ -248,6 +409,7 @@ public class RemoteSession(
             when (reply.type) {
                 "transaction" -> onSummary(current, reply)
                 "notice" -> reply.json.long("dropped")?.let { _dropped.value = it }
+                "rules" -> if (synchronized(lock) { link === current }) relistSoon()
             }
         }
     }
@@ -261,6 +423,7 @@ public class RemoteSession(
             val startedAt = store.get(id)?.startedAtEpochMs ?: clock()
             val transaction = BridgeDecoder.summary(reply.json, startedAt) ?: return
             if (id == fetching && transaction.state.isTerminal) fetchingSawTerminal = true
+            transaction.ruleId?.let { countHit(id, it) }
             val had = fetched[id]
             if (had != null) {
                 // The detail already holds this snapshot or a later one.
@@ -369,19 +532,27 @@ public class RemoteSession(
      * Under [lock]: keeps the store when [next] is the process already shown, else starts a fresh
      * one (ids restart with the process). Returns true for the same process.
      */
+    /**
+     * A store mirroring the app's, with a viewer attached for its lifetime: the app's tail already
+     * paid for every pending line, so the host applies each one at once (no request thread here).
+     */
+    private fun mirrorStore(): HopiStore = newStore().also { it.attachViewer() }
+
     private fun adopt(next: ByteArray): Boolean {
         val previous = generation
         generation = next
         if (previous == null) return false
         if (MessageDigest.isEqual(previous, next)) return true
         val old = _store.value
-        _store.value = newStore()
+        _store.value = mirrorStore()
         old.close()
         fetched.clear()
         pending.clear()
         highestSeen = 0
         idsAllocated = 0
         _dropped.value = 0
+        rulesBaseline = 0
+        counted.clear()
         // Its ids mean other transactions here: fetching it would pull a body nobody opened.
         selected = null
         return false
@@ -395,6 +566,7 @@ public class RemoteSession(
             if (link !== current) return
             closeLink(current)
             link = null
+            _rules.value = RemoteRules.NONE
             if (!closed) _state.value = RemoteState.Disconnected(message)
         }
     }
@@ -405,13 +577,15 @@ public class RemoteSession(
         current.endpoint.close()
     }
 
-    private class Link(val endpoint: BridgeEndpoint, val request: BridgeClient, @Volatile var tail: BridgeClient)
+    /** [rules] is null for an app without rules: nothing but `get` and `clear` is sent to it. */
+    private class Link(val endpoint: BridgeEndpoint, val request: BridgeClient, @Volatile var tail: BridgeClient, val rules: RuleClient?)
 
     public companion object {
         /** Larger than an app's store: the desktop keeps a longer history of one process. */
         public const val DEFAULT_MAX_ENTRIES: Int = 2_000
         public const val DEFAULT_MAX_TOTAL_BYTES: Long = 256L * 1024 * 1024
         public const val DEFAULT_READ_TIMEOUT_MS: Int = 10_000
+        private const val RULES_UNSUPPORTED = "this app's Hopi does not support rules (older Hopi, or rules = false)"
 
         /** The token (iOS, JVM) and the proof (Android) are new with every app start. */
         private fun fingerprint(endpoint: BridgeEndpoint, hello: Reply): ByteArray {

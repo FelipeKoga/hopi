@@ -1,0 +1,28 @@
+--------- beginning of main
+okhttp enqueue POST 200 315 bytes
+okhttp execute GET 200 67 bytes
+okhttp subclass GET 200
+okhttp derived GET 200
+urlconnection GET 200 67 bytes
+urlconnection POST 200 368 bytes
+urlconnection 404 404 64 bytes
+url openStream 67 bytes
+url method reference 200 67 bytes
+kotlin URL.readText 67 chars
+capture: started=false okHttpInstrumented=false
+--------- beginning of main
+okhttp enqueue POST 200 315 bytes
+okhttp execute GET 200 67 bytes
+okhttp subclass GET 200
+okhttp derived GET 200
+urlconnection GET 200 67 bytes
+urlconnection POST 200 368 bytes
+urlconnection 404 404 64 bytes
+url openStream 67 bytes
+url method reference 200 67 bytes
+kotlin URL.readText 67 chars
+capture: started=false okHttpInstrumented=false
+{"giant":1,"build":"noop","capBytes":-1,"storeBytes":-1,"shape":"minified","chunked":false,"post":false,"start":true}
+{"giant":1,"build":"noop","capBytes":-1,"storeBytes":-1,"shape":"minified","chunked":false,"post":false,"mb":1,"run":1,"fetchMs":133,"parseMs":300,"totalMs":433,"elements":50171,"gcCount":1,"gcCountAfter":2,"gcTimeMs":21,"gcTimeMsAfter":47,"blockingGcCount":0,"blockingGcCountAfter":1,"blockingGcTimeMs":0,"blockingGcTimeMsAfter":26,"javaHeapUsedKb":11438,"javaHeapUsedKbAfter":16534,"nativeHeapKb":-72,"nativeHeapKbAfter":18252,"frames":17,"gapP50Ms":16.66,"gapP95Ms":83.33,"gapMaxMs":99.99,"gapsOver100Ms":0,"gapsOver33Ms":8}
+{"giant":1,"build":"noop","capBytes":-1,"storeBytes":-1,"shape":"minified","chunked":false,"post":false,"mb":1,"runs":1,"ok":1,"medianTotalMs":433,"minTotalMs":433,"maxTotalMs":433}
+--- dump ---

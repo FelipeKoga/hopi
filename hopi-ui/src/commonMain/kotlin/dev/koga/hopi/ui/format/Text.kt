@@ -1,5 +1,7 @@
 package dev.koga.hopi.ui.format
 
+import dev.koga.hopi.core.model.TransactionSource
+
 /** Host (with port) and the rest of a URL, for a row's two lines. */
 internal class UrlParts(val host: String, val path: String)
 
@@ -36,6 +38,15 @@ internal fun formatDuration(ms: Long): String = when {
         val seconds = (ms + 500) / 1_000
         "${seconds / 60}m ${(seconds % 60).toString().padStart(2, '0')}s"
     }
+}
+
+/** How a transaction's recorder is named on screen: `Ktor`, `URLSession`, …; an unknown value as sent. */
+internal fun sourceLabel(source: String): String = when (source) {
+    TransactionSource.KTOR -> "Ktor"
+    TransactionSource.URL_SESSION -> "URLSession"
+    TransactionSource.OKHTTP -> "OkHttp"
+    TransactionSource.URL_CONNECTION -> "HttpURLConnection"
+    else -> source
 }
 
 /** The standard reason phrase for common status codes, else null. */

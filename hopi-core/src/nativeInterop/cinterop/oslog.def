@@ -8,11 +8,21 @@ headerFilter = hopi-oslog-shim-only
 #include <os/log.h>
 #include <dispatch/dispatch.h>
 
-static inline void hopi_os_log_line(const char *line) {
+static inline os_log_t hopi_os_log_handle(void) {
     static os_log_t handle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         handle = os_log_create("dev.koga.hopi", "http");
     });
-    os_log(handle, "%{public}s", line);
+    return handle;
+}
+
+static inline void hopi_os_log_line(const char *line) {
+    os_log(hopi_os_log_handle(), "%{public}s", line);
+}
+
+// A line of `length` UTF-8 bytes that need not end in NUL: the summary sink encodes into a buffer
+// it reuses and passes it pinned, so no C string is made per line.
+static inline void hopi_os_log_bytes(const char *bytes, int length) {
+    os_log(hopi_os_log_handle(), "%{public}.*s", length, bytes);
 }

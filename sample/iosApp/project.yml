@@ -16,8 +16,11 @@ targets:
   iosApp:
     type: application
     platform: iOS
-    # A shared scheme, so `xcodebuild -scheme iosApp` works from a fresh checkout.
-    scheme: {}
+    # A shared scheme, so `xcodebuild -scheme iosApp` works from a fresh checkout; its test action
+    # runs the Swift capture tests (sample/iosApp/scripts/capture-swift-test.sh).
+    scheme:
+      testTargets:
+        - iosAppCaptureTests
     sources:
       - path: iosApp
         excludes:
@@ -42,10 +45,20 @@ targets:
           - "$(inherited)"
           - "-framework"
           - "Shared"
+          # A Debug Kotlin/Native framework links every wrapper of the platform libraries it
+          # uses, built against the current SDK, so symbols newer than iOS 18 become strong
+          # imports (kCGAdaptiveMaximumBitDepth, libresolv's __res_9_p_*_syms): weak linking those
+          # two lets the Debug app launch on older runtimes (iOS 18.2) too.
+          - "-weak_framework"
+          - "CoreGraphics"
+          - "-weak-lresolv"
       configs:
         # Debug allows cleartext to the dev server on the host loopback only; Release has no ATS exception.
         Debug:
           INFOPLIST_FILE: iosApp/Info-Debug.plist
+          # The capture tests call the Kotlin framework's test accessor through the host app's
+          # binary, which a dead-stripping link would drop as unreferenced.
+          DEAD_CODE_STRIPPING: NO
         Release:
           INFOPLIST_FILE: iosApp/Info-Release.plist
     preBuildScripts:
@@ -54,11 +67,34 @@ targets:
         shell: /bin/sh
         script: |
           # Debug links the real Hopi modules; any other configuration their noop twins
-          # (docs/ARCHITECTURE.md, "Selecting real vs noop").
+          # (docs/ARCHITECTURE.md, "Selecting real vs noop"). The build setting HOPI_ENABLED=false
+          # (`xcodebuild ... HOPI_ENABLED=false`) builds a Debug app with the noop twins, for A/B runs
+          # against the same optimisation level.
           set -eu
           cd "$SRCROOT/../.."
-          if [ "$CONFIGURATION" = "Debug" ]; then
+          if [ "$CONFIGURATION" = "Debug" ] && [ "${HOPI_ENABLED:-true}" != "false" ]; then
             ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true
           else
             ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode
           fi
+  # Swift concurrency's URLSession APIs under automatic capture (Kotlin/Native cannot call them):
+  # hosted by the app, so they run in its process, after its HopiUrlSession.shared.start().
+  iosAppCaptureTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: iosAppCaptureTests
+    dependencies:
+      - target: iosApp
+        link: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.koga.hopi.sample.capturetests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/HopiSample.app/HopiSample"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"

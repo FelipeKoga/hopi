@@ -11,6 +11,10 @@ import dev.koga.hopi.connect.Targets
 import dev.koga.hopi.ui.desktop.rememberHopiPanesState
 import java.awt.FileDialog
 import java.awt.Frame
+import dev.koga.hopi.core.body.formatBytes
+import dev.koga.hopi.core.rules.RuleLimits
+import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -28,6 +32,7 @@ public fun main() {
     application {
         val window = rememberWindowState(width = 1280.dp, height = 820.dp)
         val panes = rememberHopiPanesState()
+        val rules = remember { RulesPanelState() }
         Window(
             onCloseRequest = {
                 viewer.close()
@@ -37,6 +42,7 @@ public fun main() {
             state = window,
         ) {
             val chooseFile = remember(this.window) { { format: ExportFormat, name: String -> saveDialog(this.window, format, name) } }
+            val chooseBody = remember(this.window) { { bodyDialog(this.window, rules) } }
             val export = { format: ExportFormat ->
                 chooseFile(format, exportFileName(viewer.status.value, format))?.let { viewer.export(format, it) }
             }
@@ -49,14 +55,44 @@ public fun main() {
                     Item("Find   ${Shortcut.Search.keys}", onClick = panes::focusSearch)
                     Item("Clear   ${Shortcut.Clear.keys}", onClick = viewer::clear)
                 }
+                Menu("Rules") {
+                    Item("Rules panel   ${Shortcut.Rules.keys}", onClick = rules::toggle)
+                    Item("New mock…", onClick = { rules.edit(RuleForm(FormKind.Mock)) })
+                    Item("New fail…", onClick = { rules.edit(RuleForm(FormKind.Fail)) })
+                    Item("New delay…", onClick = { rules.edit(RuleForm(FormKind.Delay)) })
+                    Item("New edit…", onClick = { rules.edit(RuleForm(FormKind.Edit)) })
+                }
                 Menu("Connection") {
                     Item("Reconnect   ${Shortcut.Reconnect.keys}", onClick = viewer::reconnect)
                     Item("Disconnect", onClick = viewer::disconnect)
                     Item("Refresh devices", onClick = viewer::refresh)
                 }
             }
-            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes)
+            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody)
         }
+    }
+}
+
+/**
+ * The native open dialog for a rule or replay body; null when cancelled. A file over the 1 MiB a
+ * rule body may hold is not read: the panel says so instead.
+ */
+private fun bodyDialog(owner: Frame, rules: RulesPanelState): BodyFile? {
+    val dialog = FileDialog(owner, "Choose a body file", FileDialog.LOAD)
+    dialog.isVisible = true
+    val name = dialog.file ?: return null
+    val file = Paths.get(dialog.directory.orEmpty(), name)
+    return try {
+        val size = Files.size(file)
+        if (size > RuleLimits.MAX_BODY_BYTES) {
+            rules.message = "$name: ${formatBytes(size)}, more than the ${formatBytes(RuleLimits.MAX_BODY_BYTES.toLong())} a rule body may hold"
+            null
+        } else {
+            BodyFile(name, Files.readAllBytes(file))
+        }
+    } catch (e: IOException) {
+        rules.message = "Cannot read $name: ${e.message}"
+        null
     }
 }
 

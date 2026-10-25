@@ -15,20 +15,34 @@ public object TransactionJson {
     public const val SUMMARY_VERSION: Int = 1
     private const val MAX_METHOD_CHARS = 64
     private const val MAX_ERROR_CHARS = 512
+    private const val MAX_SOURCE_CHARS = 13
+
+    /** `delay,edit-request,edit-response`, the longest mark a rule can leave ([dev.koga.hopi.core.rules.RuleMark]). */
+    private const val MAX_APPLIED_CHARS = 32
 
     /**
      * `{"hopi":1,"id":…,…}`: one log-stream line, no bodies, at most [maxBytes] UTF-8 bytes.
-     * A URL or error that does not fit is cut at a code point boundary and marked.
+     * A URL, final URL or error that does not fit is cut at a code point boundary and marked.
      */
     public fun summaryLogLine(
         transaction: HttpTransaction,
         redactor: Redactor,
         maxBytes: Int = MAX_SUMMARY_LINE_BYTES,
-    ): String = summary(transaction, redactor, bridge = false, maxBytes)
+    ): String = StringBuilder(256).also { appendSummary(transaction, redactor, bridge = false, maxBytes, it) }.toString()
+
+    /** [summaryLogLine], appended to [out]: the log sink reuses one builder and makes no string of the line. */
+    public fun appendSummaryLogLine(transaction: HttpTransaction, redactor: Redactor, maxBytes: Int, out: StringBuilder) {
+        appendSummary(transaction, redactor, bridge = false, maxBytes, out)
+    }
 
     /** `{"type":"transaction",…summary…}`: one bridge `list`/`tail` line. */
     public fun bridgeSummary(transaction: HttpTransaction, redactor: Redactor): String =
-        summary(transaction, redactor, bridge = true, MAX_SUMMARY_LINE_BYTES)
+        StringBuilder(256).also { appendBridgeSummary(transaction, redactor, it) }.toString()
+
+    /** [bridgeSummary], appended to [out]. */
+    public fun appendBridgeSummary(transaction: HttpTransaction, redactor: Redactor, out: StringBuilder) {
+        appendSummary(transaction, redactor, bridge = true, MAX_SUMMARY_LINE_BYTES, out)
+    }
 
     /** `{"type":"transaction",…}` with headers and bodies: the bridge `get` reply. */
     public fun bridgeDetail(transaction: HttpTransaction, redactor: Redactor): String {
@@ -58,8 +72,11 @@ public object TransactionJson {
             .field("startedAt", transaction.startedAtEpochMs)
             .field("method", transaction.method)
             .field("url", redactor.url(transaction.url))
-            .field("state", transaction.state.wireName)
-            .field("code", transaction.responseCode)
+        transaction.finalUrl?.let { w.field("finalUrl", redactor.url(it)) }
+        w.field("state", transaction.state.wireName)
+        transaction.source?.let { w.field("source", it) }
+        writeRuleMarks(w, transaction)
+        w.field("code", transaction.responseCode)
             .field("ms", transaction.durationMs)
             .field("protocol", transaction.protocol)
             .field("error", transaction.error?.let { redactor.textMentioning(it, transaction.url) })
@@ -70,36 +87,101 @@ public object TransactionJson {
         w.endObject()
     }
 
-    private fun summary(transaction: HttpTransaction, redactor: Redactor, bridge: Boolean, maxBytes: Int): String {
+    /**
+     * Appends the summary line to [out]. The line is written once; only one that may exceed
+     * [maxBytes] (more than a third of [maxBytes] in chars) is measured, and only one that does is
+     * written again, cut.
+     */
+    private fun appendSummary(transaction: HttpTransaction, redactor: Redactor, bridge: Boolean, maxBytes: Int, out: StringBuilder) {
         val url = redactor.url(transaction.url)
+        val finalUrl = transaction.finalUrl?.let(redactor::url)
         val error = if (transaction.state == TransactionState.Failed) {
             transaction.error?.let { takeCodePoints(redactor.textMentioning(it, transaction.url), MAX_ERROR_CHARS) }
         } else {
             null
         }
-        val full = writeSummary(transaction, url, error, bridge, urlTruncated = false, errorTruncated = false)
-        if (utf8Length(full) <= maxBytes) return full
+        val mark = out.length
+        writeSummary(transaction, url, finalUrl, error, bridge, Truncated.NONE, out)
+        val chars = out.length - mark
+        if (chars <= maxBytes / 3 || utf8Length(out, mark) <= maxBytes) return
+        out.setLength(mark)
+        appendCutSummary(transaction, url, finalUrl, error, bridge, maxBytes, out)
+    }
 
+    /** Which values a summary line cut. */
+    private class Truncated(val url: Boolean, val finalUrl: Boolean, val error: Boolean) {
+        companion object {
+            val NONE = Truncated(url = false, finalUrl = false, error = false)
+        }
+    }
+
+    /**
+     * The summary line with its URL, final URL and error cut to share what [maxBytes] leaves after
+     * the rest: each gets an equal share, and a value shorter than its share leaves the rest to
+     * the others. Without a final URL the error and the URL split exactly as before it existed.
+     */
+    private fun appendCutSummary(
+        transaction: HttpTransaction,
+        url: String,
+        finalUrl: String?,
+        error: String?,
+        bridge: Boolean,
+        maxBytes: Int,
+        out: StringBuilder,
+    ) {
         val hasError = !error.isNullOrEmpty()
-        val skeleton = writeSummary(transaction, "", error?.let { "" }, bridge, urlTruncated = true, errorTruncated = hasError)
+        val hasFinalUrl = !finalUrl.isNullOrEmpty()
+        val skeleton = StringBuilder()
+        writeSummary(transaction, "", finalUrl?.let { "" }, error?.let { "" }, bridge, Truncated(true, hasFinalUrl, hasError), skeleton)
         val available = (maxBytes - utf8Length(skeleton)).coerceAtLeast(0)
         val urlBytes = JsonWriter.escapedUtf8Length(url)
         val errorBytes = error?.let(JsonWriter::escapedUtf8Length) ?: 0
-        val errorBudget = when {
-            errorBytes <= available / 2 -> errorBytes
-            urlBytes <= available / 2 -> available - urlBytes
-            else -> available - available / 2
+        val urlBudget: Int
+        val finalUrlBudget: Int
+        val errorBudget: Int
+        if (finalUrl == null) {
+            errorBudget = when {
+                errorBytes <= available / 2 -> errorBytes
+                urlBytes <= available / 2 -> available - urlBytes
+                else -> available - available / 2
+            }
+            urlBudget = available - errorBudget
+            finalUrlBudget = 0
+        } else {
+            val budgets = shareFairly(available, intArrayOf(errorBytes, JsonWriter.escapedUtf8Length(finalUrl), urlBytes))
+            errorBudget = budgets[0]
+            finalUrlBudget = budgets[1]
+            urlBudget = budgets[2]
         }
-        val cutUrl = url.substring(0, cutToEscapedBytes(url, available - errorBudget))
+        val cutUrl = url.substring(0, cutToEscapedBytes(url, urlBudget))
+        val cutFinalUrl = finalUrl?.let { it.substring(0, cutToEscapedBytes(it, finalUrlBudget)) }
         val cutError = error?.let { it.substring(0, cutToEscapedBytes(it, errorBudget)) }
-        return writeSummary(
+        writeSummary(
             transaction,
             cutUrl,
+            cutFinalUrl,
             cutError,
             bridge,
-            urlTruncated = cutUrl.length < url.length,
-            errorTruncated = (cutError?.length ?: 0) < (error?.length ?: 0),
+            Truncated(
+                url = cutUrl.length < url.length,
+                finalUrl = (cutFinalUrl?.length ?: 0) < (finalUrl?.length ?: 0),
+                error = (cutError?.length ?: 0) < (error?.length ?: 0),
+            ),
+            out,
         )
+    }
+
+    /** Splits [available] among [wanted] by water-filling: the smallest are served whole first, the rest share equally. */
+    private fun shareFairly(available: Int, wanted: IntArray): IntArray {
+        val order = wanted.indices.sortedBy { wanted[it] }
+        val budgets = IntArray(wanted.size)
+        var left = available
+        for ((served, index) in order.withIndex()) {
+            val share = left / (wanted.size - served)
+            budgets[index] = minOf(wanted[index], share)
+            left -= budgets[index]
+        }
+        return budgets
     }
 
     /** Length of the longest prefix of [text] whose escaped UTF-8 form fits [budget], at a code point boundary. */
@@ -125,12 +207,13 @@ public object TransactionJson {
     private fun writeSummary(
         transaction: HttpTransaction,
         url: String,
+        finalUrl: String?,
         error: String?,
         bridge: Boolean,
-        urlTruncated: Boolean,
-        errorTruncated: Boolean,
-    ): String {
-        val w = JsonWriter(StringBuilder(160 + url.length))
+        truncated: Truncated,
+        out: StringBuilder,
+    ) {
+        val w = JsonWriter(out)
         w.beginObject()
         if (bridge) w.field("type", "transaction") else w.field("hopi", SUMMARY_VERSION)
         w.field("id", transaction.id)
@@ -141,6 +224,13 @@ public object TransactionJson {
             .field("reqBytes", transaction.requestBody?.reportedBytes ?: 0L)
             .field("resBytes", transaction.responseBody?.reportedBytes ?: 0L)
             .field("state", transaction.state.wireName)
+        // Additive: omitted when unknown, and readers that ignore unknown fields are unaffected.
+        transaction.source?.let { w.field("source", takeCodePoints(it, MAX_SOURCE_CHARS)) }
+        // Additive like `source`: only after a redirect inside the client changed the URL.
+        finalUrl?.let { w.field("finalUrl", it) }
+        // Additive like `source`, and part of every line's fixed fields (at most 106 bytes with
+        // 19-digit ids), so the cut below leaves room for them.
+        writeRuleMarks(w, transaction)
         if (bridge) {
             // What a `get` would transfer, when the app holds less than the size (a truncated or
             // skipped body): a host viewer budgets its fetches on it.
@@ -150,10 +240,19 @@ public object TransactionJson {
         if (transaction.state == TransactionState.Failed) {
             w.field("error", error)
         }
-        if (urlTruncated) w.field("urlTruncated", true)
-        if (errorTruncated) w.field("errorTruncated", true)
+        if (truncated.url) w.field("urlTruncated", true)
+        if (truncated.finalUrl) w.field("finalUrlTruncated", true)
+        if (truncated.error) w.field("errorTruncated", true)
         w.endObject()
-        return w.toString()
+    }
+
+    /** `"rule":3,"applied":"delay,mock"` and `"replayOf":42`, each only when set. */
+    private fun writeRuleMarks(w: JsonWriter, transaction: HttpTransaction) {
+        transaction.ruleId?.let { id ->
+            w.field("rule", id)
+            transaction.ruleApplied?.let { w.field("applied", takeCodePoints(it, MAX_APPLIED_CHARS)) }
+        }
+        transaction.replayOf?.let { w.field("replayOf", it) }
     }
 
     private fun heldBytes(body: CapturedBody?): Long? = body?.heldBytes?.takeIf { it != body.reportedBytes }
@@ -194,9 +293,12 @@ public object TransactionJson {
     }
 
     /** UTF-8 byte length of [text] without encoding it; unpaired surrogates count as 3 (U+FFFD). */
-    public fun utf8Length(text: CharSequence): Int {
+    public fun utf8Length(text: CharSequence): Int = utf8Length(text, 0)
+
+    /** [utf8Length] of [text] from [from] on. */
+    public fun utf8Length(text: CharSequence, from: Int): Int {
         var bytes = 0
-        var i = 0
+        var i = from
         while (i < text.length) {
             val c = text[i]
             bytes += when {

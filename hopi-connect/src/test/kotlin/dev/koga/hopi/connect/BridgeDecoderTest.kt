@@ -173,6 +173,20 @@ class BridgeDecoderTest {
     }
 
     @Test
+    fun theSourceAndTheFinalUrlRoundTripAndAnOlderAppsLinesDecodeToNull() {
+        val tx = completeTx(9).copy(source = "urlsession", finalUrl = "https://api.example.com/final")
+        detailRoundTrip(tx)
+        val summary = assertNotNull(BridgeDecoder.summary(parse(TransactionJson.bridgeSummary(tx, redactor)), 0))
+        assertEquals("urlsession", summary.source)
+        // A line from an app built before the field: no source, no final URL.
+        val old = """{"type":"transaction","id":1,"method":"GET","url":"u","code":200,"ms":1,"reqBytes":0,"resBytes":0,"state":"complete"}"""
+        assertNull(assertNotNull(BridgeDecoder.summary(parse(old), 0)).source)
+        val decoded = assertNotNull(BridgeDecoder.detail(parse(TransactionJson.bridgeDetail(completeTx(2), redactor))))
+        assertNull(decoded.source)
+        assertNull(decoded.finalUrl)
+    }
+
+    @Test
     fun malformedLinesDecodeToNull() {
         val good = parse(TransactionJson.bridgeDetail(completeTx(1), redactor))
         assertNull(BridgeDecoder.detail(parse("""{"type":"notice","dropped":3}""")))
@@ -183,5 +197,18 @@ class BridgeDecoderTest {
         val badBase64 = TransactionJson.bridgeDetail(completeTx(2, responseBody = CapturedBody(ByteArray(3) { 0 }, 3, false, null, null)), redactor)
             .replace("\"data\":\"AAAA\"", "\"data\":\"!!\"")
         assertNull(BridgeDecoder.detail(parse(badBase64)))
+    }
+
+    @Test
+    fun aSummaryCarriesTheFinalUrlAndAFailureAfterTheResponseKeepsItsCode() {
+        val redirected = completeTx(5).copy(finalUrl = "https://cdn.example.com/final")
+        val summary = assertNotNull(BridgeDecoder.summary(parse(TransactionJson.bridgeSummary(redirected, redactor)), 0))
+        assertEquals("https://cdn.example.com/final", summary.finalUrl)
+        val failed = pendingTx(6).failedAfterResponse("IOException: reset", 12, 200, listOf("Content-Type" to "text/plain"), textBody("par", "text/plain"), "HTTP/1.1")
+        val decodedSummary = assertNotNull(BridgeDecoder.summary(parse(TransactionJson.bridgeSummary(failed, redactor)), 0))
+        assertEquals(TransactionState.Failed, decodedSummary.state)
+        assertEquals(200, decodedSummary.responseCode)
+        assertEquals(3L, decodedSummary.responseBody?.totalBytes)
+        assertEquals(failed, detailRoundTrip(failed))
     }
 }

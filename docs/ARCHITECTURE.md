@@ -2,7 +2,9 @@
 
 Hopi is a real-time debugging toolkit for Kotlin Multiplatform / Compose Multiplatform apps on
 Android and iOS, inspired by DebugSwift. v1 ships one tool: an HTTP inspector for apps that use the
-Ktor client. It is built for two audiences at once: a developer looking at an in-app screen, and an
+Ktor client, plus automatic capture of every URLSession request of an iOS process and of every
+OkHttp and `HttpURLConnection` request of an Android app (third-party SDKs included, see
+"URLSession capture" and "Android capture"). It is built for two audiences at once: a developer looking at an in-app screen, and an
 AI coding agent reading the same traffic from a terminal.
 
 This document is the contract every module is built against. Change it before changing code.
@@ -37,21 +39,30 @@ This document is the contract every module is built against. Change it before ch
 | `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          |
 | `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       |
 | `hopi-ui-noop`   | compose-runtime, compose-ui          | Same public API as `hopi-ui`, renders nothing         |
+| `hopi-urlsession` | core                                | Automatic URLSession capture on iOS (`HopiUrlSession.start()`); does nothing on Android and the JVM |
+| `hopi-urlsession-noop` | nothing                        | Same public API as `hopi-urlsession`, does nothing; no dependency at all |
+| `hopi-android`   | core (Android only)                  | Automatic OkHttp and `HttpURLConnection` capture on Android; added by the Gradle plugin to debuggable variants, started by its manifest's provider |
+| `hopi-android-noop` | nothing                           | Same public API as `hopi-android` (`HopiAndroid`), does nothing; what non-debuggable variants get |
+| `hopi-rules`     | core                                 | `HopiRules`, the in-process API over core's rule engine (mock, fail, delay, edit, replay; docs/design/rules.md) |
+| `hopi-rules-noop` | nothing                             | Same public API as `hopi-rules`, does nothing; no dependency at all |
+| `gradle-plugin/` (included build) | AGP API and ASM at build time only | `hopi-instrument` (the bytecode rewriter and `DexReader`) and `hopi-gradle-plugin` (`dev.koga.hopi`); never a runtime dependency |
 | `hopi-connect`   | core (JVM), kotlinx-serialization    | Host side of the bridge: targets, `bridge.json`, bridge client (all `@HopiInternalApi`) |
 | `hopi-cli`       | connect, core (JVM)                  | Host CLI for developers and AI agents                      |
 | `hopi-desktop`   | connect, ui (JVM), core (JVM), Compose Desktop | Desktop viewer app (macOS `.dmg`); never a dependency of an app |
-| `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests          |
+| `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests; `sample/fakesdk` is a Java library that stands in for a third-party SDK and knows nothing of Hopi |
 
 Targets for every KMP library module: `android`, `iosArm64`, `iosSimulatorArm64`, and `jvm` (the JVM
 target exists so logic tests run on the host in seconds; it is also a legitimate desktop target).
 
 `hopi-core` is public so the other Hopi modules can use it, but every declaration that is
 not part of the consumer API is annotated `@HopiInternalApi` (a `RequiresOptIn` annotation).
-The one exception is the iOS os_log shim (see Agent access): cinterop cannot annotate its binding,
-so it lives in `dev.koga.hopi.core.internal.oslog` and binds only `hopi_os_log_line`
-(no os/log.h declarations are re-exported).
-Consumers only ever touch the API of `hopi-ktor` and `hopi-ui`, which is what the noop
-twins mirror.
+The exceptions are the two iOS cinterop bindings, which cinterop cannot annotate: the os_log shim
+(see Agent access) lives in `dev.koga.hopi.core.internal.oslog` and binds only `hopi_os_log_line`
+(no os/log.h declarations are re-exported), and the URLSession capture library (see URLSession
+capture) lives in `dev.koga.hopi.core.internal.urlsession` and binds only its own `hopi_us_*` C
+functions and constants (no Objective-C class).
+Consumers only ever touch the API of `hopi-ktor`, `hopi-ui`, `hopi-urlsession`, `hopi-android` and
+`hopi-rules`, which is what the noop twins mirror.
 
 ## Consumer API (what the noop twins mirror)
 
@@ -69,6 +80,7 @@ val client = HttpClient(engine) {
         unsafeDisableRedaction()             // explicit opt-out, logged once at install
         logSink = HopiLogSink.Summary   // Off | Summary (default) — one NDJSON line per transaction
         agentBridge = true                   // start the device-local agent bridge, default false
+        rules = true                         // apply Hopi rules to the requests this plugin records (default true)
     }
 }
 ```
@@ -98,6 +110,78 @@ only spawns that thread. `agentBridge = false` never touches the hook.
 @Composable fun HopiLauncher(content: @Composable () -> Unit)   // wraps app content, adds a floating button
 ```
 
+`hopi-urlsession` (call once, first thing at startup, in debug builds; Swift:
+`HopiUrlSession.shared.start()` or `HopiUrlSession.shared.start { $0.agentBridge = true }`):
+
+```kotlin
+HopiUrlSession.start()                       // idempotent; the first call's configuration wins
+HopiUrlSession.start {
+    enabled = true                           // false: start() installs nothing
+    maxEntries = 500                         // the same store settings as the Ktor plugin
+    maxTotalBytes = 16L * 1024 * 1024
+    maxBodyBytes = 256L * 1024
+    redactHeaders("X-Api-Key")
+    redactQueryParameters("token")
+    unsafeDisableRedaction()
+    summaryLog = true                        // the NDJSON line per transaction, as logSink = Summary
+    agentBridge = false
+    rules = true                             // false: no rule protocol, no factory hook, rules never read
+}
+HopiUrlSession.isStarted                     // true once capture runs (never on Android/JVM, never in the noop)
+```
+
+The store semantics are the plugin's (one helper in core, `CaptureInstallation`, does both): the
+first installation of either sets the caps, redaction is the union, the summary sink and the bridge
+start once per process. A second `start` with a different configuration writes a notice line
+instead of changing anything. Invalid caps (`maxEntries` or `maxTotalBytes` not positive,
+`maxBodyBytes` outside `0..Int.MAX_VALUE`) write a notice line and start nothing, without using up
+the first call: `start()` is called from Swift, where an exception would abort the app, and the
+noop twin accepts any value. The Ktor plugin, a Kotlin API, still throws on them. The name is not `Hopi` because that is the Ktor plugin, and two
+`Hopi` declarations in one framework collide in the Objective-C export. On Android and the JVM
+`start()` returns at once, so common code can call it.
+
+Android capture (the app module's `build.gradle.kts`; nothing to call):
+
+```kotlin
+plugins { id("dev.koga.hopi") }
+hopi {                                       // optional; the store settings of HopiUrlSessionConfig
+    enabled = true                           // false: every variant gets the noops, nothing is instrumented
+    okhttp = true                            // rewrite OkHttp's RealCall
+    urlConnection = true                     // rewrite java.net.URL connection call sites
+    selectTwins = true                       // real hopi-ktor/hopi-ui in debuggable variants, noops elsewhere
+    agentBridge = false                      // plus maxEntries, maxTotalBytes, maxBodyBytes, redact…, summaryLog
+    rules = true                             // false: the interceptor and the wrappers never read the rule state
+}
+HopiAndroid.isStarted                        // true once capture runs (never in the noop, never in release)
+HopiAndroid.okHttpInstrumented               // true when this APK's OkHttp was rewritten
+```
+
+`hopi-rules` (tests and debug menus; Swift: `HopiRules.shared`; see "Rules" below):
+
+```kotlin
+object HopiRules {
+    fun mock(match: String, block: HopiMock.() -> Unit = {}): Long          // the rule's id
+    fun fail(match: String, failure: HopiFailure, block: HopiRuleOptions.() -> Unit = {}): Long
+    fun delay(match: String, block: HopiDelay.() -> Unit): Long
+    fun edit(match: String, block: HopiEdit.() -> Unit): Long
+    fun list(): List<HopiRuleInfo>
+    fun setEnabled(id: Long, enabled: Boolean): Boolean
+    fun remove(id: Long): Boolean
+    fun clear()
+    fun replay(transactionId: Long, block: HopiRequestEdit.() -> Unit = {}): Long   // the new record's id, -1 when refused
+}
+```
+
+`match` is the shorthand of the CLI's `--match`. The builders (`HopiMock`, `HopiDelay`, `HopiEdit`
+with `request { }`/`response { }`, `HopiRequestEdit`, `HopiResponseEdit`, `HopiRuleOptions` for
+label, priority, times, enabled, `sources(…)`, query and header predicates and `delay(…)`) and the
+enums `HopiFailure` (`Timeout`, `Reset`, `UnknownHost`, `Cancel`) and `HopiSource` are plain
+classes with internal constructors. A validation error throws `IllegalArgumentException` with the
+bridge's message, a limit `IllegalStateException`. In the noop every call returns `-1`, `false` or
+an empty list and nothing is stored; the builders accept and keep every setting. The `rules`
+switch of each recorder is accepted and ignored by its noop, with the same default
+(`DefaultsParityTest`).
+
 The noop twins expose exactly these declarations with the same signatures. `HopiConfig` in
 the noop accepts every setter and ignores it (a property reads back what was set, with the same
 defaults); `Hopi` is a `createClientPlugin("Hopi", ::HopiConfig) {}` that registers
@@ -115,7 +199,7 @@ ui-unit, no foundation and no Material). Neither noop depends on `hopi-core`; ea
 tests assert that its test runtime classpath holds no `hopi-core` and that core's classes
 cannot be loaded.
 
-**Parity is checked mechanically.** The four modules enable the Kotlin Gradle plugin's built-in ABI
+**Parity is checked mechanically.** The real and noop modules enable the Kotlin Gradle plugin's built-in ABI
 validation (`kotlin { abiValidation { … } }`, KGP 2.4.20, `@ExperimentalAbiValidation`), which
 writes JVM, Android and klib (iOS) dumps to each module's `api/` directory (`updateKotlinAbi`) and
 fails `check` when the code no longer matches them (`checkKotlinAbi`). The dumps are checked in.
@@ -133,7 +217,12 @@ consumer API, and a noop that must not depend on core could not declare it (the 
 for the viewer's own chrome live there too, for the same reason). A change to the consumer API is
 therefore made in both modules and both dumps together
 (`./gradlew :hopi-ktor:updateKotlinAbi :hopi-ktor-noop:updateKotlinAbi`, and the same
-for the UI).
+for the UI). `hopi-android` excludes its package `dev.koga.hopi.android.internal` from its dump:
+the hooks the rewritten bytecode calls, the interceptor, the wrappers and the manifest's provider
+are public in the binary (`@HopiInternalApi`) but no consumer API, and the noop has no manifest and
+no hook. Because the Gradle plugin swaps twins under code compiled against the other side (below),
+the parity task also fails on an `inline` function or a `const` in any parity-checked dump: its body
+would be copied from the side the caller was compiled against.
 
 The dumps hold signatures, not initializers, so they cannot see a default that changed on one
 side (the noop cannot take core's constants: it copies them). `DefaultsParityTest` in
@@ -156,25 +245,69 @@ commonMain.dependencies {
 }
 ```
 
-Debug builds pass `-Phopi.enabled=true` (Android Studio run configuration, the Xcode build
-phase that calls Gradle). Release builds get the noop unless someone deliberately passes the flag.
+To call `HopiUrlSession` from Swift, the shared module also exports it from the framework (an
+Objective-C framework carries only its own declarations and those it exports):
+
+```kotlin
+val urlSession = if (hopiEnabled) "dev.koga.hopi:hopi-urlsession:$v" else "dev.koga.hopi:hopi-urlsession-noop:$v"
+iosMain.dependencies { api(urlSession) }
+target.binaries.framework { export(urlSession) }
+```
+
+Debug builds pass `-Phopi.enabled=true` (the Xcode build phase that calls Gradle; on Android the
+`dev.koga.hopi` plugin, below, replaces the flag). Release builds get the noop unless someone
+deliberately passes the flag.
 
 An Android-only app module does have build types, so it can select with `debugImplementation`
 (real) and `releaseImplementation` (noop) instead. An app module that consumes a KMP shared module
 must not: the shared module already brings one of the two, and real and noop declare the same
 classes. `sample/androidApp` therefore names neither and takes whatever `sample/shared` selected.
 
+**An Android application with the `dev.koga.hopi` plugin needs no property.** The plugin resolves
+`hopi-ktor`/`hopi-ui` per variant, whichever of the two the app's modules name: the real module in
+debuggable variants, the noop twin in the others (a dependency substitution on each variant's
+compile and runtime configurations, for this repository's projects and for the `dev.koga.hopi`
+coordinates), and it adds `hopi-android` or `hopi-android-noop` the same way. A KMP shared module
+compiled against either twin links against the other because the two have the same ABI with no
+inlined body (`:checkNoopParity`). So a debug build is real and a release build is noop whatever
+`-Phopi.enabled` says; to ship the real modules in a release, a developer must remove the plugin,
+which is the deliberate, visible choice principle 1 asks for. The property keeps its meaning for
+iOS frameworks and for Android apps without the plugin. (The generated `HOPI_ENABLED` of
+`sample/shared` still follows the property, so the Android debug build's Diagnostics caption says
+"noop twins" when built without the flag although the plugin made it real; `HopiAndroid.isStarted`
+in the "Third-party SDK" action's output is the truthful signal.)
+
 The sample checks the switch mechanically. `:sample:androidApp:verifyReleaseUsesNoop` reads the
-class definitions of the release APK's dex files and fails unless the release runtime classpath
-holds exactly `:hopi-ktor-noop` and `:hopi-ui-noop`, the APK has no
-`dev.koga.hopi.core` class, and its Hopi classes (outside `dev.koga.hopi.sample`, D8's
+release APK's dex files with the plugin's `DexReader` (class definitions, every referenced type and
+method, and each class's `invoke-*` instructions) and its merged manifest, and fails unless the
+release runtime classpath holds exactly `:hopi-ktor-noop`, `:hopi-ui-noop` and
+`:hopi-android-noop`, its Hopi classes (outside `dev.koga.hopi.sample`, D8's
 `$$ExternalSynthetic…` classes counted as their owner's) are exactly those the noop twins' jars
-hold. `:sample:androidApp:verifyHopiSelection` makes the same comparison for whatever the
-property selected, so with `-Phopi.enabled=true` it requires `:hopi-core`,
-`:hopi-ktor` and `:hopi-ui` and all of their classes (it is part of the app's `check`).
-Measured on this change: 12 Hopi classes and 0 core classes without the flag, 345 and 97 with
-it (the noop launcher's layout policy added two classes; earlier counts were 10 and 327). On iOS, a framework linked without the flag has no
+hold, no type of `dev.koga.hopi.core`, `dev.koga.hopi.android.internal` or
+`dev.koga.hopi.android.generated` is defined or even referenced, no class calls a Hopi hook, and the
+manifest declares no Hopi provider; as its negative control, OkHttp's `RealCall` must still call
+`OkHttpClient.interceptors()` and the fake SDK `URL.openConnection()`. `verifyHopiSelection` (part
+of the app's `check`) is the same check, kept to prove that `-Phopi.enabled=true` no longer
+reaches the release APK. `:sample:androidApp:verifyDebugCapture` (also in `check`) is the positive
+control on the debug APK: `RealCall` calls `HopiOkHttpHooks.interceptors` and no longer the getter,
+no class outside the runtime opens a `URL` connection directly, the fake SDK and
+`kotlin.io.TextStreamsKt` call the URL hooks, the provider is in the merged manifest, and the
+debug runtime classpath holds `:hopi-android`, `:hopi-core`, `:hopi-ktor` and `:hopi-ui`.
+Measured on this change: the release APK has 13 Hopi classes, 0 referenced core or capture types and
+0 classes calling a hook; the debug APK has 6 classes calling a URL hook (the fake SDK, the stdlib,
+Ktor's `URIFileContent`, kotlinx-coroutines' `FastServiceLoader`, Okio's `ResourceFileSystem`, and
+the runtime itself) and 0 still opening connections directly. Before the plugin: 12 Hopi classes and
+0 core classes without the flag, 345 and 97 with it. On iOS, a framework linked without the flag has no
 `kfun:dev.koga.hopi.core` symbol; the Debug app the Xcode project builds has 503.
+`:sample:shared:verifyIosReleaseExcludesCapture` (part of `:sample:shared:check` on macOS) links the
+release framework for `iosSimulatorArm64` and checks it mechanically: without the flag it fails on
+any `_hopi_us_` symbol, any `HopiUSTask`/`HopiUSObserver` class, any `kfun:dev.koga.hopi.core`
+symbol (`xcrun nm -m`, an argument array), or the C strings of the capture queue's label and of the
+private selectors `_didReceiveData:`/`_didFinishWithError:` in its bytes; with
+`-Phopi.enabled=true` it requires all of them (the positive control). Measured: 0, 0, 0 and none
+without the flag; 99 `_hopi_us_` symbols, 36 class symbols, 185 core symbols and all three strings
+with it. `hopi-urlsession` is an iOS-only dependency of the sample, so the Android checks are
+unchanged.
 
 ## Data model (`hopi-core`)
 
@@ -193,6 +326,12 @@ class HttpTransaction(            // immutable snapshot; the store replaces, nev
     val durationMs: Long?,        // request start to response body fully read (or failure)
     val error: String?,           // exception class + message on failure
     val protocol: String?,        // e.g. "HTTP/2.0"
+    val source: String? = null,   // what recorded it: "ktor", "urlsession", "okhttp", "urlconnection"; null from an older app
+    val finalUrl: String? = null, // the URL the response came from, when a redirect followed inside the client changed it
+    val ruleId: Long? = null,     // the rule applied to this request (docs/design/rules.md)
+    val ruleApplied: String? = null, // what it did: "delay,edit-request,mock,fail,edit-response" (that order, a subset)
+    val replayOf: Long? = null,   // the record this request replays
+    val replayTarget: ReplayTarget? = null, // in memory only: how to replay it through its client; never serialized or compared
 )
 
 class CapturedBody(
@@ -216,15 +355,89 @@ gone instead of loading forever, and the row is not asked for again.
 
 Body text decoding and pretty-printing are functions over `CapturedBody`, computed on demand.
 
+**A failure after the response arrived keeps the response.** `failedAfterResponse(error, …)`
+builds a `Failed` snapshot that keeps `responseCode`, `responseHeaders`, `protocol` and, as
+`responseBody`, what arrived of the body before the failure (a partial body: its `totalBytes`
+counts the bytes received, `truncated` says whether the cap cut them). Every recorder uses it when a
+body read fails, the app closes a body part-way (`"cancelled"`) or the connection drops: the Ktor
+plugin (teed, saved and decoded bodies), URLSession capture (a task that ends with an error after
+its response), OkHttp and `HttpURLConnection`. A failure before any response stays as it was
+(`code` null, no response). On the wire nothing new is needed: a failed summary line now has its
+`code` and a non-zero `resBytes`, the detail its response headers and body, fields every reader
+already decodes. The in-app and desktop detail read "Failed after 200 OK" and "Response received
+… (partial)"; `hopi get` titles the body "Response (partial)"; `hopi list` keeps `ERR` in the code
+column and writes `(HTTP 200, then <error>)`. An older CLI parses these lines but shows them
+differently: its code column prefers a present `code` over the state, so it prints `200` where the
+current one prints `ERR`, and only the `(error)` after the URL says the request failed (release
+note: update the CLI with the app; the older desktop viewer, which reads the state first, is
+unaffected).
+
+`source` and `finalUrl` are additive in both directions: written only when set (the summary line
+and bridge summary carry `"source"` right after `"state"`, then `"finalUrl"`, cut to fit the line
+like the URL and marked `"finalUrlTruncated":true` when it was; the detail carries `"finalUrl"`
+whole after `"url"` and `"source"` after `"state"`), decoded as null when absent, so an older app
+and an older viewer keep working. A host viewer therefore knows where a redirect ended from the
+summary alone: its list row reads `host → final-host` (`→ redirected` on the same host) and a
+search matches the final URL too; the CLI's `list`/`tail` text appends `  -> <final URL>`. The in-app detail and the desktop viewer (the same composables) show a
+"Source" row (`Ktor`, `URLSession`, …) and a "Final URL" row when set; a list row's second line
+ends with the source when it is not the Ktor plugin; a platform-captured duration reads
+"… (network)"; HAR export adds `_source` and `_finalUrl` to an entry; the CLI's `list`/`tail` text
+appends `[urlsession]` (any source but `ktor`) and `get` shows both rows, `--json` passes the lines
+through.
+
+The rule marks follow the same rule: `"rule":3,"applied":"delay,mock"` and `"replayOf":42` come
+after `"finalUrl"` (or `"source"`) and before `"error"` on the summary line and bridge summary,
+after `"source"` in the detail, only when set; they are fixed fields of the line budget (at most
+106 bytes with 19-digit ids). HAR export adds `_rule`, `_ruleApplied`, `_replayOf`; `hopi list`/`tail`
+text appends `[delay,mock #3]` / `[replay of 42]`, and `get` shows "Rule" and "Replay of" rows.
+
 ### Store
 
 `HopiStore`: ring buffer of `HttpTransaction`, bounded by `maxEntries` and `maxTotalBytes`
 (oldest evicted first, except the entry just written, which is evicted last: a long download that
 started first and completes large is not evicted by its own completion while newer, smaller
-entries stay). Writes come from a single consumer coroutine on `Dispatchers.Default` fed by
-two bounded channels, so producers never suspend: pending snapshots go through one of capacity ~256
-with `BufferOverflow.DROP_OLDEST` (losing one is harmless, the terminal snapshot carries
-everything); terminal snapshots go through their own of capacity 4096 that never drops silently.
+entries stay). Writes are applied by a single consumer fed by two bounded channels, so producers
+never suspend: pending snapshots go through one of capacity ~256 with `BufferOverflow.DROP_OLDEST`
+(losing one is harmless, the terminal snapshot carries everything); terminal snapshots go through
+their own of capacity 4096 that never drops silently. The consumer is a thread of the store's own,
+`hopi-store`, at a lower priority (Android nice 5: below the app's threads, but above
+`THREAD_PRIORITY_BACKGROUND`, which would also move it to the background scheduling policy and, on
+many devices, the background cpu cgroup; iOS utility QoS), that
+blocks on a semaphore with no timeout while nothing is queued (`WakeSignal`: a producer that finds
+it awake pays one atomic exchange, and only one that finds it asleep pays the semaphore release).
+While a viewer is attached (`attachViewer()`: each bridge session for its lifetime, the in-app and
+desktop list while composed) every write wakes it, so a request shows the moment it starts and the
+moment it ends. While none is, a pending write wakes nothing, and a terminal write wakes the
+consumer only when it sleeps with no timer: after each pass the consumer dozes for
+`batchWindowMillis` (50 ms), and the terminal writes that arrive meanwhile only mark the work (one
+compare-and-set, no system call), applied together when the doze ends; a doze with nothing marked
+ends in the untimed sleep. So with nobody watching, a burst of requests costs its threads one wake
+in all (the first request's), a request's start is applied with its end, and a record (with its
+summary log line) shows at most 50 ms after the request ended. Attaching a viewer, a `clear`, a
+`close`, a lost terminal write and half the terminal lane queued without a wake all wake the
+consumer at once, also out of its doze (since 2026-10-25, speed fixes; before, every terminal
+write woke it, a futex wake that was about half of the calling thread's cost per request on the
+emulator: Android capture has the numbers). Waking is not applying, so two callers wait for the
+pass with `awaitApplied(timeout)`, which returns once a pass that began after the call has drained
+both lanes and run the listeners (the summary line included): a bridge session, after it attaches
+and before it reads the client's first request (at most 250 ms; a pass takes well under a
+millisecond), so a `list` or `get` sent with the token and `hello` in one write sees every request
+that ended before the client connected; and a dying process. With the summary log on, the default
+store's installation chains an uncaught-exception handler and a shutdown hook (Android, JVM) or an
+uncaught Objective-C exception handler and an `atexit` handler (iOS) that wait at most 200 ms for
+that pass, then hand on to the handler they replaced, so the request whose response crashed the
+app, or that ended just before `exitProcess`/`exit()`, still gets its log line. Neither runs on a
+request's path or while idle. What no handler sees (`SIGKILL`, `abort()`, a Swift trap,
+Kotlin/Native's own termination on an uncaught Kotlin exception) can still lose the records of
+the last 50 ms, which before the batch window was a race of about 0.1 ms.
+With nobody watching, a request in flight is therefore not in the store yet, and more
+than the pending lane's capacity of unfinished starts loses the oldest (they appear when they end);
+a store built with a `scope` (tests, which drive it with a test dispatcher) runs the same consumer
+as a coroutine woken by a conflated doorbell channel. Either way the consumer waits on its wake-up,
+not on a lane, so a lane holds exactly its capacity. Before, a coroutine on `Dispatchers.Default`
+selected over the lanes and every write woke a pool worker, whose scheduler then spun before
+parking again (measured on Android: about 4 wakes and 216 µs of other threads' CPU per request,
+see Android capture).
 A terminal write that does not fit is rejected (`submit` returns false) and counted in
 `droppedTerminalWrites: StateFlow<Long>`; the summary log sink turns every increase into a line
 `{"hopi":1,"notice":"…","dropped":N}` (N is the running total), so an agent knows
@@ -237,7 +450,8 @@ largest body cap (half the store) still fits whole with a small other body; a PO
 bodies at that cap keeps the response. Exposes:
 
 - `transactions: StateFlow<List<HttpTransaction>>` for the UI (newest last),
-- `events: SharedFlow<TransactionEvent>` (Started / Updated / Completed) for the bridge and log sink,
+- `events: SharedFlow<TransactionEvent>` (Started / Updated / Completed) for collectors that may lose
+  events (no Hopi code collects it per request any more: the log sink and the bridge are listeners),
 - `get(id)`, `since(id)`, `clear()`,
 - `addEventListener(listener)`: called on the consumer for every event, in order and without loss,
   after the snapshot containing it is published. `events` drops the oldest for a slow collector
@@ -246,7 +460,17 @@ bodies at that cap keeps the response. Exposes:
 
 Updates are cheap: a transaction is captured as one `Started` write and one terminal write.
 `submit(transaction)` is non-suspending (`trySend`) and inserts or replaces by id; entries stay in
-id order. `Completed` is emitted for both terminal states (`Complete` and `Failed`), after the
+id order. `submitDeferred(terminal) { … }` queues a write whose snapshot the consumer builds, so a
+recorder's request thread only queues it (Android capture builds its records this way; no hop to a
+capture thread first). The entries are kept in chunks of 32 that published snapshots share
+(`ChunkedTransactions`): publishing copies the chunk index, and a write to a published chunk copies
+that chunk first, so one update copies about two chunks and the index (about 80 references at 500
+entries) instead of the whole list, and the `StateFlow`'s equality check of the old and new list
+compares only the chunks that differ. `transactions` keeps its `StateFlow<List<…>>` contract (each
+value an immutable list, structurally equal as `List` requires); `get` and `since` binary-search
+the same snapshot. Measured per request in a full store (500 entries), consumer run inline:
+Kotlin/Native debug (iOS simulator test binary) 157.6 → 19.3 µs, 190.4 → 27.9 µs with a
+`transactions` collector; JVM 2.65 → 1.89 µs (`StoreHotPathBenchmark`, `-Phopi.hotpath`). `Completed` is emitted for both terminal states (`Complete` and `Failed`), after the
 snapshot containing it is published, so a subscriber's `get(id)` finds it when the store retained
 it (not when it was cleared or evicted in the same batch). `clear()` drops every
 transaction whose id was allocated before the call, including a pending one whose completion
@@ -371,6 +595,412 @@ How the plugin implements this (Ktor 3.5.2):
   store's non-suspending `submit`.
 - `enabled = false` returns before installing any hook or touching the store.
 
+## URLSession capture (`hopi-urlsession`)
+
+One call at startup in a debug build, `HopiUrlSession.start()`, records every URLSession request
+of the iOS process into the same store, whoever makes it: the app, a third-party SDK (analytics,
+ads, crash reporting), Ktor's Darwin engine. No session, client or SDK is configured. The full
+design, the spike evidence and the reasons are in `docs/design/urlsession-capture.md`; this is the
+contract.
+
+**Observe only** (until the developer adds a rule; see "Rules"). Nothing is re-sent (DebugSwift, Netfox and Wormholy re-issue every request
+through a `URLProtocol`, which is what makes them slow and changes caching, cookies, redirects,
+authentication, HTTP/2 and metrics). An Objective-C library (`hopi-core/src/nativeInterop/objc`,
+compiled per iOS target by two Gradle `Exec` tasks with argument arrays and embedded in the
+cinterop klib, so consumers need no linker flags) replaces, once, inside one `dispatch_once`:
+
+1. `-[NSURLSessionTask resume]` on every class of the task class chains that defines it (found
+   from never-resumed probe tasks): creates the per-task state, before calling the original, on
+   the first resume of a suspended task;
+2. `-[__NSCFURLLocalSessionConnection _didReceiveData:]` (CFNetwork's per-task connection, below
+   every API and delegate shape): after the original, retains the chunk (no copy) while the kept
+   bytes are below `maxBodyBytes`, copies only the part of the chunk that crosses the cap, and past
+   the cap only counts;
+3. `-[__NSCFURLLocalSessionConnection _didFinishWithError:]`: after the original, reads the
+   response, the error and the metrics' protocol and ends the record;
+4. `NSURLSession`'s upload factories (`fromData:`, `fromFile:`, streamed, and the private one the
+   async `upload(for:from:)` uses): after the original, notes the body data (an immutable
+   `NSData`'s `copy` is the same object; a mutable body over the cap keeps a copy of its first
+   `maxBodyBytes` and its length) or that the body is a file or a stream.
+
+Each replacement calls the previous implementation with its own selector, so swizzlers installed
+before or after (Firebase Performance, Pulse, FLEX, AFNetworking) keep working in both orders
+(tested with an exchange-style and two set-style swizzlers). No method is added, no app or SDK
+class, delegate, `respondsToSelector:` answer or task class changes (tested over 25 delegate
+selectors and four delegate shapes), and no `protocolClasses` changes except, with `rules` on
+(the default), `HopiUSRuleProtocol` first in the configuration of a session created after
+`start()` (background sessions untouched) and registered with `+[NSURLProtocol registerClass:]`
+for `URLSession.shared` while rules exist; the protocol claims only a task whose first matching
+rule is a mock or a fail (see "Rules"). With `rules` on, the session factory
+`+sessionWithConfiguration:delegate:delegateQueue:` is replaced too, and the task factories
+(public and private, request and URL forms) and `-suspend` only once the first edit or delay rule
+was added. The private selectors are used only after a
+start-time self-check (class present, both selectors defined on it with the expected type
+encodings, the `_task` ivar typed `NSURLSessionTask`); otherwise, and for background sessions
+(out of process), a metadata path records request, status, headers, sizes, timing and error with
+bodies `"not observable"`, using KVO on the task's `state` as its end, and a notice line says so.
+
+**One record per request.** Once capture runs, the Ktor plugin defers to it for the engines it
+covers: `PlatformCapture` (core) holds the covered engine packages, `start()` covers
+`io.ktor.client.engine.darwin.`, and the plugin checks its client's engine class on every send
+(one atomic read) and records nothing for a covered one, so a client built before `start()` defers
+from its next request. Other engines (CIO, OkHttp in an app without the Android plugin's instrumentation, MockEngine)
+are recorded by the plugin as before, `source = "ktor"`. The plugin's install-time work (caps,
+redaction, summary sink, bridge) still happens.
+
+**Threads.** The app's thread that calls `resume` pays an allocation, an associated object, two
+retains and one `dispatch_async`; it reads no header and copies no byte. The connection hooks run
+on CFNetwork's own queue, never the main thread (counted in the tests, also for a session whose
+delegate queue is the main queue). Records are built on one serial utility-QoS dispatch queue
+(`dev.koga.hopi.urlsession-capture`), which holds no thread while empty: idle cost stays zero.
+Kotlin runs only there, called through `staticCFunction` callbacks.
+
+**What a record holds.** `originalRequest`'s method, URL and headers (headers URLSession adds
+itself are not seen); the request body when it is `HTTPBody` or upload data, else skipped with
+`"stream, not captured"`, `"file, not captured"` or `"not observed"` (an upload created before
+`start()`); the final response's status and headers (a native redirect is one record, with
+`finalUrl`); the response body as the app receives it (decoded), up to the cap, `totalBytes`
+exact (Hopi's own count, replays excluded); downloads `"download"` with their size and no bytes;
+binary and event-stream content types skipped by the same rule as the plugin (`ResponseSkip` in
+core, mirrored in the library and compared by a test); `protocol` as Ktor writes it (`HTTP/1.1`,
+`HTTP/2.0`); errors as `NSURLErrorDomain <code>: <description>`, `"cancelled"` for a cancel;
+`durationMs` from the first `resume` to the network's end (not to the app's delegate queue).
+CFNetwork can hand `_didReceiveData:` the same chunk object twice (seen on a redirect and a
+mid-body cancel); a chunk already counted is ignored by identity: kept chunks are compared
+directly, chunks past the cap through a ring of four `__weak` references, which keep nothing alive
+and read nil once freed. `countOfBytesReceived` is not used to cut a record: at
+`_didFinishWithError:` it is still 0 or partial for uploads, redirects and downloads (measured).
+
+**Coverage**, every row tested on the iPhone 16 simulator (iOS 18.2) and the iPhone 17 simulator
+(iOS 27.0) unless marked: completion-handler data, upload (data, file) and download tasks with a
+URL or a request, with and without a handler; `URLSession.shared`, default and ephemeral sessions;
+full, partial, nil, `NSProxy` and subclass-calling-super delegates on the main and a background
+queue; Swift `data(for:)`, `data(from:)`, `upload(for:from:)`, `bytes(for:)`, `download(for:)`
+(XCTest target, iOS 27.0 only, see Sample app); sessions created before `start()` (their tasks
+resumed after it are recorded; a task resumed before it is not, even if suspended and resumed
+after it; created before and resumed after is); `HTTPBodyStream`; 204, 304, HEAD, a native redirect, gzip; reset, refused, timeout and cancel
+(before the first byte and mid-body); 64 parallel uploads; an 8 MB body; Ktor Darwin (one record,
+concurrent POSTs, a channel body, redirects recorded per hop because Ktor follows them itself).
+Not recorded: WebSocket and stream tasks, `data:`, `file:` and custom-scheme loads, AVFoundation
+media loading, WKWebView, `NSURLConnection`, raw sockets; background sessions take the metadata path while the app runs.
+
+**Measured** (2026-10-24, simulator only, no physical iOS device; `benchmark/urlsession/`):
+Hopi's own part of each hook, timed inside the library over sequential loopback requests on the
+iPhone 17 simulator (iOS 27.0): `resume` 6 to 10 µs, `_didReceiveData:` 4.5 to 5 µs per chunk for
+1 KB and 64 KB bodies (16 µs averaged over a 1 MB body's chunks, the one crossing copy of up to the
+256 KB cap included), `_didFinishWithError:` 9 to 12 µs. On the iPhone 16 simulator (iOS 18.2): `resume` 4 to 6 µs (32 µs
+averaged over the first, cold block), `_didReceiveData:` 2.7 to 10 µs, `_didFinishWithError:` 12 to
+17 µs. Per request, capture on against off in
+one binary (`ab.m`, 200 sequential requests, interleaved, 6 blocks per arm, host load high): wall
+time from `resume` to the completion handler 466 to 476 µs on against 469 to 478 µs off at 1 KB
+(one off block at 648 µs), 1036 to 1108 µs on against 1079 to 1096 µs off at 1 MB, so within the
+off-to-off spread; CPU of the thread calling `resume` 21.7 to 22.2 µs on against 19.0 to 19.5 µs off
+at 1 KB. Retained bytes per task in flight never exceeded the cap (262144 for an 8 MB body).
+Simulator figures are an upper bound for CPU, not a device number.
+
+**Verified end to end** (2026-10-24, iPhone 17 simulator, iOS 27.0, the sample's Debug app with Hopi
+against the same Debug app built with `HOPI_ENABLED=false`; `benchmark/urlsession/e2e/`, evidence in
+`build/evidence/urlsession/`): 19 URLSession shapes (`-verifyCapture`), 9 Ktor Darwin requests
+(`-ktorVerify`) and the `ThirdPartySDK` file each appear exactly once through `hopi list/get/tail
+--json`, matched against the dev server's own request log, all `source = "urlsession"`, none
+`"ktor"`; method, URL, status or error, headers (Authorization redacted), request bodies and captured
+response bytes match what the app read (SHA-256), truncated bodies match the server's first 256 KB;
+the bytes every scenario read and the requests the server saw are identical on the noop build; the
+os_log line carries `source`; the desktop viewer shows the rows as URLSession. Cost in the sample's
+Debug build (Kotlin/Native debug framework, summary log on, bridge on, no client connected): wall
+time per small loopback request 0.587 to 0.677 ms against 0.567 to 0.570 ms noop at steady state
+(5000 sequential requests, 3 alternating rounds); 5 and 20 MB request plus read within the
+noop-vs-noop band, 1 MB consistently about 0.8 ms (wall) and 4 ms (CPU) above noop (4 rounds);
+process CPU per small request 915 to 1026 µs against 562 to 565 µs, of
+which a `sample` profile puts about half in core's `HopiStore` consumer (a full `toList()` copy of the
+retained list per batch) and the summary log line, not in the hooks. Idle with no client connected
+every Hopi thread uses 0 µs over 60 s; with a `tail` connected the `hopi-bridge-writer` thread uses
+about 0.35 ms of CPU per second while parked in `runBlocking` (`BridgeSession.writeLoop`): the
+profile shows kotlinx-coroutines' `ThreadLocalKeepAlive` re-arming `Worker.executeAfter` on it. Since
+the hardening pass (2026-10-24) the writer blocks on a dispatch semaphore instead (0 µs over 60 s with
+`tail` connected), and process CPU per small request is 679 to 698 µs against 575 to 580 noop and
+878 to 961 for the build before (iPhone 17 simulator, iOS 27.0; details in the design doc,
+"Hardening"). After the speed fixes and their follow-ups (2026-10-25, the same simulator, 3 rounds
+of noop / before / after / noop2, 40000 steady small requests per block, arm minus the mean of the
+round's two noop blocks; `build/evidence/speed/final/ios/`): process CPU per small request +48 to
++81 µs (the tree before the follow-ups +51 to +86; noise noop2 − noop −43 to +37), median wall
+within ±0.015 ms of noop; 1, 5 and 20 MB request plus read inside or near that session's wide
+noop-vs-noop spread. Every `hopi-*` thread 0 µs over 60 s idle with no client, a tail, the desktop
+and 10 rules; live tail latency over 2000 back-to-back requests p50 0.40, p99 3.9, max 8.8 ms.
+
+## Android capture (`hopi-android`, the `dev.koga.hopi` Gradle plugin)
+
+One line in the Android application module, `plugins { id("dev.koga.hopi") }`, records every OkHttp
+call and every `HttpURLConnection` of the app into the same store, whoever makes it: the app,
+Retrofit, image loaders, a third-party SDK compiled long before (analytics, ads, crash reporting),
+Kotlin's `URL.readText()`, Ktor's OkHttp and Android engines. No client, SDK or session is configured and no
+code runs at startup. The full design, the reasons and the measurements are in
+`docs/design/android-capture.md`; this is the contract.
+
+**Build time, debuggable variants only.** The plugin (an included build, `gradle-plugin/`) registers
+AGP instrumentation (`variant.instrumentation.transformClassesWith`, scope `ALL`: the app's classes
+and every dependency's) with an ASM rewriter (`hopi-instrument`) for each debuggable variant, and for
+no other: a release variant has no transform task at all.
+
+1. In OkHttp's `RealCall` (`okhttp3.internal.connection.RealCall`, 4.x and 5.x; `okhttp3.RealCall`
+   for 3.x: 3.14 is recorded, 3.12 and 3.13 are rewritten but the runtime, which needs 3.14's
+   `RequestBody.isDuplex()`, leaves their chains alone), the one `invokevirtual OkHttpClient.interceptors()` becomes `invokestatic
+   HopiOkHttpHooks.interceptors(OkHttpClient)` (the same stack effect), and the class gains
+   `@HopiInstrumented`. The hook returns the client's own list while capture is off, and a
+   read-only view with Hopi's interceptor last once it is on. It covers every client: subclasses,
+   clients built by reflection or before capture started, `newBuilder()` copies. No list the app
+   can read changes (`client.interceptors()`, the builder's, a copy's), unlike hooking
+   `OkHttpClient` itself.
+2. Every `URL.openConnection()`, `openConnection(Proxy)`, `openStream()`, `getContent()` and
+   `getContent(Class[])` call site, and the same methods as method-reference handles of a
+   `LambdaMetafactory` bootstrap, go to the static hook of the same name in `HopiUrlHooks`, which
+   calls the real method and wraps an HTTP(S) connection (`java.net.URL` itself is a boot class no
+   transform sees).
+
+Each rewrite replaces one instruction or handle by one of the same stack effect, so frames are
+copied, not computed, and no class hierarchy is loaded. Hopi's own classes are never rewritten.
+The plugin also adds the runtime (`hopi-android` to debuggable build types, `hopi-android-noop`
+to the others), generates the optional `hopi { }` block into the variant as a class the runtime
+reads with one lookup, and resolves the Ktor and UI twins per variant (see "Selecting real vs noop").
+
+**Start.** `hopi-android`'s manifest declares `HopiInitProvider` (`initOrder` the highest, so it runs
+before other SDKs' providers). It reads the generated configuration, looks `RealCall` up by name
+without initializing it, and sets the started flag; the store installation (`CaptureInstallation`,
+the same semantics as the Ktor plugin and URLSession capture) is made by the first recorded request,
+on its thread. It writes one notice line with its own duration.
+
+**Observe only** (until the developer adds a rule; see "Rules"). The interceptor runs as the last application interceptor: it sees the request as
+the app's interceptors left it, DNS, connect and TLS failures, cache hits and WebSocket handshakes,
+and the response as the app receives it (decoded). It wraps a request body in a delegating body
+that copies what OkHttp writes during the first complete `writeTo`, so a one-shot body is still
+written once, by OkHttp, and captured (duplex bodies are skipped); it wraps a response body in a
+delegating body whose source copies what the app reads, up to `maxBodyBytes`, and counts the rest:
+no `peekBody`, no read-ahead, so a long poll or an event stream reaches the app as fast as without
+Hopi (tested by holding a body's second half on the server until the app has read the first). A
+failure is recorded and rethrown unchanged. `HttpURLConnection` and `HttpsURLConnection` wrappers
+delegate every overridable method of the compile SDK's classes (a test reads `android.jar` and fails
+on a missing one), never call a delegate method the app did not call except reading the request
+before the first connecting call and the cached status and headers after it, and tee the input,
+error and output streams the same bounded way. A connection OkHttp implements
+(`okhttp-urlconnection`) is left unwrapped, since the interceptor records it.
+
+What the app can observe differently: `request.body`/`response.body` below Hopi's interceptor (and
+in `response.request`) are Hopi's delegating classes, and a wrapped connection's class is Hopi's,
+so `instanceof` checks on them or reflection on `HttpURLConnection`'s private fields behave
+differently. Headers OkHttp's `BridgeInterceptor` and the platform stack add themselves (`Host`,
+`User-Agent`, `Accept-Encoding`, `Cookie`) are not recorded, as on iOS.
+
+**One record per request.** The Ktor plugin defers to Android capture through `PlatformCapture`, as
+on iOS: the provider covers `io.ktor.client.engine.okhttp.` only when `RealCall` carries the
+annotation (and links: 3.14 or later), and `io.ktor.client.engine.android.` only when the
+generated configuration says the plugin rewrote that engine's `URL` calls, so the plugin can never
+defer to capture that is not there (an unknown OkHttp version writes a notice line and the plugin
+keeps recording, `source = "ktor"`). One exception keeps the body as the app reads it: a request of
+a covered engine that names its own `Accept-Encoding` (Ktor's `ContentEncoding`) gets its body from
+OkHttp or the platform connection still encoded, and Ktor decodes it, so the plugin records it
+itself (`"ktor"`, decoded) and marks it with `X-Hopi-Pass-Through`, which the interceptor removes
+before sending (the wrapper never sets it) and which makes them record nothing for that request.
+The app's own OkHttp interceptors see the marker on those requests; the wire does not. Ktor
+disables OkHttp's redirects, so a Ktor redirect is one record per hop; OkHttp's own redirects and
+retries are one record, with `finalUrl`.
+
+**What a record holds.** `source = "okhttp"` or `"urlconnection"`; method, URL and headers as the
+interceptor (or the connection before connecting) saw them, with the body's `Content-Type` when only
+the body names it; the request body up to the cap (`"duplex, not captured"`, `"not sent"` when
+`writeTo` never ran, `"incomplete"` when it threw); status, headers, `protocol` (`HTTP/1.1`,
+`HTTP/2.0`; for `HttpURLConnection` from Android's `X-Android-Selected-Protocol`) and `finalUrl`;
+the response body as the app read it, up to the cap, `totalBytes` exact; binary and event-stream
+types not kept (`ResponseSkip`) but counted as the app reads them, so their record ends with the
+body (exact size and duration, a failed download is `Failed`, an SSE stream stays `Pending` until
+the app closes it); a failure after the response keeps it, with what arrived of the body; `durationMs` from the interceptor (or the first connecting call) to
+the end of the body as the app reads it, not labelled "network". A body the app closes without
+reading a byte is `Complete` with the body `"not read"`, one closed part-way is `Failed`,
+`"cancelled"`, one read to its declared length and closed is `Complete`; a body nobody reads or
+closes stays `Pending`, as with the Ktor plugin.
+
+**Threads.** The app's request thread allocates the per-request state, copies body bytes below the
+cap as its own reads move them (one bounded array per body, allocated by the first copy and sized
+to the cap when `Content-Length` says the body reaches it) and queues two writes
+(`store.submitDeferred`). The store's consumer thread builds the records (converts headers, trims
+the array), applies them and writes the summary line in the same pass. The main thread runs only the provider; if an app reads a body
+on the main thread, its bounded copy runs there, as with the Ktor plugin.
+
+**Not recorded:** shaded or relocated OkHttp, code outside the APK (Play services dynamite modules,
+code loaded at run time), Cronet's native API, WebView, `DownloadManager`, native HTTP stacks,
+processes other than the main one, requests made before the provider runs, `URLConnection`s
+obtained by reflection or through a `MethodHandle` constant, WebSocket frames.
+
+**Release.** Non-debuggable variants get `hopi-android-noop` (`HopiAndroid`, both values false, no
+dependency, no manifest entry) and no instrumentation. `:sample:androidApp:verifyReleaseUsesNoop`
+proves it on the release APK, and the plugin's TestKit tests (`:gradle-plugin:hopi-gradle-plugin:functionalTest`,
+part of the root `check`) build a fixture app with AGP and check that its debug APK is instrumented
+and its release APK untouched, and that an app without OkHttp builds and is instrumented.
+
+**Measured** (2026-10-24, API 35 emulator, debuggable builds against the same app built
+with `hopi { enabled = false }`, interleaved; details in the design doc): the calling thread's CPU
+per small request +85 to +95 µs (OkHttp 259 to 345 µs, `HttpURLConnection` 116 to 208 µs), wall time
+per small loopback request +350 to +390 µs (about 1.1 to 1.5 ms); a 300 KB body copied to the 256 KB
+cap +250 µs (OkHttp) and +170 µs (`HttpURLConnection`) of CPU; cold start 1200 ms median against 1152 ms for the whole debug
+Hopi (Ktor plugin, UI, bridge and capture); the provider itself 5.4 ms median (2.9 to 15.4 ms) on a
+debuggable build, most of it loading core's and Kotlin's classes, above its 1 ms target (open). Raw
+data in `benchmark/android-capture/2026-10-24/`. After the hardening pass (records built and logged on the store's
+consumer thread; design doc, "Hardening"), with no logcat reader during a
+block: wall per small request +68 to +84 µs (was +135 to +168 in the same session), the calling
+thread's CPU +65 to +74 µs (was +77 to +91), process CPU +183 µs (was +460). The calling-thread
+target of 30 µs is not met: about 25 µs of it is the futex wake of the parked store thread. Those
+requests ran back to back, which hid a second wake: a spaced request also woke the parked store
+thread at its start. Since 2026-10-25 a start wakes it only while a viewer is attached (design doc,
+"Review fixes", which has the spaced and back-to-back numbers). Speed fixes (2026-10-25, raw data in the ignored
+`build/evidence/speed/fixes/`): with no viewer attached a terminal write only marks the work while
+the store's consumer dozes in its 50 ms batch window (Store, above), recorders queue themselves
+(no `Deferred` or lambda per hand-off), the `application/json` type skips the `ResponseSkip` scan,
+the interceptor list view is cached for the last four clients (so an app whose API and image clients interleave still hits), the pass-through header is scanned for only once the
+Ktor plugin used it, and the `URLConnection` record's URL text is made on the store's thread.
+Back to back on the same emulator, capture minus noop: the calling thread's CPU +17 to +30 µs for
+OkHttp (was +49 to +65) and +23 to +27 µs for `HttpURLConnection` (was +67 to +76), median wall
++9 to +56 and −27 to +26 µs (was +52 to +83 and +69 to +103; noise noop2 − noop −15 to +43 and
+−26 to +15), the store thread 0.07 timeslices and about 60 µs per request (was 1.08 and 92). Live
+tail latency, with the viewer attached and so unbatched, stays at p50 6.2 ms, max 17 ms.
+Re-measured after the follow-up fixes (the apply barrier, the crash flush, the four-client list
+cache, the method looked up once per request for rules; raw data in the ignored
+`build/evidence/speed/final/`), 4 rounds of noop / before / after / before + 10 rules / after + 10
+rules / noop2: the calling thread's CPU, after − noop, +16 to +26 µs for OkHttp (median +21) and
++26 to +31 µs for `HttpURLConnection` (median +28.5; before, the same tree without these fixes,
++24 to +31), noise noop2 − noop −5 to +5 and 0 to +4. Median wall +9 to +19 and +14 to +29 µs,
+against a noop2 − noop band of −51 to +9 and −29 to +18: still about 10 to 30 µs above the noise,
+which is roughly the calling thread's own added CPU, so the wall target cannot be met while that
+CPU stays above the band. 10 enabled, non-matching rules add −6 to +6 µs (median +2) on OkHttp,
+inside the bench's CPU noise, and +6 to +19 µs (median +7.5; before +7 to +8) on
+`HttpURLConnection`. `hopi-store` 0.23 to 0.35 timeslices and 226 to 251 µs on-CPU per counted
+request (both stacks), unchanged. Idle: every `hopi-*` thread 0 µs and 0 context switches over
+60 s with no client, a tail, the desktop's two connections, 10 rules, and 10 rules plus a tail.
+Live tail latency (200 spaced requests): OkHttp p50 6.17, p99 10.2, max 11.2 ms (before 6.28 / 9.05
+/ 9.60), `HttpURLConnection` 6.11 / 8.83 / 9.01 ms (before 6.04 / 8.78 / 8.80).
+
+**Verified end to end** on the same emulator (`benchmark/android-capture/run.py e2e`): the fake SDK's
+nine request shapes, `URL.readText()` and a Ktor request through the OkHttp engine each recorded
+exactly once (summary log and `hopi list`/`get` over the bridge, matched against the dev server's
+log), with the right source, the SDK's own headers and the request bodies the server received; the
+noop build sends the same requests and records nothing.
+
+## Rules (`hopi-core` engine; `hopi-rules`; every recorder)
+
+A rule matches a request and changes what happens to it: **mock** (a response made up in the app,
+no network), **fail** (`timeout`, `reset`, `unknown-host`, `cancel`, as the source's own exception
+or `NSError`), **delay** (before the request and/or before the response, each 0..120 s, optional on
+any rule) or **edit** (method, host, port, path, query, headers, body of the request; status,
+headers, body of the response). **Replay** re-sends a recorded request, optionally edited, through
+the client or session that sent it. The full design, the reasons and the rejected alternatives are
+in `docs/design/rules.md`; this is the contract.
+
+**Engine** (`dev.koga.hopi.core.rules`, all `@HopiInternalApi`). `RuleEngine` holds the rules as
+added and their compiled form in one immutable `RuleState` behind one atomic reference; a mutation
+copies, validates, compiles and publishes with a compare-and-set loop. `RuleState.EMPTY` is
+published whenever no enabled, unexhausted rule exists and no replay is in flight, so a recorder's
+whole cost without rules is one volatile read and one reference comparison
+(`if (state === RuleState.EMPTY)`). At publish each source gets only the rules it can apply
+(`Capabilities`), so a rule never matches where it cannot be applied and nothing checks
+capabilities per request. The first enabled rule that matches and still has `times` left wins
+(higher `priority` first, then the newest); a claim is one compare-and-increment of the rule's
+shared hit counter, and the claim that exhausts a rule republishes the state without it.
+Matching reads each stack's own request objects through a `RuleRequest` view, allocated only when
+the state is not `EMPTY`. Globs are compiled at `add` (two-pointer matching, patterns at most 256
+chars). Limits: 64 rules, 1 MiB per body, 8 MiB of rule bodies in all, 32 headers per side, 8
+query and 8 header predicates, 8 replays in flight. On iOS each publish also hands the URLSession
+rules, compiled to C structs, to the Objective-C library synchronously (`hopi_us_rules_publish`),
+whose matcher is a second implementation checked against the same JSON vectors as the Kotlin one
+(`commonTest` resources); the hit counters live in C memory there, shared by both sides.
+
+**Who applies a rule: the recorder.** Exactly one layer records each request (`PlatformCapture`'s
+one-record rule), and only that layer reads the rules for it: the Ktor plugin returns before
+reading them for a request a platform recorder covers, and the interceptor and the wrappers apply
+nothing to a request the plugin keeps (`X-Hopi-Pass-Through`). A rule can never be applied twice,
+and a record's mark always describes what its recorder did.
+
+| | Ktor plugin | OkHttp | `HttpURLConnection` | URLSession |
+| --- | --- | --- | --- | --- |
+| mock, fail | yes | yes | yes | yes; not background sessions; not sessions created before `start()` (`URLSession.shared` excepted) |
+| delay before request | yes | yes | yes | yes (a deferred `resume`; adds to the session's timeouts) |
+| delay before response | yes | yes | yes | with a mock or fail only |
+| edit request | yes | yes | yes | yes, for tasks from the hooked factories; a body only for `HTTPBody` and upload-from-data |
+| edit response | yes | yes | yes | **no** |
+| replay | yes, while the client is open | yes, OkHttp 4.x/5.x (3.14 refused) | yes | yes, local sessions, while the session lives |
+
+Where it applies: the Ktor plugin at `HttpSendPipeline.Monitoring` (an edit rewrites the builder
+before the record's snapshot; a mock builds the call without calling the engine); OkHttp in the
+instrumented application interceptor (a mock answers without `proceed`; a before-response wait
+checks for cancel every 50 ms, only while a delayed request waits); `HttpURLConnection` in the
+wrappers (a mock never connects the delegate; a URL edit builds a new delegate with the app's
+`SSLSocketFactory` and `HostnameVerifier`); URLSession in `HopiUSRuleProtocol` (mock and fail,
+delivered on the run loop of the thread that called `startLoading`, never cached) and the factory
+and `resume` hooks (edits, delays).
+
+**Marks.** A ruled record carries `ruleId` and `ruleApplied` (see Data model) and holds the request
+as sent and the response as delivered to the app; a replay carries `replayOf`. A mock's record has
+the recorder's `source`, `protocol` null and a duration that includes the delay; a fail's is
+`Failed` with the exception the app saw.
+
+**Replay.** `Replays.start` (core) re-sends a record through its in-memory `replayTarget` (the Ktor
+client, the OkHttp client, the connection's TLS objects, the URLSession session) and returns the
+new record's id at once; the replay is recorded like any request, and rules apply to it. It is
+refused (`UNSUPPORTED`) for a record whose recorder offers no replay, a closed client or
+invalidated session (the target's own refusal), and a request body not held in full; an edit
+whose header value is the redaction placeholder is `BAD_REQUEST`, and a ninth replay in flight
+`LIMIT`. A URLSession replay goes through the task's own session with a task delegate that
+implements only the response, data, completion and metrics callbacks, so authentication challenges
+still reach the app's delegate.
+
+**Security.** No action contacts the network outside the app's own stack: a mock and a fail
+contact nothing; an edit and a replay go through the app's client or session with its own TLS,
+certificate pinning, verifier, proxy and challenge delegate. Hopi offers no action that changes
+trust, a verifier, a proxy or a challenge answer. The scheme cannot change; an edit that changes
+the origin removes `Authorization`, `Proxy-Authorization`, `Cookie` and every redacted header
+unless it sets them itself. Mocks and response edits never set a cookie (`Set-Cookie` rejected)
+and never enter an HTTP cache (OkHttp's and `HttpURLConnection`'s caches sit below Hopi; the
+URLSession protocol answers with `NSURLCacheStorageNotAllowed`; on Ktor a ruled response carries
+`Cache-Control: no-store` when the client has `HttpCache`). Rules, bodies and blobs live in memory
+only: nothing is written to a file, preferences, `NSUserDefaults`, the proof file or `bridge.json`,
+and no rule comes from a file, an intent, a deep link, a launch argument or an environment
+variable; the only ways in are the authenticated bridge, `HopiRules` and the in-app screen.
+Restarting the app clears every rule.
+
+**Observable differences while a rule applies**, stated rather than hidden: `task.originalRequest`
+is the edited request; `configuration.protocolClasses` lists Hopi's class; a delayed URLSession
+task reads `Suspended` during the delay and its timeouts start after it; an OkHttp mock has no
+handshake and skips the cache and network interceptors; a mocked 3xx, 401 or 407 is the final
+response on OkHttp, `HttpURLConnection` and URLSession (their follow-up logic is below Hopi) and
+is followed on Ktor (above it); an `HttpURLConnection` mock has no certificates; a mocked
+URLSession upload reports no send progress.
+
+**Switch.** Each recorder has `rules: Boolean = true` (`HopiConfig`, `HopiUrlSessionConfig`, the
+Gradle DSL's `hopi { rules = … }`, generated into `HopiGeneratedConfig`). False means that
+recorder never reads the rule state and, on iOS, injects no protocol and hooks no factory. The
+engine and `HopiRules` stay; `hello` says `"rules":false` when every recorder that started has it
+off, and the bridge then answers rule commands `UNSUPPORTED`.
+
+**Surfaces.** Bridge commands (Agent access, "Wire protocol"); the CLI's `mock|fail|delay|edit add`,
+`rules ls|rm|clear|enable|disable|reset` and `replay` (Agent access, "CLI"); `HopiRules` (Consumer
+API); the desktop viewer's Rules panel (Desktop viewer); the in-app rules list, "Mock this
+response" and "Replay" (UI).
+
+**Compatibility.** The bridge's `"protocol"` stays 1, so a current CLI keeps working with a new
+app and the other way round. A new host sends rule commands only to an app whose `hello` said
+`"rules":true` (older apps omit it: "this app's Hopi does not support rules", exit 4); an older
+app answers a rule command `BAD_REQUEST` ("unknown cmd", or "malformed JSON object" for a nested
+one) without changing its state. `{"type":"rules"}` notices go only to a `tail` that asked for
+them, so an older client never sees an unknown line type, and the new record fields are additive
+(older decoders ignore them; a new decoder reads their absence as null). On Android the generated
+`HopiGeneratedConfig` gained the `rules` argument, so the plugin and `hopi-android` must come from
+the same Hopi version, as they always do (the plugin adds the runtime itself).
+
+**Release.** The engine is in `hopi-core`, which no release build contains: `hopi-rules-noop`
+depends on nothing, the Gradle plugin swaps `hopi-rules` for it in non-debuggable variants (the
+third twin pair, checked by its functional test), `:sample:androidApp:verifyReleaseUsesNoop`
+expects exactly the four noops (`:hopi-rules-noop` included) and `verifyDebugCapture` requires
+`RuleEngine` in the debug APK, and `:sample:shared:verifyIosReleaseExcludesCapture` fails on any
+`HopiUSRuleProtocol` or `_hopi_us_rule` symbol and the rule queue's label without the flag and
+requires them with it. `:checkNoopParity` covers the `hopi-rules` pair.
+
 ## cURL export
 
 `toCurl(transaction, redaction)`: `curl -X METHOD 'url'` (`curl -I 'url'` for a `HEAD` without a
@@ -410,8 +1040,22 @@ With `logSink = Summary`, every completed or failed transaction emits one NDJSON
 {"hopi":1,"id":42,"method":"GET","url":"https://api.example.com/users?page=2","code":200,"ms":183,"reqBytes":0,"resBytes":5120,"state":"complete"}
 ```
 
-A failed transaction has `"code":null` and adds `"error":"…"` (at most 512 chars, cut at a code
-point boundary) after `state`.
+A failed transaction adds `"error":"…"` (at most 512 chars, cut at a code point boundary) after
+`state`; its `code` is null unless the response arrived before the failure (then it is the status,
+and `resBytes` what arrived of the body). A transaction whose recorder is known adds
+`"source":"ktor"` (or `"urlsession"`, …) right after `state`, before `error`; it counts toward the
+line budget like the other fixed fields. A redirect inside the client adds `"finalUrl"` after
+`source`.
+
+The lines are written by a store event listener, on the store's consumer thread, in the same pass
+that publishes the terminal snapshot: no thread of its own, no wake per line, and no line lost to a
+slow collector (it used to collect `events`, which woke a coroutine per transaction). The line is
+built in one reused builder and measured only when it may exceed the budget (more than a third of
+it in chars); on iOS it is encoded once by the runtime's native encoder and handed to os_log
+pinned, with its length (`hopi_os_log_bytes`, `%{public}.*s`), instead of a C string per line.
+Measured per line, Kotlin/Native debug: 11.6 → 9.0 µs for the line plus its UTF-8 bytes (the
+`String.cstr` conversion that went with it on the device, 23 µs in the profile, is gone); JVM
+0.54 → 0.50 µs. On Android `Log.i` (one logd socket write) is most of what is left.
 Not every line is a transaction: notice lines carry `"notice"` and no `"id"`, e.g.
 `{"hopi":1,"notice":"…","dropped":N}` when the store had to drop terminal writes (N is the
 running total). Agents must skip lines without `id`.
@@ -423,7 +1067,7 @@ bridge.
   `os_log` is a C macro Kotlin/Native cannot call, so `hopi-core` ships a cinterop shim
   (`src/nativeInterop/cinterop/oslog.def`) with an inline C function that calls it. The def file
   includes the system headers in its body and filters them out, so the generated binding (package
-  `dev.koga.hopi.core.internal.oslog`) is only `hopi_os_log_line`.
+  `dev.koga.hopi.core.internal.oslog`) is only `hopi_os_log_line` and `hopi_os_log_bytes`.
   Agent: `xcrun simctl spawn booted log stream --style ndjson --predicate 'subsystem == "dev.koga.hopi"'`.
 - JVM: stderr.
 
@@ -433,9 +1077,11 @@ sizes through the shim on an iPhone 16 simulator (iOS 18.2, Xcode 16.2), read ba
 `xcrun simctl spawn booted log show --last 5m --style ndjson --predicate 'subsystem == "dev.koga.hopi"'`.
 Lines of 1000 to 1015 bytes arrive intact; every longer one (1016, 1017, 1020, 1024, 2165 bytes)
 arrives as its first 1015 bytes followed by `<…>`, which is no longer JSON. The budget keeps 15
-bytes of margin below that cut for other OS versions. Physical devices have not been measured. A URL and an error that do not fit share the budget,
-are cut at code point boundaries, and the line gains `"urlTruncated":true` and/or
-`"errorTruncated":true` as its last fields. Unpaired surrogates are written as `\u` escapes, so a
+bytes of margin below that cut for other OS versions. Physical devices have not been measured. A URL, a final URL and an error that do not fit
+share the budget (each an equal share, a shorter one leaving the rest to the others; without a
+final URL the URL and the error split as before), are cut at code point boundaries, and the line
+gains `"urlTruncated":true`, `"finalUrlTruncated":true` and/or `"errorTruncated":true` as its last
+fields. Unpaired surrogates are written as `\u` escapes, so a
 line is always valid UTF-8. The bridge's summaries have the same shape with `"type":"transaction"`
 in place of `"hopi":1` and the 3999-byte budget, plus `"reqHeld"`/`"resHeld"` after `state`
 when the app holds fewer bytes of that body than its size (truncated, or skipped: `0`): what a
@@ -515,7 +1161,12 @@ Never `INADDR_ANY` / `0.0.0.0`. Tokens are 256 bits from `SecRandomCopyBytes` (i
 
 **Threads.** One thread blocks in `accept()`. Each connection gets two dedicated threads, never the
 app's `Dispatchers.IO`: one reads and answers requests, one writes, joined by a bounded reply queue
-(64 lines), so a client that reads slowly only slows its own replies. `shutdown` unblocks the other
+(64 lines), so a client that reads slowly only slows its own replies. The writer is a plain
+blocking loop: it takes from its queues with `tryReceive` and, when both are empty, blocks on a
+semaphore (`WakeSignal`) that every producer releases after queueing (a reply, a live event, a
+close); it never runs a coroutine event loop, which on Kotlin/Native woke on a keep-alive timer
+while parked. A live summary line is built in a builder the writer reuses and encoded straight
+from it. `shutdown` unblocks the other
 thread (`Socket.close` on the JVM, `shutdownInput`/`shutdownOutput` on Android, `shutdown(2)` on
 iOS); the handle is closed only after both threads left it. At most 8 connections are served at
 once, authenticated or not; more are closed at once. A local process that connects and stays
@@ -585,6 +1236,28 @@ Client to app:
 {"cmd":"tail","since":0}              // → summaries since `since`, then live events until disconnect
 {"cmd":"clear"}                       // → {"type":"ok","through":N}
 ```
+
+Rule commands (docs/design/rules.md, "Bridge"), accepted only after `hello` on the same connection
+(`BAD_REQUEST`, "hello first") and sent by `hopi-connect` only after it verified `hello` (never
+pipelined with it); `UNSUPPORTED` when `hello` said `"rules":false`:
+
+```json
+{"cmd":"rules.add","rule":{...}}          // → {"type":"rule",...,"id":N,"hits":0,"exhausted":false,"unsupported":[{"source","reason","applies"}]}
+{"cmd":"rules.list"}                      // → {"type":"rule",...}* then {"type":"end"}
+{"cmd":"rules.update","id":3,"enabled":false,"priority":5,"times":10,"resetHits":true}  // → {"type":"rule",...}; "times":null clears it
+{"cmd":"rules.remove","id":3}             // → {"type":"ok"} | NOT_FOUND
+{"cmd":"rules.clear"}                     // → {"type":"ok","removed":N}
+{"cmd":"blob.put","blob":1,"offset":0,"data":"<base64, ≤3072 chars>"}  // → {"type":"ok","blob":1,"size":N}
+{"cmd":"replay","id":42,"edit":{...}}     // → {"type":"replay","of":42,"id":57}
+{"cmd":"tail","since":0,"rules":true}     // as `tail`, plus {"type":"rules","rev":N} whenever the rule set changes
+```
+
+`hello` gains `"rules":true|false` (absent on an older app, which a host reads as false). Rule
+commands parse with a bounded tree parser (depth 6, the same 4096-char line); every other command
+stays flat, so a nested value in one is still `BAD_REQUEST` "malformed JSON object". Replies echo
+bodies as `{"bytes":N}` only and header values through the store's redactor. Blobs (at most 2 of
+1 MiB per session, in order by `offset`, any failure discarding the blob) live in the session and
+die with it. New error codes: `LIMIT` (a limit of the design's table) and `UNSUPPORTED`.
 
 Errors: `{"type":"error","code":"NOT_FOUND|BAD_REQUEST|UNAUTHORIZED|SLOW_CLIENT","message":"…"}`;
 `SLOW_CLIENT` adds `"since":N` (see Slow clients). `proof` is sent on Android only (see the
@@ -750,7 +1423,10 @@ terminal. `--json` needs nothing: JSON escapes them.
 Exit codes: 0 ok, 1 usage (including several targets without `--device` and a bridge
 `BAD_REQUEST`), 2 not reachable (no device, app not installed, app not running, bridge off, a
 `SLOW_CLIENT` disconnect, which says `run hopi tail --since N to resume without losing a transaction`, the app closing the connection, adb dropping the forward, a bridge that fails the Android proof), 3 not found (`get`/`curl` of an id the
-store does not hold). Every error is one actionable line on stderr, `hopi: <message>`.
+store does not hold, a rule id the app does not have), 4 unsupported (rules off or absent in the
+app's Hopi, a replay the app refused). A rule the app rejects (`BAD_REQUEST`, `LIMIT`) is exit 1.
+The rule commands (`mock|fail|delay|edit add`, `rules ls|rm|clear|enable|disable|reset`, `replay`)
+are listed in `hopi --help` and docs/design/rules.md ("CLI"). Every error is one actionable line on stderr, `hopi: <message>`.
 stdout is a buffered writer over the raw file descriptor (not `System.out`, which hides write
 errors), flushed once at the end, and after every line in `tail`; when stdout is closed (`hopi
 tail | head -1`) the CLI exits 0 without a message.
@@ -837,8 +1513,23 @@ the error, and ⌘R or Reconnect tries again.
 from the search field too: ↓/↑ (`HopiPanesState.selectNext`/`selectPrevious`), Enter (the
 first row when none is selected; left to the app id field when it has focus), Esc (clears the
 selection, focus back to the root), ⌘F (search), ⌘K (`clear`, the app's store first), ⌘E and ⇧⌘E
-(export), ⌘R (reconnect). Ctrl replaces ⌘ outside macOS. The menu bar lists the same commands
-without binding the keys a second time.
+(export), ⌘R (reconnect), ⌘L (the Rules panel). Ctrl replaces ⌘ outside macOS. The menu bar lists
+the same commands without binding the keys a second time; while a field of the Rules panel has
+focus, the arrows, Enter and Esc stay with it.
+
+**Rules.** `RulesPanel`, 420 dp beside the list (⌘L or the Rules menu), reads only
+`RemoteSession.rules`: one row per rule (switch, match, action, hits and `times`, label, one
+warning line per `unsupported` source), Update (priority, times, reset hits: `rules.update` changes
+nothing else, and bodies and header values come back as sizes and redacted, so changing a match or
+an action is remove and add), Remove, Clear. Forms for mock, fail, delay, edit and edit-and-replay
+(`RuleForm`, which validates what it can before anything is sent) take headers as a table and a
+body from a text area or a file (at most 1 MiB, uploaded as a blob when it does not fit a line);
+the app's refusal is shown exactly as sent. The detail pane adds "Mock this response" (a mock form
+prefilled with the record's exact request and `fromTransaction`, so the body is copied inside the
+app and never crosses the bridge), "Replay" and "Edit and replay…"; the new record is selected
+when the tail brings it. `RemoteSession` (hopi-connect) lists the rules on connect and again on
+each `{"type":"rules"}` notice of its tail (asked for only when `hello` said `"rules":true`), and
+counts hits locally from the `rule` mark of the summaries the tail brings, so nothing polls.
 
 **Export.** `SessionExport` streams one transaction at a time, giant bodies in 32K-char slices
 (`JsonWriter.chunkedValue`). Each transaction known only by its summary is first completed with
@@ -922,18 +1613,32 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   tag on Android and stdout on iOS (`simctl launch --console-pty`). The back gesture (ui-backhandler `BackHandler`) returns to the item list. iOS
   gets `MainViewController()`, a `ComposeUIViewController`; the static framework is `Shared`.
 - **`sample/androidApp`** (`applicationId` `dev.koga.hopi.sample`) hosts the shared UI in one
-  activity and depends on `sample/shared` only. It adds what only Android has, as a Diagnostics
-  button and two intent extras. "Bridge self-check" connects to the app's own bridge as the app's
+  activity, applies `id("dev.koga.hopi")` (with `agentBridge = true`), and depends on
+  `sample/shared` and `sample/fakesdk`. The plugin makes its debug build real (the Ktor plugin, the
+  UI, automatic capture) and its release build noop with no flag; `-Psample.hopiCapture=false`
+  builds the debug variant as release is built (`hopi { enabled = false }`), the control arm of the
+  capture A/B. **`sample/fakesdk`** is a Java-only Android library with neither the plugin nor any
+  Hopi dependency, the stand-in for a third-party SDK: a static `OkHttpClient` with its own
+  application and network interceptors (`enqueue` and `execute`), a subclass built by reflection, a
+  `newBuilder()` client, `HttpURLConnection` GET, fixed-length POST and a 404 read through
+  `getErrorStream`, `URL.openStream()` and a `URL::openConnection` method reference; it is compiled
+  against OkHttp 4.12 and runs on the 5.3.2 Ktor brings. The Diagnostics button "Third-party SDK and
+  URL.readText()" (`am start … --es capture all` at launch) runs it plus Kotlin's `URL.readText()`
+  and logs one line per request and `HopiAndroid.isStarted`/`okHttpInstrumented` under
+  `HopiSample`; `--es captureBench 'kinds=okhttp,urlconnection;path=/json;n=1000;warmup=1000'`
+  runs the A/B workload (sequential GETs through the SDK's client and connection on one worker
+  thread, logging the median and p90 wall time and the thread's CPU per request).
+  `benchmark/android-capture/run.py` drives both (`e2e`, `ab`). The app also adds what only Android
+  has, as a Diagnostics button and two intent extras. "Bridge self-check" connects to the app's own bridge as the app's
   uid and logs the `hello` reply under the `HopiSample` tag, its `proof` value replaced by
   `<redacted>`; `am start … --es selfCheck <process name>` runs it at launch (opening Diagnostics)
   against another app's bridge, and a second install built with
   `-Psample.applicationIdSuffix=.probe` (another uid) uses that to prove the bridge cannot be
   reached from another app. `am start … --es squat <process name>` makes that second install bind
   the other app's socket name first and answer with a forged `hello` (right app id, no proof) plus
-  one forged transaction, to prove the CLI refuses a squatter. **Both need the real bridge, so the
-  APKs for these checks are built with `-Phopi.enabled=true`**
-  (`./gradlew :sample:androidApp:installDebug -Phopi.enabled=true`); a debug build without
-  the flag packages the noop like a release build does. `-Psample.largeHeap=true` sets
+  one forged transaction, to prove the CLI refuses a squatter. Both need the real bridge, which every
+  debug build now has (the plugin selects the real modules; `-Phopi.enabled=true` is no longer
+  needed on Android). `-Psample.largeHeap=true` sets
   `android:largeHeap` (512 MB instead of 192 MB on the API 35 emulator), so the giant-body runs
   can see past the app's own heap limit.
 - **`sample/iosApp`**: a SwiftUI app (bundle id `dev.koga.hopi.sample`, iOS 16+) whose only
@@ -950,12 +1655,64 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   that matters, and the sample does not use that name). The simulator build excludes `x86_64`
   (`EXCLUDED_ARCHS[sdk=iphonesimulator*]`), since the framework has only an `iosSimulatorArm64`
   slice and a Release build otherwise builds, and fails on, every architecture.
+  `IOSApp.init` calls `HopiUrlSession.shared.start { … }` first thing (`agentBridge = true`, and the
+  giant-body launch arguments `-maxBodyBytes`/`-maxTotalBytes`, because the Darwin client's requests
+  are now recorded there, not by the plugin); the shared framework exports `hopi-urlsession` (or
+  its noop, so the Release build compiles the same Swift). `ThirdPartySDK.swift` stands in for an
+  SDK the app does not own: plain Swift, no Kotlin import, `URLSession.shared` with a completion
+  handler, an ephemeral session with its own data delegate uploading JSON, and `data(for:)`,
+  `upload(for:from:)` and `bytes(for:)`; the launch argument `-thirdPartySDK` runs it
+  (`xcrun simctl launch booted dev.koga.hopi.sample -thirdPartySDK`). The XCTest target
+  `iosAppCaptureTests`, hosted by the app, calls the five Swift async APIs and the SDK file against
+  the dev server and reads each record through `SampleCaptureProbe` (a source directory of
+  `sample/shared` compiled only with `-Phopi.enabled=true`); `sample/iosApp/scripts/capture-swift-test.sh`
+  starts the dev server and runs it (not in the base check: it boots a simulator, and the
+  Xcode build phase runs Gradle). With Xcode 27.1 the Debug app no longer launches on the iOS 18.2
+  runtime: Kotlin/Native's `platform.CoreGraphics` binding references `kCGAdaptiveMaximumBitDepth`,
+  which iOS 18.2 lacks (dyld aborts before `main`), so the Swift tests ran on the iPhone 17
+  simulator, iOS 27.0; the Kotlin/Native tests, which link no CoreGraphics, run on both.
+  `CaptureVerification.swift` (launch arguments `-verifyCapture`, `-captureBench <spec>`,
+  `-idleCPU S`) and `-ktorVerify` (`KtorVerify.kt`, iosMain) drive the end-to-end check in
+  `benchmark/urlsession/e2e/`; the build setting `HOPI_ENABLED=false` (`xcodebuild ...
+  HOPI_ENABLED=false`) builds the Debug app with the noop twins, for A/B runs at the same
+  optimisation level.
+- **Rules scenarios.** `sample/shared` depends on `hopi-rules` (or its noop, by `hopi.enabled`,
+  as `api` so the Android app names it too; the iOS framework exports it for Swift).
+  `RulesVerify.kt` (commonMain) runs the self-test over a list of `RulesTarget`s, each a way of
+  sending a request named by the source that records it: for each target, a mock, every fail
+  kind, a before-request delay, a delayed mock, a request edit (path `/missing` to `/echo` plus a
+  header, which the echo shows), a request body edit, a response edit (expected unsupported, and
+  the real response read, on URLSession) and `times = 1`, each rule limited to the target's
+  source and to its own `rv=<target>-<scenario>` query key and removed again afterwards; one
+  `{"rules":…,"ok":…}` line per scenario and a `{"rules":"done","failed":N}` line under
+  `HopiSample` (stdout on iOS). The noop build answers `"ok":false` everywhere, the control.
+  `runRulesTargets` instead sends a GET of `/json`, a GET of `/missing` and a POST of `/echo`
+  tagged `rv=host-<target>` per target, for rules the host adds with the CLI or the desktop, and
+  whose records `hopi replay` re-sends (the app cannot read record ids, so replay is driven from
+  the host or the in-app detail). Android (`--es rulesVerify all`, `--es rulesTargets all`, and
+  the Diagnostics buttons "Rules self-test", "Rules targets"): the targets are the Ktor plugin (a
+  request with its own `Accept-Encoding`, which the plugin keeps), Ktor's OkHttp engine (ruled by
+  the interceptor), and the fake SDK's OkHttp client and `HttpURLConnection` (`FakeSdk.call`, still
+  without any Hopi dependency); then `FakeSdk.pinned` checks that a client pinning the
+  `verifyHttps` host to a key no server has fails the pin without a rule and under a request edit,
+  and that a mock answers it without a connection (needs the emulator's network). iOS
+  (`-verifyRules`, `-rulesTargets`, the same buttons): Ktor Darwin as the URLSession target from
+  Kotlin, while `CaptureVerification.verifyRules` runs mock, fail (timeout, unknown host), request
+  and response edits on `URLSession.shared` with a completion handler, a full delegate session,
+  async `data(for:)` and a download task through `HopiRules.shared`, then the same pinning check
+  with a session delegate that cancels every server-trust challenge (`-verifyRulesHttps <url>`).
+  No Ktor-plugin target exists on iOS: with URLSession capture on, the Darwin engine is always
+  ruled by URLSession.
 
-`sample/devserver/devserver.py` (Python 3 standard library, bound to `127.0.0.1:8765`) serves those
-routes (`/slow?s=N` sends a chunked body over N seconds, one chunk every 5 s so no client read
+`sample/devserver/devserver.py` (Python 3 standard library, bound to `127.0.0.1:8765`; `--nodelay`
+sets `TCP_NODELAY`, for per-request benchmarks, since Python writes headers and body in separate
+sends and Nagle's algorithm then holds each small keep-alive response about 40 ms; `/json` and
+`/echo` ignore a query string, so callers can tag requests; `/echo` answers a GET too, the oracle
+of a rule's request edit) serves those routes (`/slow?s=N` sends a chunked body over N seconds, one chunk every 5 s so no client read
 timeout fires; `/items` keeps created items in memory until it exits and answers 400 to a body that is not
 an item; `/giant?mb=N&shape=S&chunked=0|1` generates about N MiB of JSON while sending it, with
-a Content-Length computed in advance or chunked; `POST /sink` reads and drops a body of any size)
+a Content-Length computed in advance or chunked; `POST /sink` reads and drops a body of any size; `/redirect?to=/path&code=302` redirects to a path on
+the same server only)
 and logs every request as one JSON line on stdout. The Android emulator reaches it with
 `adb reverse tcp:8765 tcp:8765`; the iOS simulator shares the host's loopback, so it needs nothing.
 The Android debug build's network security config allows cleartext to `127.0.0.1` only. Nothing
@@ -1051,6 +1808,19 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   Type on iOS) grows them instead of clipping their text, and a status badge widens rather than
   wrapping its code; a binary body's hex dump scrolls sideways; safe-drawing insets respected;
   short transitions only on open, close and list/detail navigation.
+
+**Rules.** A "Rules" button in the top bar opens a list read from `RuleEngine` only while it is
+composed (it refreshes when the rule set or the store changes): one row per rule with its match
+(header values redacted), action and hits, an on/off switch, remove, and "Remove all". A list row of
+a ruled record shows one badge, the strongest action first (`MOCK`, `FAIL`, `EDIT`, `DELAY`), plus
+`REPLAY`; the overview shows "Rule: #3: delay, mock" and "Replay of #42", a link. The detail adds
+"Mock this response" (an enabled rule matching the record's exact method, scheme, host, port and
+path, built in the app from the record with `fromTransaction`, `times` unset, Undo offered for 4 s;
+disabled with the reason when the response body is not held in full) and "Replay" (opens the new
+record once it is recorded); both are disabled with the reason when every recorder has
+`rules = false`. There is no rule editor on the phone. `HopiScreen`, `HopiLauncher` and
+`hopi-ui-noop` are unchanged. `HopiPanes` gained `HopiPanesRules`, callbacks the desktop connects
+to the bridge, so the desktop's panes never use the desktop process's own engine.
 
 Opening the screen before any client installed the plugin creates the default store with default
 caps (`HopiStore.default` creates it on first access); a later installation's caps then do not
@@ -1203,15 +1973,21 @@ Hopi rejects each of them:
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Many monitors on by default (FPS, CPU, memory, leaks, UI tree)   | One tool, HTTP only, and only on the clients the developer installs it on      |
 | Polling timers sampling the app continuously                     | **No timers, no polling, no periodic work anywhere.** Everything is event-driven |
-| Global interception (URLSession swizzling, every request in the process) | Opt-in per `HttpClient`; nothing global, no swizzling, no reflection           |
+| Global interception that re-sends every request through a `URLProtocol` | Observe only, unless a rule the developer added applies: a rule's `URLProtocol` claims only the requests a mock or fail rule matches and answers them itself, re-issuing nothing, and with no rule a task of a session created after `start()` costs one `canInitWithTask:` answer; every other recorder pays one volatile read. The OkHttp before-response wait checks for cancel every 50 ms only while a delayed request waits. Global capture exists, but only after an explicit `HopiUrlSession.start()` in a debug build, never in release (noop twin, checked). It re-issues nothing, replaces method implementations only on `NSURLSessionTask`, `NSURLSession`'s upload factories (with rules on, also its session factory, and its task factories once an edit or delay rule was added) and CFNetwork's connection class (never an app or SDK class), adds no method, copies no bytes on the app's threads, and wakes nothing while no request runs. On Android, global capture exists only in debuggable variants of an app that applies `dev.koga.hopi`: it rewrites at build time one call inside OkHttp's `RealCall` and the `java.net.URL` connection call sites, adds no method, field or interface to any class (one annotation on `RealCall`), changes no list or object the app reads except the delegating bodies and connection wrappers it hands on, and wakes nothing while no request runs |
 | UI/overlay work on the main thread while the app runs            | The launcher is one static composable: no recomposition unless dragged or tapped, no observation of the store |
 | Formatting and storing everything eagerly                        | Capture raw bytes only; decode, pretty-print, encode only when a screen, log line, or agent asks |
 
 Concretely, when nothing is looking (screen closed, no agent connected, log sink off):
 
 - the only per-request work is header copy, bounded byte copy, one `trySend`;
-- the store consumer coroutine is suspended on its channel between events;
-- the bridge thread is blocked in `accept()` (not spinning) and encodes nothing;
+- the store's consumer thread (`hopi-store`) is blocked on its semaphore, with no timeout, between
+  bursts of requests: after a burst it dozes once for 50 ms (the window in which later requests'
+  ends only mark the work), then blocks with no timer again;
+- the bridge thread is blocked in `accept()` (not spinning) and encodes nothing; a connected client
+  that is idle (a `tail` with no traffic) leaves its reader blocked in `read()` and its writer
+  blocked on a semaphore: no coroutine event loop on either (Kotlin/Native's `runBlocking` loop
+  re-armed a keep-alive timer on the writer, about 0.35 ms of CPU a second), checked by
+  `IdleWakeupTest` on the JVM and the iOS simulator (0 wakes in 1.5 s, one per event);
 - the UI collects nothing: `transactions` is collected only while `HopiScreen` is composed;
 - no thread wakes up on its own. A CPU profile of an idle app with Hopi installed must be
   indistinguishable from one without it.

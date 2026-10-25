@@ -326,7 +326,12 @@ class HopiPluginTest {
                 val tx = t.awaitTerminal().single()
                 assertEquals(TransactionState.Failed, tx.state)
                 assertEquals("cancelled", tx.error)
-                assertNull(tx.responseCode)
+                // The response had arrived: its status and headers stay, with the part of the body that came.
+                assertEquals(200, tx.responseCode)
+                assertEquals("text/plain", tx.responseHeaders.firstOrNull { it.first.equals("Content-Type", ignoreCase = true) }?.second)
+                val partial = assertNotNull(tx.responseBody)
+                assertTrue(partial.capturedBytes in 10..64 * 1024, "partial body: ${partial.capturedBytes}")
+                assertContentEquals(payload.copyOf(partial.capturedBytes), partial.bytes)
                 assertNotNull(body.closedCause, "the source is cancelled, so the engine can release the connection")
                 assertTrue(withTimeout(10_000) { producer.await() }, "the rest of the body is refused")
             } finally {

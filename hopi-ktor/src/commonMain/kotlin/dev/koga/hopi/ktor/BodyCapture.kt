@@ -1,5 +1,6 @@
 package dev.koga.hopi.ktor
 
+import dev.koga.hopi.core.body.ResponseSkip
 import dev.koga.hopi.core.model.CapturedBody
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.discard
@@ -166,46 +167,12 @@ internal class BoundedBuffer(private val limit: Int, sizeHint: Long?) {
 }
 
 internal object SkipReason {
-    const val BINARY = "binary content-type"
-    const val STREAMING = "streaming"
+    const val BINARY = ResponseSkip.BINARY
+    const val STREAMING = ResponseSkip.STREAMING
     const val MULTIPART = "multipart"
     const val PROTOCOL_UPGRADE = "protocol upgrade"
     const val INCOMPLETE = "incomplete"
 }
 
-private val binaryApplicationTypes = setOf(
-    "application/octet-stream",
-    "application/zip",
-    "application/gzip",
-    "application/x-gzip",
-    "application/x-bzip2",
-    "application/x-tar",
-    "application/x-7z-compressed",
-    "application/x-rar-compressed",
-    "application/vnd.rar",
-    "application/zstd",
-    "application/pdf",
-    "application/wasm",
-    "application/protobuf",
-    "application/x-protobuf",
-    "application/vnd.google.protobuf",
-    "application/grpc",
-    "application/msgpack",
-    "application/x-msgpack",
-    "application/cbor",
-    "application/vnd.android.package-archive",
-)
-
 /** Why a response body with [contentType] is not captured, or null when it is. */
-internal fun responseSkipReason(contentType: String?): String? {
-    if (contentType == null) return null
-    val mime = contentType.substringBefore(';').trim().lowercase()
-    return when {
-        mime == "text/event-stream" -> SkipReason.STREAMING
-        mime == "image/svg+xml" -> null
-        mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/") ||
-            mime.startsWith("font/") || mime in binaryApplicationTypes ||
-            mime.startsWith("application/grpc+") -> SkipReason.BINARY
-        else -> null
-    }
-}
+internal fun responseSkipReason(contentType: String?): String? = ResponseSkip.reason(contentType)

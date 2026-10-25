@@ -8,12 +8,14 @@ import dev.koga.hopi.core.curl.CURL_BODY_CUT_WARNING
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.ui.format.PieceWriter
 import dev.koga.hopi.ui.format.TextPieces
 import dev.koga.hopi.ui.format.cutForDisplay
 import dev.koga.hopi.ui.format.formatDuration
+import dev.koga.hopi.ui.format.sourceLabel
 import dev.koga.hopi.ui.format.hexDump
 import dev.koga.hopi.ui.format.reasonPhrase
 import dev.koga.hopi.ui.format.splitText
@@ -70,7 +72,8 @@ internal class ExchangeView(
     val gone: Boolean = false,
 )
 
-internal class OverviewField(val label: String, val value: String)
+/** [opens]: the transaction the value links to ("Replay of #42"), or null. */
+internal class OverviewField(val label: String, val value: String, val opens: Long? = null)
 
 /** The detail screen's content for one transaction snapshot. */
 internal class DetailModel(
@@ -178,28 +181,41 @@ private fun statusText(transaction: HttpTransaction): String = when (transaction
 private fun overview(transaction: HttpTransaction, url: String, redactor: Redactor): List<OverviewField> {
     val fields = ArrayList<OverviewField>(10)
     fields += OverviewField("URL", cutForDisplay(url))
+    transaction.finalUrl?.let { fields += OverviewField("Final URL", cutForDisplay(redactor.url(it))) }
     fields += OverviewField("Method", transaction.method)
     fields += OverviewField(
         "Status",
         when (transaction.state) {
             TransactionState.Pending -> "Pending"
-            TransactionState.Failed -> "Failed"
-            TransactionState.Complete -> {
-                val code = transaction.responseCode ?: 0
-                reasonPhrase(code)?.let { "$code $it" } ?: code.toString()
-            }
+            // The response arrived, then the exchange failed (a dropped connection, a cancel mid-body).
+            TransactionState.Failed -> transaction.responseCode?.let { "Failed after ${statusLine(it)}" } ?: "Failed"
+            TransactionState.Complete -> statusLine(transaction.responseCode ?: 0)
         },
     )
     transaction.error?.let { fields += OverviewField("Error", cutForDisplay(redactor.textMentioning(it, transaction.url))) }
     fields += OverviewField("Started", formatTimeOfDay(transaction.startedAtEpochMs, withMillis = true))
-    fields += OverviewField("Duration", transaction.durationMs?.let(::formatDuration) ?: "—")
+    // Platform capture times to the network's end; the Ktor plugin to the reader's.
+    val networkOnly = transaction.source != null && transaction.source != TransactionSource.KTOR
+    fields += OverviewField(
+        "Duration",
+        transaction.durationMs?.let { formatDuration(it) + if (networkOnly) " (network)" else "" } ?: "—",
+    )
     transaction.protocol?.let { fields += OverviewField("Protocol", it) }
+    transaction.source?.let { fields += OverviewField("Source", sourceLabel(it)) }
+    transaction.ruleId?.let { id ->
+        fields += OverviewField("Rule", "#$id" + (transaction.ruleApplied?.let { ": " + it.replace(",", ", ") } ?: ""))
+    }
+    transaction.replayOf?.let { fields += OverviewField("Replay of", "#$it", opens = it) }
     fields += OverviewField("Request size", sizeText(transaction.requestBody))
     if (transaction.state == TransactionState.Complete) {
         fields += OverviewField("Response size", sizeText(transaction.responseBody))
+    } else if (transaction.state == TransactionState.Failed && transaction.responseBody != null) {
+        fields += OverviewField("Response received", sizeText(transaction.responseBody) + " (partial)")
     }
     return fields
 }
+
+private fun statusLine(code: Int): String = reasonPhrase(code)?.let { "$code $it" } ?: code.toString()
 
 /** Header values as shown: each one text layout, so a giant cookie or token is cut ([cutForDisplay]). */
 private fun shownHeaders(headers: List<Pair<String, String>>): List<Pair<String, String>> =

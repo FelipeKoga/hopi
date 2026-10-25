@@ -77,6 +77,13 @@ public class JsonWriter(public val out: StringBuilder = StringBuilder()) {
         return this
     }
 
+    /** Writes [json], a complete JSON value the caller built and trusts, as the next value. */
+    public fun rawValue(json: String): JsonWriter {
+        beforeValue()
+        out.append(json)
+        return this
+    }
+
     /** Writes [bytes] as a base64 string without building an intermediate copy of the input. */
     public fun base64Value(bytes: ByteArray): JsonWriter {
         beforeValue()

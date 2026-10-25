@@ -8,8 +8,10 @@ Every request is logged to stdout as one JSON line (method, path, headers in ord
 so a request replayed with `hopi curl` can be compared with the one the app sent.
 
 Routes:
-  GET  /json     a small JSON object
-  POST /echo     echoes the request (method, path, headers, body) as JSON, credential values masked
+  GET  /json     a small JSON object (any query string is ignored, so a caller can tag requests)
+  POST /echo     (query string ignored) echoes the request (method, path, headers, body) as JSON, credential values masked
+  GET  /echo     the same for a GET (an empty body): the oracle of a rule's request edit, whose
+                 changed path, query and headers come back in the response
   GET  /missing  404 (any unknown path is a 404)
   GET  /large    a JSON response of LARGE_BYTES bytes, larger than the default 256 KB body cap
   GET  /chunked  a JSON array sent with Transfer-Encoding: chunked, in CHUNKS chunks
@@ -27,16 +29,30 @@ Routes:
                  chunked=0 (default) it has a Content-Length, computed before the first byte; with
                  chunked=1 it is sent with Transfer-Encoding: chunked. The same query always sends
                  the same bytes.
+  GET  /redirect?to=P&code=C
+                 a redirect (C in 301|302|303|307|308, default 302) to P, a path on this server
+                 (starts with "/", not "//"); anything else is a 400
+  GET  /gzip?kb=N
+                 a JSON body of about N KiB (1..4096, default 64) sent gzip-compressed
+                 (Content-Encoding: gzip, the compressed Content-Length) whatever the request's
+                 Accept-Encoding says, as a server that always compresses; the same query always sends
+                 the same bytes
+  GET  /drop?kb=N&type=json|binary
+                 announces a Content-Length of 2*N KiB (1..4096, default 64), sends N KiB and closes
+                 the connection: a body that fails half way; application/json (default) or
+                 application/octet-stream
   POST /sink     reads and discards the request body, answers {"received": <bytes>}; the request
                  is logged without its body
 
-Usage: python3 sample/devserver/devserver.py [--port 8765]
+Usage: python3 sample/devserver/devserver.py [--port 8765] [--nodelay]
 """
 
 import argparse
+import gzip
 import json
 import math
 import re
+import socket
 import sys
 import threading
 import time
@@ -48,6 +64,7 @@ CHUNKS = 8
 SLOW_TICK_S = 5
 SLOW_PATH = re.compile(r"^/slow(?:\?s=([0-9]{1,3}))?$")
 SECRET_HEADERS = {"authorization", "proxy-authorization", "cookie"}
+REDIRECT_CODES = (301, 302, 303, 307, 308)
 ITEM_PATH = re.compile(r"^/items/([0-9]{1,9})$")
 GIANT_SHAPES = ("minified", "pretty", "string", "nested")
 GIANT_PIECE = 64 * 1024
@@ -152,6 +169,17 @@ def giant_pieces(mb, shape):
     return total, pieces()
 
 
+def gzip_plain(kb):
+    """The uncompressed body of /gzip?kb=N: records until about N KiB."""
+    parts, size, i = [], 2, 0
+    while size < kb * 1024:
+        part = '{"i":%d,"name":"record %d","tags":["kmp","okhttp","gzip"]}' % (i, i)
+        parts.append(part)
+        size += len(part) + 1
+        i += 1
+    return ("[" + ",".join(parts) + "]").encode("utf-8")
+
+
 def log(record):
     sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
     sys.stdout.flush()
@@ -232,12 +260,75 @@ class Handler(BaseHTTPRequestHandler):
         if sent != total:
             sys.stderr.write("giant: sent %d bytes, announced %d\n" % (sent, total))
 
+    def _kb(self, default=64):
+        try:
+            kb = int(parse_qs(urlsplit(self.path).query).get("kb", [str(default)])[0])
+        except ValueError:
+            return None
+        return kb if 1 <= kb <= 4096 else None
+
+    def _send_gzip(self):
+        kb = self._kb()
+        if kb is None:
+            self._send(400, {"error": "expected kb in 1..4096"})
+            return
+        # mtime=0: the same query always sends the same compressed bytes.
+        data = gzip.compress(gzip_plain(kb), mtime=0)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Encoding", "gzip")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_drop(self):
+        kb = self._kb()
+        if kb is None:
+            self._send(400, {"error": "expected kb in 1..4096"})
+            return
+        binary = parse_qs(urlsplit(self.path).query).get("type", ["json"])[0] == "binary"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream" if binary else "application/json")
+        self.send_header("Content-Length", str(2 * kb * 1024))
+        self.end_headers()
+        self.wfile.write(bytes(i % 251 for i in range(kb * 1024)) if binary else (b"[" + b"0," * (kb * 512))[:kb * 1024])
+        self.wfile.flush()
+        # Half the announced body, then the connection ends.
+        self.close_connection = True
+        self.connection.shutdown(socket.SHUT_RDWR)
+
+    def _send_redirect(self):
+        # Local paths only, so a redirect can never send the app off this server.
+        query = parse_qs(urlsplit(self.path).query)
+        target = query.get("to", [""])[0]
+        try:
+            code = int(query.get("code", ["302"])[0])
+        except ValueError:
+            code = 0
+        if not target.startswith("/") or target.startswith("//") or code not in REDIRECT_CODES:
+            self._send(400, {"error": "expected to=/path and code in %s" % "|".join(map(str, REDIRECT_CODES))})
+            return
+        self.send_response(code)
+        self.send_header("Location", target)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_echo(self, record):
+        # Like a real API, never reflect a credential back: Hopi redacts headers, not
+        # bodies, so an echoed secret would reach every channel through the response body.
+        self._send(200, dict(record, headers=[
+            [name, "<received, %d chars>" % len(value) if name.lower() in SECRET_HEADERS else value]
+            for name, value in record["headers"]
+        ]))
+
     def do_GET(self):
-        self._record(b"")
+        record = self._record(b"")
         if self.path == "/giant" or self.path.startswith("/giant?"):
             self._send_giant()
-        elif self.path == "/json":
+        elif urlsplit(self.path).path == "/json":
             self._send(200, {"id": 1, "name": "Ada Lovelace", "languages": ["kotlin", "swift"]})
+        elif urlsplit(self.path).path == "/echo":
+            self._send_echo(record)
         elif self.path == "/large":
             item = '{"i":%d,"pad":"' + "x" * 80 + '"}'
             parts, size, i = [], 2, 0
@@ -247,6 +338,12 @@ class Handler(BaseHTTPRequestHandler):
                 size += len(part) + 1
                 i += 1
             self._send(200, ("[" + ",".join(parts) + "]").encode("utf-8"))
+        elif self.path.startswith("/redirect?"):
+            self._send_redirect()
+        elif urlsplit(self.path).path == "/gzip":
+            self._send_gzip()
+        elif urlsplit(self.path).path == "/drop":
+            self._send_drop()
         elif self.path == "/items":
             with ITEMS_LOCK:
                 items = [summary(item) for item in ITEMS]
@@ -285,14 +382,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = self._read_body()
         record = self._record(body)
-        if self.path == "/echo":
-            # Like a real API, never reflect a credential back: Hopi redacts headers, not
-            # bodies, so an echoed secret would reach every channel through the response body.
-            echoed = dict(record, headers=[
-                [name, "<received, %d chars>" % len(value) if name.lower() in SECRET_HEADERS else value]
-                for name, value in record["headers"]
-            ])
-            self._send(200, echoed)
+        if urlsplit(self.path).path == "/echo":
+            self._send_echo(record)
         elif self.path == "/items":
             item = parse_item(body)
             if item is None:
@@ -313,7 +404,12 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=8765)
+    # Off by default, so earlier measurements stay comparable: Python writes a response's headers
+    # and body in separate sends, and Nagle's algorithm against the client's delayed ACK then holds
+    # each small keep-alive response back by about 40 ms.
+    parser.add_argument("--nodelay", action="store_true", help="set TCP_NODELAY on every connection (per-request benchmarks)")
     args = parser.parse_args()
+    Handler.disable_nagle_algorithm = args.nodelay
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     sys.stderr.write("devserver listening on http://127.0.0.1:%d\n" % args.port)
     try:
