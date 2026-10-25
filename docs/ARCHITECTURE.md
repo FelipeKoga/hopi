@@ -645,7 +645,7 @@ viewer; the CLI adds argument parsing, rendering and exit codes on top. Its whol
 For the desktop viewer, `hopi-connect` also holds `BridgeDecoder` (summary and `get` lines
 back into `HttpTransaction`s: the inverse of core's `TransactionJson`, round-trip tested) and
 `RemoteSession`. A `tail` reads nothing after it, so a session opens two connections on one
-endpoint (one adb forward): the tail streams summaries into an `HopiStore` of the viewer's own
+endpoint (one adb forward): the tail streams summaries into a `HopiStore` of the viewer's own
 (2000 entries, 256 MB, keyed by the app's ids, with the store's default redaction on top of the
 app's), the other serves `get` and `clear`. A body crosses the bridge only for the selected
 transaction (`select`, fetched again when a pending selection completes) or an explicit `fetch`; a

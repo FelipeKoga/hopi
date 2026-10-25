@@ -12,7 +12,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Bridge lines back into [HttpTransaction]s, the inverse of core's `TransactionJson`: a host
- * viewer keeps them in an `HopiStore` of its own, keyed by the app's ids. Every value is
+ * viewer keeps them in a `HopiStore` of its own, keyed by the app's ids. Every value is
  * already redacted by the app. A line that is not a well-formed transaction decodes to null.
  */
 @HopiInternalApi
