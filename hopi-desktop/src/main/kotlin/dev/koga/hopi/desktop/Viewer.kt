@@ -202,7 +202,7 @@ internal class Viewer(
         }
     }
 
-    /** Shows [text] in the status bar, where exports report too (a replay's outcome). */
+    /** Shows [text] in the status bar, where exports report too. */
     fun notify(text: String?) {
         _notice.value = text
     }

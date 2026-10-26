@@ -342,7 +342,8 @@ class HopiPluginFunctionalTest {
             package dev.koga.hopi.android.internal;
             public abstract class HopiConfigValues {
                 protected HopiConfigValues(boolean okhttp, boolean urlConnection, int maxEntries, long maxTotalBytes, long maxBodyBytes, boolean summaryLog,
-                        boolean agentBridge, boolean redactionDisabled, String[] redactHeaders, String[] redactQueryParameters, boolean rules) {}
+                        boolean agentBridge, boolean redactionDisabled, String[] redactHeaders, String[] redactQueryParameters, boolean rules,
+                        boolean perfPresent, int perfAutoStart, long perfHangThresholdMs, boolean perfHangHeartbeat) {}
             }
             """.trimIndent(),
         )

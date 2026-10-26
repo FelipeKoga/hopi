@@ -49,8 +49,8 @@ public interface RuleRequest {
 }
 
 /**
- * A [RuleRequest] over a URL string and a header list: what replay, tests and the sources whose
- * request is a URL plus properties (`HttpURLConnection`) use. The URL is split once, at creation.
+ * A [RuleRequest] over a URL string and a header list: what tests and the sources whose request
+ * is a URL plus properties (`HttpURLConnection`) use. The URL is split once, at creation.
  */
 @HopiInternalApi
 public class UrlRuleRequest(

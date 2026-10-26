@@ -12,8 +12,6 @@ import java.io.InputStream
 import java.io.OutputStream
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.Glob
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.RequestEdits
 import dev.koga.hopi.core.rules.RuleEngine
@@ -29,9 +27,7 @@ import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.UnknownHostException
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLSocketFactory
 
 /**
  * The record of one wrapped `HttpURLConnection` (docs/design/android-capture.md, "The
@@ -67,16 +63,6 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
     private var requestLength = -1L
     private var chunkLength = 0
     private var passingThrough = false
-
-    // Read back from the delegate at the snapshot: what a replay configures its connection with.
-    private var connectTimeout = 0
-    private var readTimeout = 0
-    private var sslSocketFactory: SSLSocketFactory? = null
-    private var hostnameVerifier: HostnameVerifier? = null
-
-    /** A replay's hand-off, set by [UrlConnectionReplayTarget] before the first connecting call. */
-    @Volatile
-    internal var replayHandoff: ReplayHandoff? = null
 
     /** The rule applied to this connection, or null: then everything below is what it was before rules existed. */
     private var ruled: Ruled? = null
@@ -117,11 +103,11 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
             ruled?.again(output)
             return
         }
-        // One read and a reference comparison: with no rule and no replay in flight the connection
-        // takes exactly the path it took before rules existed.
+        // One read and a reference comparison: with no rule the connection takes exactly the path
+        // it took before rules existed.
         val state = if (AndroidCapture.rules) RuleEngine.state else RuleState.EMPTY
-        // Rules of other sources only, and no replay of this connection: the path without rules.
-        if (state !== RuleState.EMPTY && (state.rulesFor(RuleSource.URL_CONNECTION).isNotEmpty() || replayHandoff != null)) {
+        // Rules of other sources only: the path without rules.
+        if (state !== RuleState.EMPTY && state.rulesFor(RuleSource.URL_CONNECTION).isNotEmpty()) {
             beforeConnectRuled(state, output)
             return
         }
@@ -140,29 +126,15 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
         } catch (_: IllegalStateException) {
             emptyMap()
         }
-        readConfiguration()
         target.store.submitStart(this)
-    }
-
-    /** The settings a replay needs and has no other way to learn: field reads on the delegate. */
-    private fun readConfiguration() {
-        val delegate = delegate
-        connectTimeout = delegate.connectTimeout
-        readTimeout = delegate.readTimeout
-        if (delegate is HttpsURLConnection) {
-            sslSocketFactory = delegate.sslSocketFactory
-            hostnameVerifier = delegate.hostnameVerifier
-        }
     }
 
     /**
      * The first connecting call with rules (docs/design/rules.md, "`HttpURLConnection`"): the
-     * replay hand-off is taken, the first matching rule claimed and its request edit applied before
-     * the snapshot (a new delegate when the URL changes or a header is removed), then the record is
+     * first matching rule is claimed and its request edit applied before the snapshot (a new delegate when the URL changes or a header is removed), then the record is
      * started and the rule's before-request delay, mock, fail or body replacement run.
      */
     private fun beforeConnectRuled(state: RuleState, output: Boolean) {
-        val handoff = replayHandoff?.takeIf { it.take() }
         val requested = delegate.requestMethod ?: "GET"
         val requestMethod = if (requested == "GET" && delegate.doOutput) "POST" else requested
         val properties = try {
@@ -172,20 +144,16 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
         }
         val requestedUrl = delegate.url
         val target = AndroidCapture.target()
-        val rule = if (state.rulesFor(RuleSource.URL_CONNECTION).isEmpty()) {
-            null
-        } else {
-            state.firstMatch(RuleSource.URL_CONNECTION, UrlConnectionRuleRequest(requestMethod, requestedUrl, properties))
-        }
+        val rule = state.firstMatch(RuleSource.URL_CONNECTION, UrlConnectionRuleRequest(requestMethod, requestedUrl, properties))
         val edit = rule?.requestEdit
         if (rule != null) {
             // Claimed: the rule applies, as far as this stack can, whatever happens below.
             ruled = Ruled(rule)
             edit?.let { applyRequestEdit(it, requestMethod, properties, target) }
+            mark = RuleRecordMark(rule.id, rule.applied, mocked = rule.mock != null)
         }
-        if (rule != null || handoff != null) mark = RuleRecordMark(rule?.id, rule?.applied, handoff?.replayOf, mocked = rule?.mock != null)
         this.target = target
-        id = handoff?.id ?: target.store.nextId()
+        id = target.store.nextId()
         startedAtEpochMs = System.currentTimeMillis()
         startNanos = System.nanoTime()
         if (edit == null) {
@@ -204,7 +172,6 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
                 emptyMap()
             }
         }
-        readConfiguration()
         target.store.submitStart(this)
         ruled?.first(output)
     }
@@ -272,7 +239,7 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
         requestLength = length
     }
 
-    /** The app's chunked streaming mode (there is no getter): what a rebuilt delegate or a replay sets again. */
+    /** The app's chunked streaming mode (there is no getter): what a rebuilt delegate sets again. */
     @Synchronized
     public fun chunked(length: Int) {
         chunkLength = if (length > 0) length else DEFAULT_CHUNK
@@ -414,15 +381,7 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
 
     override fun pendingSnapshot(): HttpTransaction = HttpTransaction.pending(
         id, startedAtEpochMs, method, url(), flatten(requestProperties), requestBody = null, source = TransactionSource.URL_CONNECTION,
-        ruleId = mark?.ruleId, ruleApplied = mark?.applied, replayOf = mark?.replayOf, replayTarget = replayTarget(),
-    )
-
-    /**
-     * How to replay this connection: its settings, and the app's TLS objects and proxy, held weakly;
-     * null with rules off, where the recorder never reads a replay's hand-off.
-     */
-    private fun replayTarget(): ReplayTarget? = if (!AndroidCapture.rules) null else UrlConnectionReplayTarget.of(
-        connectTimeout, readTimeout, requestLength.takeIf { it >= 0 }, chunkLength, sslSocketFactory, hostnameVerifier, proxy,
+        ruleId = mark?.ruleId, ruleApplied = mark?.applied,
     )
 
     /** A mocked response crossed no protocol. */

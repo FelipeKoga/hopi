@@ -62,7 +62,7 @@ internal class TransactionRow(
     val redirect: String?,
     /** The redacted URL, lowercased, for the substring search. */
     val searchKey: String,
-    /** What a rule did (`MOCK`, `FAIL`, `EDIT`, `DELAY`) and `REPLAY`; empty for most rows. */
+    /** What a rule did (`MOCK`, `FAIL`, `EDIT`, `DELAY`); empty for most rows. */
     val tags: List<String> = emptyList(),
 ) {
     /** What a screen reader says for the badge, whose glyphs (`···`, `ERR`) read poorly. */
@@ -121,8 +121,8 @@ internal fun buildRow(transaction: HttpTransaction, redactor: Redactor): Transac
 }
 
 /**
- * The row's marks: `REPLAY` for a replayed request, then the one word for what its rule did, the
- * strongest first (a mock or a fail decides the response; an edit changes it; a delay only waits).
+ * The row's mark: the one word for what its rule did, the strongest (a mock or a fail decides the
+ * response; an edit changes it; a delay only waits).
  */
 internal fun ruleTags(transaction: HttpTransaction): List<String> {
     val applied = transaction.ruleApplied?.split(',').orEmpty()
@@ -133,8 +133,7 @@ internal fun ruleTags(transaction: HttpTransaction): List<String> {
         RuleMark.DELAY in applied -> "DELAY"
         else -> null
     }
-    if (transaction.replayOf == null) return if (rule == null) NO_TAGS else listOf(rule)
-    return listOfNotNull("REPLAY", rule)
+    return if (rule == null) NO_TAGS else listOf(rule)
 }
 
 private val NO_TAGS = emptyList<String>()

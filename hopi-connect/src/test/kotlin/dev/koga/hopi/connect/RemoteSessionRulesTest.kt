@@ -5,9 +5,6 @@ import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchSpec
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSpec
@@ -33,7 +30,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
-/** [RemoteSession]'s rules: listed on connect, re-listed on notices, hits counted locally, commands and replay. */
+/** [RemoteSession]'s rules: listed on connect, re-listed on notices, hits counted locally, and commands. */
 class RemoteSessionRulesTest {
     private val root: Path = Files.createTempDirectory("hopi-remote-rules")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -117,33 +114,6 @@ class RemoteSessionRulesTest {
         session.rules.await { rules -> rules.rules.single().hits == 1L }
         session.store.value.transactions.await { list -> list.any { it.id == id && it.state.isTerminal } }
         assertEquals(1L, session.rules.value.rules.single().hits)
-    }
-
-    @Test
-    fun replayReturnsTheNewRecordsId() {
-        val target = object : ReplayTarget {
-            override val source = "okhttp"
-
-            override fun refusal(): String? = null
-
-            override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-                check(handoff.take())
-                store.submit(
-                    HttpTransaction.pending(handoff.id, 0, request.method, request.url, request.headers, null)
-                        .copy(replayOf = handoff.replayOf, source = source)
-                        .completed(200, emptyList(), null, 3, null),
-                )
-                handoff.finish(null)
-            }
-        }
-        val original = store.nextId()
-        store.submit(completeTx(original).copy(replayTarget = target))
-        val session = session()
-        val newId = session.replay(original).get(15, TimeUnit.SECONDS)
-        val replayed = session.store.value.transactions.await { list -> list.any { it.id == newId } }.single { it.id == newId }
-        assertEquals(original, replayed.replayOf)
-        val refused = assertFailsWith<ExecutionException> { session.replay(newId).get(15, TimeUnit.SECONDS) }
-        assertEquals(ExitCode.UNSUPPORTED, (refused.cause as CliException).exitCode)
     }
 
     @Test

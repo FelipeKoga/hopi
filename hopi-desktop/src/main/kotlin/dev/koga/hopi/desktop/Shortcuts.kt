@@ -28,6 +28,9 @@ internal enum class Shortcut(val keys: String) {
 
     /** Shows or hides the rules panel. */
     Rules("⌘L"),
+
+    /** Shows or hides the perf panel. */
+    Perf("⌘P"),
 }
 
 internal val IS_MAC: Boolean = System.getProperty("os.name").orEmpty().startsWith("Mac")
@@ -43,6 +46,7 @@ internal fun shortcutOf(event: KeyEvent, isMac: Boolean = IS_MAC): Shortcut? {
             Key.E -> if (event.isShiftPressed) Shortcut.ExportNdjson else Shortcut.ExportHar
             Key.R -> Shortcut.Reconnect.takeUnless { event.isShiftPressed }
             Key.L -> Shortcut.Rules.takeUnless { event.isShiftPressed }
+            Key.P -> Shortcut.Perf.takeUnless { event.isShiftPressed }
             else -> null
         }
         !plain -> null

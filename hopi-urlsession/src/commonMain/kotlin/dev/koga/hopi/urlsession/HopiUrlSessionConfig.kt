@@ -27,7 +27,7 @@ public class HopiUrlSessionConfig {
     public var agentBridge: Boolean = false
 
     /**
-     * Applies Hopi rules (mock, delay, fail, request edit, replay) to URLSession requests. With no
+     * Applies Hopi rules (mock, delay, fail, request edit) to URLSession requests. With no
      * rule set, a session created after [HopiUrlSession.start] pays one `canInitWithTask:` message
      * per task and nothing else; false installs no rule hook at all (docs/design/rules.md).
      */

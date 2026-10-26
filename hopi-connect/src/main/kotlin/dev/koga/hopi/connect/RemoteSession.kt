@@ -59,6 +59,9 @@ public sealed interface RemoteState {
  * the tail asks for rules notices, [rules] is listed on connect and again on each notice, and the
  * rule commands run on the request connection, after its verified `hello` ([RuleClient]).
  *
+ * Perf (docs/design/perf-monitors.md, "Desktop viewer"): for an app whose `hello` said
+ * `"perf":true`, [perf] opens a third connection for a `perf.tail`, only while a viewer watches it.
+ *
  * Nothing here polls: the tail is one thread blocked on its socket, requests run on one thread
  * blocked on its queue, and both sit idle while the app is quiet, as the app's side does.
  */
@@ -87,6 +90,12 @@ public class RemoteSession(
     private val requests: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "hopi-remote-request").apply { isDaemon = true }
     }
+
+    /**
+     * The app's perf monitors (docs/design/perf-monitors.md, "Desktop viewer"): nothing is sent
+     * for them until a viewer [RemotePerf.watch]es, and then over a connection of their own.
+     */
+    public val perf: RemotePerf = RemotePerf(requests, readTimeoutMs)
 
     /** Guards [link], [generation] and the decode bookkeeping below. */
     private val lock = Any()
@@ -150,6 +159,7 @@ public class RemoteSession(
             val since = if (sameProcess) synchronized(lock) { resumeSince() } else 0L
             // Never sent before this connection's `hello` was verified (RuleClient checks `rules`).
             val rules = if (hello.json.bool("rules") == true) RuleClient(request) else null
+            val perfClient = if (hello.json.bool("perf") == true) PerfClient(request) else null
             tail = openTail(endpoint, since, rules != null)
             val next = Link(endpoint, request, tail, rules)
             synchronized(lock) {
@@ -157,6 +167,7 @@ public class RemoteSession(
                 link = next
                 _state.value = RemoteState.Connected(hello.json.str("app").orEmpty(), hello.json.str("platform").orEmpty())
             }
+            perf.attach(endpoint, perfClient, lost = { lost(next, it) }, sameProcess = sameProcess)
             startTailThread(next)
             // The selection survives a reconnect: fetch it again if the new link has not got it.
             fetchSelectedSoon()
@@ -252,15 +263,6 @@ public class RemoteSession(
     /** Returns how many rules the app removed. */
     public fun clearRules(): CompletableFuture<Long> = ruleCommand { client ->
         client.clear().also { synchronized(lock) { if (_rules.value.supported) _rules.value = RemoteRules(true, emptyList()) } }
-    }
-
-    /**
-     * Replays record [id] through the app's own client, with the edit object [edit] writes (null,
-     * or an [edit] that writes null: none). Returns the new record's id, which the tail brings
-     * once the replay is recorded.
-     */
-    public fun replay(id: Long, edit: ((body: (ByteArray) -> String) -> String?)? = null): CompletableFuture<Long> = ruleCommand { client ->
-        client.replay(id, edit?.invoke(client::body)).json.long("id") ?: throw notReachable("the bridge sent a malformed replay reply")
     }
 
     /**
@@ -360,6 +362,7 @@ public class RemoteSession(
             link = null
             _state.value = RemoteState.Disconnected("closed")
         }
+        perf.close()
         requests.shutdownNow()
         _store.value.close()
     }
@@ -572,6 +575,7 @@ public class RemoteSession(
     }
 
     private fun closeLink(current: Link) {
+        perf.detach()
         current.tail.close()
         current.request.close()
         current.endpoint.close()

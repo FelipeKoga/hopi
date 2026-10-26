@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -50,6 +51,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import dev.koga.hopi.core.perf.PerfHook
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RulePatch
 import dev.koga.hopi.core.store.HopiStore
@@ -67,6 +69,7 @@ import dev.koga.hopi.ui.list.RowModelCache
 import dev.koga.hopi.ui.list.StatusFilter
 import dev.koga.hopi.ui.list.TransactionListPane
 import dev.koga.hopi.ui.list.filterRows
+import dev.koga.hopi.ui.perf.PerfPane
 import dev.koga.hopi.ui.platform.MAX_SHARE_CHARS
 import dev.koga.hopi.ui.platform.SystemBarIcons
 import dev.koga.hopi.ui.platform.cutAt
@@ -87,7 +90,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -124,8 +126,16 @@ internal fun HopiScreen(
         val formatter = remember(store) { DetailFormatter() }
         var toast by remember { mutableStateOf<Toast?>(null) }
         var showRules by rememberSaveable { mutableStateOf(false) }
-        // A replay's record exists once its recorder writes it: opened then, not before.
-        var openWhenRecorded by remember { mutableStateOf<Long?>(null) }
+        var showPerf by rememberSaveable { mutableStateOf(false) }
+        // Read once: an app without hopi-perf loads core's PerfHook object and nothing else.
+        val perf = remember { PerfHook.controller }
+        if (perf != null) {
+            // Frames drawn while the inspector covers the app are flagged and left out of the figures.
+            DisposableEffect(perf) {
+                perf.data.inspectorOpen = true
+                onDispose { perf.data.inspectorOpen = false }
+            }
+        }
 
         // The store is collected here, while the screen is composed, never before.
         val list by rememberListModel(store, query, { filter }, rowCache, formatDispatcher)
@@ -133,26 +143,15 @@ internal fun HopiScreen(
         val model = (detail as? DetailState.Ready)?.model
         val rules = remember(store, model) {
             model?.let { m ->
-                inAppRuleActions(store, m.transaction) { outcome ->
+                inAppRuleActions(m.transaction) { outcome ->
                     toast = when (outcome) {
                         is InAppOutcome.Mocked -> Toast("Mock rule #${outcome.ruleId} added", action = "Undo") { RuleEngine.remove(outcome.ruleId) }
-                        is InAppOutcome.Replaying -> {
-                            openWhenRecorded = outcome.id
-                            Toast("Replaying as #${outcome.id}")
-                        }
                         is InAppOutcome.Refused -> Toast(outcome.message.replaceFirstChar { it.uppercase() })
                     }
                 }
             }
         }
         val actions = rememberDetailActions(store, model, formatDispatcher, rules) { toast = it }
-        LaunchedEffect(store, openWhenRecorded) {
-            val id = openWhenRecorded ?: return@LaunchedEffect
-            store.transactions.first { list -> list.any { it.id == id } }
-            tab = DetailTab.Overview
-            selectedId = id
-            openWhenRecorded = null
-        }
 
         // ui-backhandler's BackHandler: the system back gesture on Android, the edge swipe on iOS.
         // Deprecated in favor of navigationevent's handler, which would add a dependency.
@@ -161,6 +160,7 @@ internal fun HopiScreen(
             when {
                 selectedId != null -> selectedId = null
                 showRules -> showRules = false
+                showPerf -> showPerf = false
                 else -> onClose()
             }
         }
@@ -175,7 +175,7 @@ internal fun HopiScreen(
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 AnimatedContent(
                     // The rules list sits above the request list, like a detail; a detail above both.
-                    targetState = selectedId ?: if (showRules) RULES_PANE else null,
+                    targetState = selectedId ?: if (showRules) RULES_PANE else if (showPerf && perf != null) PERF_PANE else null,
                     transitionSpec = {
                         val forward = targetState != null
                         val enter = fadeIn(tween(160)) + slideInHorizontally(tween(200)) { if (forward) it / 8 else -it / 8 }
@@ -184,7 +184,9 @@ internal fun HopiScreen(
                     },
                     label = "hopi-pane",
                 ) { id ->
-                    if (id == RULES_PANE) {
+                    if (id == PERF_PANE && perf != null) {
+                        PerfPane(perf, formatDispatcher, onBack = { showPerf = false }, onMessage = { toast = Toast(it) })
+                    } else if (id == RULES_PANE) {
                         val rows by rememberRuleRows(store, formatDispatcher)
                         RulesPane(
                             rows = rows,
@@ -211,6 +213,11 @@ internal fun HopiScreen(
                             onClear = { store.clear() },
                             onClose = onClose,
                             onRules = { showRules = true },
+                            onPerf = if (perf != null) {
+                                { showPerf = true }
+                            } else {
+                                null
+                            },
                         )
                     } else {
                         val shown = detail
@@ -221,10 +228,6 @@ internal fun HopiScreen(
                             onTab = { tab = it },
                             onBack = { selectedId = null },
                             actions = actions,
-                            onOpen = {
-                                tab = DetailTab.Overview
-                                selectedId = it
-                            },
                         )
                     }
                 }
@@ -362,8 +365,9 @@ internal fun rememberDetailActions(
 /** A short confirmation; each instance is shown once. [action] (Undo) runs [onAction] and dismisses it. */
 internal class Toast(val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
 
-/** The [AnimatedContent] key of the rules list; transaction ids start at 1. */
+/** The [AnimatedContent] keys of the rules list and the Perf tab; transaction ids start at 1. */
 private const val RULES_PANE = -1L
+private const val PERF_PANE = -2L
 
 @Composable
 internal fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {

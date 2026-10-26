@@ -85,6 +85,35 @@ public final class dev/koga/hopi/connect/HostEnvironment {
 	public final fun isMac ()Z
 }
 
+public final class dev/koga/hopi/connect/PerfClient {
+	public static final field Companion Ldev/koga/hopi/connect/PerfClient$Companion;
+	public static final field DEFAULT_POINTS I
+	public static final field MAX_POINTS I
+	public static final field PERF_UNSUPPORTED Ljava/lang/String;
+	public fun <init> (Ldev/koga/hopi/connect/BridgeClient;)V
+	public final fun event (J)Ldev/koga/hopi/connect/Reply;
+	public final fun getControl ()Z
+	public final fun next (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;
+	public final fun snapshot (Ljava/util/List;IZJZZZ)Ljava/util/List;
+	public static synthetic fun snapshot$default (Ldev/koga/hopi/connect/PerfClient;Ljava/util/List;IZJZZZILjava/lang/Object;)Ljava/util/List;
+	public final fun start (Ljava/util/Collection;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;)Ldev/koga/hopi/connect/Reply;
+	public static synthetic fun start$default (Ldev/koga/hopi/connect/PerfClient;Ljava/util/Collection;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;ILjava/lang/Object;)Ldev/koga/hopi/connect/Reply;
+	public final fun status ()Ldev/koga/hopi/connect/Reply;
+	public final fun stop (Ljava/util/Collection;)Ldev/koga/hopi/connect/Reply;
+	public static synthetic fun stop$default (Ldev/koga/hopi/connect/PerfClient;Ljava/util/Collection;ILjava/lang/Object;)Ldev/koga/hopi/connect/Reply;
+	public final fun tail (JZZZLjava/util/Collection;)V
+	public static synthetic fun tail$default (Ldev/koga/hopi/connect/PerfClient;JZZZLjava/util/Collection;ILjava/lang/Object;)V
+}
+
+public final class dev/koga/hopi/connect/PerfClient$Companion {
+	public final fun getMONITORS ()Ljava/util/List;
+	public final fun tailRequest (JZZZLjava/util/Collection;)Ljava/lang/String;
+}
+
+public final class dev/koga/hopi/connect/PerfClientKt {
+	public static final fun number (Lkotlinx/serialization/json/JsonObject;Ljava/lang/String;)Ljava/lang/Double;
+}
+
 public final class dev/koga/hopi/connect/Platform : java/lang/Enum {
 	public static final field Android Ldev/koga/hopi/connect/Platform;
 	public static final field Ios Ldev/koga/hopi/connect/Platform;
@@ -110,6 +139,183 @@ public final class dev/koga/hopi/connect/ProofCheck {
 	public fun <init> (Lkotlin/jvm/functions/Function0;Ljava/lang/String;)V
 	public final fun getExpected ()Lkotlin/jvm/functions/Function0;
 	public final fun getMismatch ()Ljava/lang/String;
+}
+
+public final class dev/koga/hopi/connect/RemoteFrameSecond {
+	public static final field Companion Ldev/koga/hopi/connect/RemoteFrameSecond$Companion;
+	public fun <init> (JJJJJDZ)V
+	public final fun getFrames ()J
+	public final fun getFrozen ()J
+	public final fun getJanky ()J
+	public final fun getProvisional ()Z
+	public final fun getSecond ()J
+	public final fun getSlow ()J
+	public final fun getWorstMs ()D
+}
+
+public final class dev/koga/hopi/connect/RemoteFrameSecond$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemoteFrameSecond;
+}
+
+public final class dev/koga/hopi/connect/RemotePerf {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerf$Companion;
+	public static final field MAX_HANGS I
+	public static final field MAX_MEMORY_EVENTS I
+	public static final field MAX_POINTS I
+	public final fun getView ()Lkotlinx/coroutines/flow/StateFlow;
+	public final fun setMonitor (Ljava/lang/String;Z)Ljava/util/concurrent/CompletableFuture;
+	public final fun stopAll ()Ljava/util/concurrent/CompletableFuture;
+	public final fun watch ()Ljava/lang/AutoCloseable;
+	public final fun watchThreads (Z)Ljava/util/concurrent/CompletableFuture;
+}
+
+public final class dev/koga/hopi/connect/RemotePerf$Companion {
+	public final fun framesOf (Ldev/koga/hopi/connect/RemotePerfSeries;)Ljava/util/List;
+	public final fun samplesOf (Ldev/koga/hopi/connect/RemotePerfSeries;Ldev/koga/hopi/connect/RemotePerfSeries;)Ljava/util/List;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfEvent {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfEvent$Companion;
+	public fun <init> (Ljava/lang/String;JJLjava/lang/Double;Ljava/lang/String;ZLjava/util/List;ZZZLjava/lang/Long;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getAtMs ()J
+	public final fun getDebugger ()Z
+	public final fun getDescription ()Ljava/lang/String;
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getEvent ()Ljava/lang/String;
+	public final fun getFrozenMs ()Ljava/lang/Long;
+	public final fun getKind ()Ljava/lang/String;
+	public final fun getLevel ()Ljava/lang/Long;
+	public final fun getMs ()Ljava/lang/Double;
+	public final fun getOngoing ()Z
+	public final fun getScreen ()Ljava/lang/String;
+	public final fun getSeq ()J
+	public final fun getStackMissed ()Z
+	public final fun getStacks ()Ljava/util/List;
+	public final fun getStacksCut ()Z
+	public final fun getTrace ()Ljava/lang/String;
+	public final fun stacksText ()Ljava/lang/String;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfEvent$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemotePerfEvent;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfMonitor {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Long;Ljava/util/List;Ljava/lang/Long;Lkotlinx/serialization/json/JsonObject;)V
+	public final fun getDetails ()Lkotlinx/serialization/json/JsonObject;
+	public final fun getExpiresAtMs ()Ljava/lang/Long;
+	public final fun getIntervalMs ()Ljava/lang/Long;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOwners ()Ljava/util/List;
+	public final fun getSinceMs ()Ljava/lang/Long;
+	public final fun getThresholdMs ()Ljava/lang/Long;
+	public final fun getUnattached ()Z
+}
+
+public final class dev/koga/hopi/connect/RemotePerfSample {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfSample$Companion;
+	public fun <init> (JLjava/lang/Double;Ljava/lang/Double;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;)V
+	public final fun getAtMs ()J
+	public final fun getAvailableBytes ()Ljava/lang/Long;
+	public final fun getCpu ()Ljava/lang/Double;
+	public final fun getHopiCpu ()Ljava/lang/Double;
+	public final fun getJavaHeapBytes ()Ljava/lang/Long;
+	public final fun getNativeHeapBytes ()Ljava/lang/Long;
+	public final fun getResidentBytes ()Ljava/lang/Long;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfSample$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemotePerfSample;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfSeries {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfSeries$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;[JLjava/util/List;)V
+	public final fun column (Ljava/lang/String;)[D
+	public final fun getColumns ()Ljava/util/List;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getSize ()I
+	public final fun getTimes ()[J
+	public final fun getValues ()Ljava/util/List;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfSeries$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemotePerfSeries;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfStatus {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfStatus$Companion;
+	public fun <init> (Ljava/lang/String;Ljava/util/List;ZLjava/util/List;Ljava/util/List;)V
+	public final fun getAvailable ()Ljava/util/List;
+	public final fun getNotices ()Ljava/util/List;
+	public final fun getPlatform ()Ljava/lang/String;
+	public final fun getRemoteControl ()Z
+	public final fun getRunning ()Ljava/util/List;
+	public final fun monitor (Ljava/lang/String;)Ldev/koga/hopi/connect/RemotePerfMonitor;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfStatus$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemotePerfStatus;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfSummary {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfSummary$Companion;
+	public fun <init> (JJJLjava/lang/Double;Ljava/lang/Double;Ljava/lang/Double;Ljava/lang/Double;JJJJLjava/lang/Double;Ljava/lang/Double;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;)V
+	public final fun getCpuAveragePercent ()Ljava/lang/Double;
+	public final fun getCpuMaxPercent ()Ljava/lang/Double;
+	public final fun getDebuggerHangs ()J
+	public final fun getFrames ()J
+	public final fun getFrozen ()J
+	public final fun getHangTotalMs ()J
+	public final fun getHangWorstMs ()J
+	public final fun getHangs ()J
+	public final fun getJanky ()J
+	public final fun getMaxMs ()Ljava/lang/Double;
+	public final fun getP50Ms ()Ljava/lang/Double;
+	public final fun getP90Ms ()Ljava/lang/Double;
+	public final fun getP99Ms ()Ljava/lang/Double;
+	public final fun getResidentLastBytes ()Ljava/lang/Long;
+	public final fun getResidentMaxBytes ()Ljava/lang/Long;
+	public final fun getResidentMinBytes ()Ljava/lang/Long;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfSummary$Companion {
+	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemotePerfSummary;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfThread {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfThread$Companion;
+	public fun <init> (JLjava/lang/String;JLjava/lang/Double;Z)V
+	public final fun getCpuMs ()J
+	public final fun getHopi ()Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getPercent ()Ljava/lang/Double;
+	public final fun getTid ()J
+}
+
+public final class dev/koga/hopi/connect/RemotePerfThread$Companion {
+	public final fun decodeAll (Lkotlinx/serialization/json/JsonObject;)Ljava/util/List;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfView {
+	public static final field Companion Ldev/koga/hopi/connect/RemotePerfView$Companion;
+	public fun <init> (ZZLdev/koga/hopi/connect/RemotePerfStatus;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;JJLjava/util/List;ZLjava/lang/String;)V
+	public final fun getControl ()Z
+	public final fun getFrames ()Ljava/util/List;
+	public final fun getHangs ()Ljava/util/List;
+	public final fun getJanks ()J
+	public final fun getMemoryEvents ()Ljava/util/List;
+	public final fun getMessage ()Ljava/lang/String;
+	public final fun getSamples ()Ljava/util/List;
+	public final fun getStalls ()J
+	public final fun getStatus ()Ldev/koga/hopi/connect/RemotePerfStatus;
+	public final fun getStreaming ()Z
+	public final fun getSupported ()Z
+	public final fun getThreads ()Ljava/util/List;
+}
+
+public final class dev/koga/hopi/connect/RemotePerfView$Companion {
+	public final fun getNONE ()Ldev/koga/hopi/connect/RemotePerfView;
 }
 
 public final class dev/koga/hopi/connect/RemoteRule {
@@ -156,12 +362,11 @@ public final class dev/koga/hopi/connect/RemoteSession : java/lang/AutoCloseable
 	public final fun connect ()V
 	public final fun fetch (J)Ldev/koga/hopi/core/model/HttpTransaction;
 	public final fun getDropped ()Lkotlinx/coroutines/flow/StateFlow;
+	public final fun getPerf ()Ldev/koga/hopi/connect/RemotePerf;
 	public final fun getRules ()Lkotlinx/coroutines/flow/StateFlow;
 	public final fun getState ()Lkotlinx/coroutines/flow/StateFlow;
 	public final fun getStore ()Lkotlinx/coroutines/flow/StateFlow;
 	public final fun removeRule (J)Ljava/util/concurrent/CompletableFuture;
-	public final fun replay (JLkotlin/jvm/functions/Function1;)Ljava/util/concurrent/CompletableFuture;
-	public static synthetic fun replay$default (Ldev/koga/hopi/connect/RemoteSession;JLkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/util/concurrent/CompletableFuture;
 	public final fun select (Ljava/lang/Long;)V
 	public final fun updateRule (JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZ)Ljava/util/concurrent/CompletableFuture;
 	public static synthetic fun updateRule$default (Ldev/koga/hopi/connect/RemoteSession;JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZILjava/lang/Object;)Ljava/util/concurrent/CompletableFuture;
@@ -228,7 +433,6 @@ public final class dev/koga/hopi/connect/RuleClient {
 	public final fun clear ()J
 	public final fun list ()Ljava/util/List;
 	public final fun remove (J)V
-	public final fun replay (JLjava/lang/String;)Ldev/koga/hopi/connect/Reply;
 	public final fun update (JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZ)Ldev/koga/hopi/connect/Reply;
 	public static synthetic fun update$default (Ldev/koga/hopi/connect/RuleClient;JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZILjava/lang/Object;)Ldev/koga/hopi/connect/Reply;
 	public final fun uploadBlob (J[B)V

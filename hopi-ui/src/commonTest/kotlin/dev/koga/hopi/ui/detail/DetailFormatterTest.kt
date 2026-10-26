@@ -258,13 +258,10 @@ class DetailFormatterTest {
     }
 
     @Test
-    fun theOverviewNamesTheRuleAndLinksTheReplayedRecord() = runTest {
-        val model = DetailFormatter().model(complete(2).copy(ruleId = 3, ruleApplied = "delay,mock", replayOf = 1), Redactor.Default)
+    fun theOverviewNamesTheRule() = runTest {
+        val model = DetailFormatter().model(complete(2).copy(ruleId = 3, ruleApplied = "delay,mock"), Redactor.Default)
         assertEquals("#3: delay, mock", model.overview.single { it.label == "Rule" }.value)
-        val replay = model.overview.single { it.label == "Replay of" }
-        assertEquals("#1", replay.value)
-        assertEquals(1L, replay.opens)
         val plain = DetailFormatter().model(complete(1), Redactor.Default)
-        assertTrue(plain.overview.none { it.label == "Rule" || it.label == "Replay of" })
+        assertTrue(plain.overview.none { it.label == "Rule" })
     }
 }

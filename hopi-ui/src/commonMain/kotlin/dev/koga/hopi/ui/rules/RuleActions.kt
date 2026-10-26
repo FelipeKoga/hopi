@@ -4,21 +4,18 @@ import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.rules.MatchSpec
-import dev.koga.hopi.core.rules.ReplayResult
-import dev.koga.hopi.core.rules.Replays
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleJson
 import dev.koga.hopi.core.rules.RuleParse
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSpec
 import dev.koga.hopi.core.rules.UrlParts
-import dev.koga.hopi.core.store.HopiStore
 
 /** One rule button of the detail: [run] when [refusal] is null, else disabled with [refusal] shown. */
 internal class RuleAction(val run: () -> Unit, val refusal: String?)
 
-/** The detail's rule buttons; a null one is not shown (the in-app screen has no "Edit and replay…"). */
-internal class RuleActions(val mock: RuleAction?, val replay: RuleAction?, val editAndReplay: RuleAction? = null)
+/** The detail's rule buttons; a null one is not shown. */
+internal class RuleActions(val mock: RuleAction?)
 
 /**
  * The exact match of [transaction]'s request: its method, scheme, host, explicit port (if any) and
@@ -43,10 +40,6 @@ internal fun mockRefusal(transaction: HttpTransaction): String? = when {
     else -> null
 }
 
-/** Why "Replay" cannot re-send [transaction] as far as a viewer can tell, or null (the app may still refuse). */
-internal fun replayRefusal(transaction: HttpTransaction): String? =
-    if (!heldInFull(transaction.requestBody)) "request body not held in full" else null
-
 /** In the app, [heldInFull] also needs the bytes here; a host viewer's summary says what the app holds. */
 private fun heldInFull(body: CapturedBody?): Boolean = when {
     body == null -> true
@@ -59,23 +52,17 @@ private fun heldInFull(body: CapturedBody?): Boolean = when {
 internal sealed interface InAppOutcome {
     class Mocked(val ruleId: Long) : InAppOutcome
 
-    class Replaying(val id: Long) : InAppOutcome
-
     class Refused(val message: String) : InAppOutcome
 }
 
 /**
- * The in-app screen's rule buttons for [transaction], over the app's own [RuleEngine] and [store]
- * (the screen's process is the app's). Rules switched off in every recorder disable both.
+ * The in-app screen's rule buttons for [transaction], over the app's own [RuleEngine] (the
+ * screen's process is the app's). Rules switched off in every recorder disable it.
  */
-internal fun inAppRuleActions(store: HopiStore, transaction: HttpTransaction, onOutcome: (InAppOutcome) -> Unit): RuleActions {
+internal fun inAppRuleActions(transaction: HttpTransaction, onOutcome: (InAppOutcome) -> Unit): RuleActions {
     val off = if (RuleEngine.rulesAvailable) null else "rules are off in this app (rules = false)"
     return RuleActions(
         mock = RuleAction({ onOutcome(mockInApp(transaction)) }, off ?: mockRefusal(transaction) ?: if (exactMatchOf(transaction) == null) "URL cannot be matched" else null),
-        replay = RuleAction(
-            { onOutcome(replayInApp(store, transaction)) },
-            off ?: replayRefusal(transaction) ?: if (transaction.replayTarget == null) "its recorder offers no replay" else null,
-        ),
     )
 }
 
@@ -91,9 +78,3 @@ internal fun mockInApp(transaction: HttpTransaction): InAppOutcome {
         is RuleResult.Failed -> InAppOutcome.Refused(result.error.message)
     }
 }
-
-internal fun replayInApp(store: HopiStore, transaction: HttpTransaction): InAppOutcome =
-    when (val result = Replays.start(store, transaction.id, edit = null)) {
-        is ReplayResult.Started -> InAppOutcome.Replaying(result.id)
-        is ReplayResult.Refused -> InAppOutcome.Refused(result.error.message)
-    }

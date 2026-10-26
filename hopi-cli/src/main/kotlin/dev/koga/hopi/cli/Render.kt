@@ -45,7 +45,6 @@ internal object Render {
             // The Ktor plugin's records (and an older app's, without the field) carry no tag.
             summary.str("source")?.takeIf { it != "ktor" }?.let { append("  [").append(visible(it)).append(']') }
             ruleMark(summary)?.let { append("  [").append(it).append(']') }
-            summary.long("replayOf")?.let { append("  [replay of ").append(it).append(']') }
             if (state == "failed") {
                 append("  (")
                 // A failure after the response arrived keeps its status; the code column still says ERR.
@@ -156,7 +155,6 @@ internal object Render {
             detail.long("rule")?.let { id ->
                 add("Rule" to "#$id" + (detail.str("applied")?.let { ": " + visible(it).replace(",", ", ") } ?: ""))
             }
-            detail.long("replayOf")?.let { add("Replay of" to "#$it") }
             detail.long("startedAt")?.let { add("Started" to Instant.ofEpochMilli(it).toString()) }
             detail.str("error")?.let { add("Error" to visible(it)) }
         }

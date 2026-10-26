@@ -16,8 +16,10 @@ import org.gradle.api.artifacts.Configuration
  * - each debuggable variant has OkHttp's `RealCall` and every `java.net.URL` connection call site of
  *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
  *   `hopi { }` block generated into it; other variants are not instrumented at all;
- * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-ui`/`hopi-rules` to the real module
- *   when debuggable and to the noop twin otherwise, whichever the app's modules name.
+ * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-ui`/`hopi-rules`/`hopi-perf` to the
+ *   real module when debuggable and to the noop twin otherwise, whichever the app's modules name;
+ * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others `hopi-perf-noop`)
+ *   and the provider registers it, starting the `autoStart` monitors (docs/design/perf-monitors.md).
  *
  * The runtime starts itself from a provider of its own manifest, so the app adds no code.
  */
@@ -49,6 +51,9 @@ public class HopiPlugin : Plugin<Project> {
                 val real = extension.enabled.get() && buildType.isDebuggable
                 realByBuildType[buildType.name] = real
                 project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) RUNTIME else RUNTIME_NOOP))
+                if (extension.perf.enabled.get()) {
+                    project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) PERF else PERF_NOOP))
+                }
             }
         }
         components.onVariants(components.selector().all()) { variant ->
@@ -91,6 +96,15 @@ public class HopiPlugin : Plugin<Project> {
             task.redactedHeaders.set(extension.redactedHeaders)
             task.redactedQueryParameters.set(extension.redactedQueryParameters)
             task.redactionDisabled.set(extension.redactionDisabled)
+            task.perfPresent.set(extension.perf.enabled)
+            task.perfAutoStart.set(extension.perf.autoStart.map(HopiPerfExtension::bits))
+            task.perfHangThresholdMs.set(
+                extension.perf.hangThresholdMs.map { ms ->
+                    if (ms !in 100L..10_000L) throw GradleException("hopi { perf { hangThresholdMs } } must be in 100..10000, not $ms")
+                    ms
+                },
+            )
+            task.perfHangHeartbeat.set(extension.perf.hangHeartbeat)
         }
         val java = variant.sources.java ?: throw GradleException("variant ${variant.name} has no Java sources to add Hopi's configuration to")
         java.addGeneratedSourceDirectory(generate, GenerateHopiConfig::outputDirectory)
@@ -147,6 +161,8 @@ public class HopiPlugin : Plugin<Project> {
         const val GROUP = "dev.koga.hopi"
         const val RUNTIME = "hopi-android"
         const val RUNTIME_NOOP = "hopi-android-noop"
-        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", "hopi-ui" to "hopi-ui-noop", "hopi-rules" to "hopi-rules-noop")
+        const val PERF = "hopi-perf"
+        const val PERF_NOOP = "hopi-perf-noop"
+        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", "hopi-ui" to "hopi-ui-noop", "hopi-rules" to "hopi-rules-noop", PERF to PERF_NOOP)
     }
 }

@@ -6,9 +6,19 @@ import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.connect.Platform
 import dev.koga.hopi.connect.RemoteRule
 import dev.koga.hopi.connect.Reply
+import dev.koga.hopi.connect.PerfClient
+import dev.koga.hopi.connect.RemoteFrameSecond
+import dev.koga.hopi.connect.RemotePerf
+import dev.koga.hopi.connect.RemotePerfEvent
+import dev.koga.hopi.connect.RemotePerfSample
+import dev.koga.hopi.connect.RemotePerfSeries
+import dev.koga.hopi.connect.RemotePerfStatus
+import dev.koga.hopi.connect.RemotePerfSummary
+import dev.koga.hopi.connect.RemotePerfThread
 import dev.koga.hopi.connect.RuleClient
-import dev.koga.hopi.connect.long
+import dev.koga.hopi.connect.SlowClientException
 import dev.koga.hopi.connect.str
+import dev.koga.hopi.connect.long
 import dev.koga.hopi.connect.usageError
 import dev.koga.hopi.connect.notReachable
 import dev.koga.hopi.connect.visible
@@ -81,9 +91,125 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             Command.RulesEnable -> updateRules(enabled = true)
             Command.RulesDisable -> updateRules(enabled = false)
             Command.RulesReset -> updateRules(resetHits = true)
-            Command.Replay -> replay()
+            Command.PerfStart -> perfStart()
+            Command.PerfStop -> perfStop()
+            Command.PerfStatus -> perfStatus()
+            Command.PerfSnapshot -> perfSnapshot()
+            Command.PerfTail -> perfTail()
+            Command.Hangs -> hangs()
         }
     }
+
+    // ---- perf (docs/design/perf-monitors.md, "CLI")
+
+    /** Validated before connecting; the app holds the monitors for the lease (10 minutes unless --for or --no-expiry). */
+    private fun perfStart() {
+        val start = PerfArgs.start(args)
+        withPerf { perf ->
+            val reply = perf.start(start.monitors, start.hangMs, start.intervalMs, start.ttlSec)
+            printStatus(perf, reply)
+        }
+    }
+
+    private fun perfStop() {
+        val monitors = PerfArgs.monitors(args)
+        withPerf { perf -> printStatus(perf, perf.stop(monitors)) }
+    }
+
+    private fun perfStatus() {
+        withPerf { perf -> printStatus(perf, perf.status()) }
+    }
+
+    /** `--json`: the bridge's line as received; else one line per monitor, with the counts of a one-point snapshot. */
+    private fun printStatus(perf: PerfClient, reply: Reply) {
+        if (args.json) {
+            out.line(reply.raw)
+            return
+        }
+        val status = RemotePerfStatus.decode(reply.json) ?: throw notReachable("the bridge sent a malformed perf status")
+        val summary = perf.snapshot(series = listOf("cpu"), points = 1, events = false).firstNotNullOfOrNull { RemotePerfSummary.decode(it.json) }
+        PerfRender.status(status, summary, System.currentTimeMillis()).forEach(out::line)
+    }
+
+    private fun perfSnapshot() {
+        val threads = "--threads" in args.switches
+        withPerf { perf ->
+            val lines = perf.snapshot(points = PerfClient.DEFAULT_POINTS, threads = threads, pss = "--pss" in args.switches)
+            if (args.json) {
+                lines.forEach { out.line(it.raw) }
+                return@withPerf
+            }
+            val series = lines.mapNotNull { RemotePerfSeries.decode(it.json) }.associateBy { it.name }
+            val pss = lines.firstOrNull { it.type == "perf.pss" }?.let { it.json.long("kb") to it.json.str("refused") }
+            PerfRender.snapshot(
+                status = lines.firstNotNullOfOrNull { RemotePerfStatus.decode(it.json) },
+                summary = lines.firstNotNullOfOrNull { RemotePerfSummary.decode(it.json) },
+                events = lines.mapNotNull { RemotePerfEvent.decode(it.json) },
+                threads = lines.firstOrNull { it.type == "perf.threads" }?.let { RemotePerfThread.decodeAll(it.json) },
+                threadsAsked = threads,
+                pss = pss,
+                lastSample = RemotePerf.samplesOf(series["cpu"], series["memory"]).lastOrNull(),
+            ).forEach(out::line)
+        }
+    }
+
+    /** Runs until interrupted or until the app goes away; a monitor named in --start runs exactly as long. */
+    private fun perfTail() {
+        val start = PerfArgs.tailStart(args)
+        withPerf { perf ->
+            perf.tail(
+                since = args.since,
+                samples = "--samples" in args.switches,
+                fps = "--fps" in args.switches,
+                threads = "--threads" in args.switches,
+                start = start,
+            )
+            val closed = "the app closed the bridge connection (app stopped?)"
+            while (true) {
+                val reply = try {
+                    perf.next(closed)
+                } catch (e: SlowClientException) {
+                    throw CliException(
+                        e.exitCode,
+                        "the bridge disconnected this client for reading too slowly (SLOW_CLIENT): " +
+                            "run hopi perf tail --since ${e.since ?: "<the last seq shown>"} to resume without losing an event",
+                    )
+                }
+                if (args.json) {
+                    out.line(reply.raw)
+                } else {
+                    val line = when (reply.type) {
+                        "perf.status" -> RemotePerfStatus.decode(reply.json)?.let { PerfRender.status(it, null, System.currentTimeMillis()).joinToString("\n") }
+                        "perf.event" -> RemotePerfEvent.decode(reply.json)?.let(PerfRender::event)
+                        "perf.frames" -> RemoteFrameSecond.decode(reply.json)?.let(PerfRender::frames)
+                        "perf.sample" -> RemotePerfSample.decode(reply.json)?.let(PerfRender::sample)
+                        "perf.threads" -> RemotePerfThread.decodeAll(reply.json)?.let(PerfRender::threads)
+                        else -> null
+                    } ?: continue
+                    out.line(line)
+                }
+                out.flush()
+            }
+        }
+    }
+
+    /** Every hang the app holds after --since, with all its stacks (a snapshot with full stacks). */
+    private fun hangs() {
+        withPerf { perf ->
+            val lines = perf.snapshot(series = listOf("cpu"), points = 1, events = true, since = args.since, fullStacks = true)
+                .filter { it.type == "perf.event" && it.json.str("kind") == "hang" }
+            if (args.json) {
+                lines.forEach { out.line(it.raw) }
+            } else if (lines.isEmpty()) {
+                out.line("no hangs" + if (args.since > 0) " after #${args.since}" else "")
+            } else {
+                lines.mapNotNull { RemotePerfEvent.decode(it.json) }.forEach { hang -> PerfRender.hang(hang).forEach(out::line) }
+            }
+        }
+    }
+
+    /** Perf commands send nothing before `hello` was verified, and nothing at all to an app without perf (exit 4). */
+    private inline fun withPerf(block: (PerfClient) -> Unit) = withBridge(request = null) { client -> block(PerfClient(client)) }
 
     /** Validated before connecting; bodies are read now, uploaded (inline or as blobs) once connected. */
     private fun addRule() {
@@ -147,38 +273,6 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
         }
     }
 
-    /** Prints the new record's id; with `--wait`, tails until that record is terminal and prints it (exit 0 whatever its status). */
-    private fun replay() {
-        val draft = RuleDraft.replayEdit(args, ::readBody)
-        withRules { rules, client ->
-            val reply = try {
-                rules.replay(args.id, draft?.json(rules::body))
-            } catch (e: CliException) {
-                if (e.exitCode == ExitCode.NOT_FOUND) {
-                    throw CliException(ExitCode.NOT_FOUND, "transaction ${args.id} not found: cleared, evicted, or never recorded (hopi list shows what is retained)")
-                }
-                throw e
-            }
-            val newId = reply.json.long("id") ?: throw notReachable("the bridge sent a malformed replay reply")
-            if ("--wait" !in args.switches) {
-                out.line(if (args.json) reply.raw else newId.toString())
-                return@withRules
-            }
-            client.waitForever()
-            client.send(BridgeClient.request("tail").field("since", newId - 1).endObject().toString())
-            while (true) {
-                val line = client.reply(closedMessage = "the app closed the bridge connection before replay $newId ended (app stopped?)")
-                if (line.type != "transaction" || line.json.long("id") != newId || line.json.str("state") == "pending") continue
-                if (args.json) {
-                    out.line(line.raw)
-                } else {
-                    Render.table(listOf(Render.SUMMARY_HEADER, Render.summaryCells(line.json))).forEach(out::line)
-                }
-                return@withRules
-            }
-        }
-    }
-
     private fun okLine(id: Long) = JsonWriter().beginObject().field("type", "ok").field("removed", id).endObject().toString()
 
     /** `@file` (a host file), `@-` (stdin) or the literal text, as curl reads `--data`. */
@@ -196,8 +290,6 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
 
     /** Rule commands send nothing before `hello` was verified: no request is pipelined with it. */
     private inline fun withRules(block: (RuleClient) -> Unit) = withBridge(request = null) { client -> block(RuleClient(client)) }
-
-    private inline fun withRules(block: (RuleClient, BridgeClient) -> Unit) = withBridge(request = null) { client -> block(RuleClient(client), client) }
 
     private fun devices() {
         val targets = Targets(environment)

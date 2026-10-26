@@ -6,7 +6,7 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.redact.Redactor
 import kotlin.io.encoding.Base64
 
-/** Where a rule's or replay's body comes from when it is not inline, and what `fromTransaction` names. */
+/** Where a rule's body comes from when it is not inline, and what `fromTransaction` names. */
 @HopiInternalApi
 public interface RuleJsonContext {
     /** The staged blob [id]; null when this session holds none by that id. */
@@ -71,11 +71,6 @@ public object RuleJson {
             fail = failKind,
             edit = edit,
         )
-    }
-
-    /** A replay's `edit` object (the request fields of a rule's `edit.request`). */
-    public fun parseReplayEdit(edit: Map<String, Any?>, context: RuleJsonContext): RuleParse<RequestEdit> = parsing {
-        requestEdit(edit, "edit", context)
     }
 
     /** The `rules.update` fields; [RulePatch.times] `null` in the JSON clears the limit. */

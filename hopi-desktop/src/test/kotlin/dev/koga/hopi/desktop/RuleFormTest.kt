@@ -6,7 +6,6 @@ import dev.koga.hopi.core.rules.FailKind
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNull
 
 class RuleFormTest {
     private val inline = { bytes: ByteArray -> """{"text":"${bytes.decodeToString()}"}""" }
@@ -76,14 +75,5 @@ class RuleFormTest {
             "sources: unknown source 'curl' (ktor, okhttp, urlconnection, urlsession)",
             assertFailsWith<IllegalArgumentException> { sources.json(inline) }.message,
         )
-    }
-
-    @Test
-    fun aReplayEditIsNullWhenItChangesNothing() {
-        val replay = RuleForm.replayOf(completeTx(3))
-        assertNull(replay.replayEditJson(inline))
-        replay.request.method.set("PUT")
-        replay.request.body.text.set("{}")
-        assertEquals("""{"method":"PUT","body":{"text":"{}"}}""", replay.replayEditJson(inline))
     }
 }

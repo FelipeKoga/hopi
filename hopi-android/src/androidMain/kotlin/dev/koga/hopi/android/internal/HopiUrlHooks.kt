@@ -44,6 +44,6 @@ public fun getContent(url: URL, classes: Array<Class<*>>): Any? = openConnection
 private fun wrap(connection: URLConnection, proxy: Proxy? = null): URLConnection {
     if (!AndroidCapture.started || connection !is HttpURLConnection) return connection
     if (connection.javaClass.name.startsWith("okhttp3.")) return connection
-    // The proxy the app chose: what a rule's rebuilt connection and a replay open with again.
+    // The proxy the app chose: what a rule's rebuilt connection opens with again.
     return if (connection is HttpsURLConnection) HopiHttpsURLConnection(connection, proxy) else HopiHttpURLConnection(connection, proxy)
 }

@@ -23,9 +23,6 @@ internal enum class FormKind(val label: String) {
     Delay("Delay"),
     Edit("Edit"),
 
-    /** "Edit and replay…" of [RuleForm.replayOf]: the request edit only, sent with `replay`. */
-    Replay("Edit and replay"),
-
     /** Priority, times and hits of an existing rule: what `rules.update` changes. */
     Update("Update"),
 }
@@ -59,7 +56,7 @@ internal class HeaderTable {
     }
 }
 
-/** The request side of an edit, also a replay's edit. */
+/** The request side of an edit. */
 internal class RequestEditFields {
     val method = TextFieldState()
     val host = TextFieldState()
@@ -85,7 +82,7 @@ internal class RequestEditFields {
 }
 
 /**
- * The rules panel's add, edit and replay form, as plain state (the panel binds it, tests fill it).
+ * The rules panel's add and edit form, as plain state (the panel binds it, tests fill it).
  * [json] checks what the host can (the match shorthand, numbers, durations, sizes) and writes the
  * wire object; the app validates the rest and its refusal is shown as is. Durations are in ms.
  */
@@ -103,10 +100,8 @@ internal class RuleForm(val kind: FormKind) {
     val headers = HeaderTable()
     val body = BodyField()
 
-    /** The record a mock copies status, headers and body from, in the app; or the record replayed. */
+    /** The record a mock copies status, headers and body from, in the app. */
     var fromTransaction: Long? = null
-        private set
-    var replayOf: Long? = null
         private set
 
     /** The rule [FormKind.Update] changes. */
@@ -128,13 +123,12 @@ internal class RuleForm(val kind: FormKind) {
             FormKind.Fail -> "New fail"
             FormKind.Delay -> "New delay"
             FormKind.Edit -> "New edit"
-            FormKind.Replay -> "Edit and replay #$replayOf"
             FormKind.Update -> "Update rule #$ruleId"
         }
 
     /** The rule object for `rules.add`; [body] turns bytes into a body object (inline, or an uploaded blob). */
     fun json(body: (ByteArray) -> String): String {
-        check(kind != FormKind.Replay && kind != FormKind.Update) { "not a rule form: $kind" }
+        check(kind != FormKind.Update) { "not a rule form: $kind" }
         val parsedSources = sources.value()?.split(',')?.map { name ->
             RuleSource.of(name.trim()) ?: throw IllegalArgumentException("sources: unknown source '${name.trim()}' (ktor, okhttp, urlconnection, urlsession)")
         }?.toSet()
@@ -190,17 +184,8 @@ internal class RuleForm(val kind: FormKind) {
                 }
                 w.endObject()
             }
-            FormKind.Replay, FormKind.Update -> Unit
+            FormKind.Update -> Unit
         }
-        return w.endObject().toString()
-    }
-
-    /** The replay's edit object, or null when the form changes nothing (a plain replay). */
-    fun replayEditJson(body: (ByteArray) -> String): String? {
-        check(kind == FormKind.Replay) { "not a replay form: $kind" }
-        if (request.isEmpty()) return null
-        val w = JsonWriter().beginObject()
-        request.write(w, body, "edit")
         return w.endObject().toString()
     }
 
@@ -223,8 +208,6 @@ internal class RuleForm(val kind: FormKind) {
             fromTransaction = transaction.id
             match.edit { replace(0, length, exactShorthand(transaction)) }
         }
-
-        fun replayOf(transaction: HttpTransaction): RuleForm = RuleForm(FormKind.Replay).apply { replayOf = transaction.id }
 
         fun updateOf(rule: RemoteRule): RuleForm = RuleForm(FormKind.Update).apply {
             ruleId = rule.id

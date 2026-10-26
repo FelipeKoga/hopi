@@ -1,0 +1,63 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <hopi:hopi-perf>
+final enum class dev.koga.hopi.perf/HopiMonitor : kotlin/Enum<dev.koga.hopi.perf/HopiMonitor> { // dev.koga.hopi.perf/HopiMonitor|null[0]
+    enum entry Cpu // dev.koga.hopi.perf/HopiMonitor.Cpu|null[0]
+    enum entry Frames // dev.koga.hopi.perf/HopiMonitor.Frames|null[0]
+    enum entry Hangs // dev.koga.hopi.perf/HopiMonitor.Hangs|null[0]
+    enum entry Memory // dev.koga.hopi.perf/HopiMonitor.Memory|null[0]
+
+    final val entries // dev.koga.hopi.perf/HopiMonitor.entries|#static{}entries[0]
+        final fun <get-entries>(): kotlin.enums/EnumEntries<dev.koga.hopi.perf/HopiMonitor> // dev.koga.hopi.perf/HopiMonitor.entries.<get-entries>|<get-entries>#static(){}[0]
+
+    final fun valueOf(kotlin/String): dev.koga.hopi.perf/HopiMonitor // dev.koga.hopi.perf/HopiMonitor.valueOf|valueOf#static(kotlin.String){}[0]
+    final fun values(): kotlin/Array<dev.koga.hopi.perf/HopiMonitor> // dev.koga.hopi.perf/HopiMonitor.values|values#static(){}[0]
+}
+
+final class dev.koga.hopi.perf/HopiPerfConfig { // dev.koga.hopi.perf/HopiPerfConfig|null[0]
+    final var agentBridge // dev.koga.hopi.perf/HopiPerfConfig.agentBridge|{}agentBridge[0]
+        final fun <get-agentBridge>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.agentBridge.<get-agentBridge>|<get-agentBridge>(){}[0]
+        final fun <set-agentBridge>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.agentBridge.<set-agentBridge>|<set-agentBridge>(kotlin.Boolean){}[0]
+    final var cpu // dev.koga.hopi.perf/HopiPerfConfig.cpu|{}cpu[0]
+        final fun <get-cpu>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.cpu.<get-cpu>|<get-cpu>(){}[0]
+        final fun <set-cpu>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.cpu.<set-cpu>|<set-cpu>(kotlin.Boolean){}[0]
+    final var frames // dev.koga.hopi.perf/HopiPerfConfig.frames|{}frames[0]
+        final fun <get-frames>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.frames.<get-frames>|<get-frames>(){}[0]
+        final fun <set-frames>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.frames.<set-frames>|<set-frames>(kotlin.Boolean){}[0]
+    final var hangHeartbeat // dev.koga.hopi.perf/HopiPerfConfig.hangHeartbeat|{}hangHeartbeat[0]
+        final fun <get-hangHeartbeat>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.hangHeartbeat.<get-hangHeartbeat>|<get-hangHeartbeat>(){}[0]
+        final fun <set-hangHeartbeat>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.hangHeartbeat.<set-hangHeartbeat>|<set-hangHeartbeat>(kotlin.Boolean){}[0]
+    final var hangThresholdMs // dev.koga.hopi.perf/HopiPerfConfig.hangThresholdMs|{}hangThresholdMs[0]
+        final fun <get-hangThresholdMs>(): kotlin/Long // dev.koga.hopi.perf/HopiPerfConfig.hangThresholdMs.<get-hangThresholdMs>|<get-hangThresholdMs>(){}[0]
+        final fun <set-hangThresholdMs>(kotlin/Long) // dev.koga.hopi.perf/HopiPerfConfig.hangThresholdMs.<set-hangThresholdMs>|<set-hangThresholdMs>(kotlin.Long){}[0]
+    final var hangs // dev.koga.hopi.perf/HopiPerfConfig.hangs|{}hangs[0]
+        final fun <get-hangs>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.hangs.<get-hangs>|<get-hangs>(){}[0]
+        final fun <set-hangs>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.hangs.<set-hangs>|<set-hangs>(kotlin.Boolean){}[0]
+    final var memory // dev.koga.hopi.perf/HopiPerfConfig.memory|{}memory[0]
+        final fun <get-memory>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.memory.<get-memory>|<get-memory>(){}[0]
+        final fun <set-memory>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.memory.<set-memory>|<set-memory>(kotlin.Boolean){}[0]
+    final var remoteControl // dev.koga.hopi.perf/HopiPerfConfig.remoteControl|{}remoteControl[0]
+        final fun <get-remoteControl>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.remoteControl.<get-remoteControl>|<get-remoteControl>(){}[0]
+        final fun <set-remoteControl>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.remoteControl.<set-remoteControl>|<set-remoteControl>(kotlin.Boolean){}[0]
+    final var sampleIntervalMs // dev.koga.hopi.perf/HopiPerfConfig.sampleIntervalMs|{}sampleIntervalMs[0]
+        final fun <get-sampleIntervalMs>(): kotlin/Long // dev.koga.hopi.perf/HopiPerfConfig.sampleIntervalMs.<get-sampleIntervalMs>|<get-sampleIntervalMs>(){}[0]
+        final fun <set-sampleIntervalMs>(kotlin/Long) // dev.koga.hopi.perf/HopiPerfConfig.sampleIntervalMs.<set-sampleIntervalMs>|<set-sampleIntervalMs>(kotlin.Long){}[0]
+    final var summaryLog // dev.koga.hopi.perf/HopiPerfConfig.summaryLog|{}summaryLog[0]
+        final fun <get-summaryLog>(): kotlin/Boolean // dev.koga.hopi.perf/HopiPerfConfig.summaryLog.<get-summaryLog>|<get-summaryLog>(){}[0]
+        final fun <set-summaryLog>(kotlin/Boolean) // dev.koga.hopi.perf/HopiPerfConfig.summaryLog.<set-summaryLog>|<set-summaryLog>(kotlin.Boolean){}[0]
+}
+
+final object dev.koga.hopi.perf/HopiPerf { // dev.koga.hopi.perf/HopiPerf|null[0]
+    final val running // dev.koga.hopi.perf/HopiPerf.running|{}running[0]
+        final fun <get-running>(): kotlin.collections/Set<dev.koga.hopi.perf/HopiMonitor> // dev.koga.hopi.perf/HopiPerf.running.<get-running>|<get-running>(){}[0]
+
+    final fun install(kotlin/Function1<dev.koga.hopi.perf/HopiPerfConfig, kotlin/Unit> = ...) // dev.koga.hopi.perf/HopiPerf.install|install(kotlin.Function1<dev.koga.hopi.perf.HopiPerfConfig,kotlin.Unit>){}[0]
+    final fun screen(kotlin/String?) // dev.koga.hopi.perf/HopiPerf.screen|screen(kotlin.String?){}[0]
+    final fun start(kotlin/Function1<dev.koga.hopi.perf/HopiPerfConfig, kotlin/Unit>) // dev.koga.hopi.perf/HopiPerf.start|start(kotlin.Function1<dev.koga.hopi.perf.HopiPerfConfig,kotlin.Unit>){}[0]
+    final fun stop(kotlin/Array<out dev.koga.hopi.perf/HopiMonitor>...) // dev.koga.hopi.perf/HopiPerf.stop|stop(kotlin.Array<out|dev.koga.hopi.perf.HopiMonitor>...){}[0]
+}

@@ -55,7 +55,6 @@ public object BridgeDecoder {
             // The rule marks, additive like `source`: absent from an older app's lines.
             ruleId = json.long("rule"),
             ruleApplied = json.str("applied"),
-            replayOf = json.long("replayOf"),
         )
     }
 
@@ -83,7 +82,6 @@ public object BridgeDecoder {
             finalUrl = json.str("finalUrl"),
             ruleId = json.long("rule"),
             ruleApplied = json.str("applied"),
-            replayOf = json.long("replayOf"),
         )
     }
 

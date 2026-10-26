@@ -68,15 +68,8 @@ public class RuleClient(private val client: BridgeClient) {
     /** `rules.clear`; returns how many rules the app removed. */
     public fun clear(): Long = request(BridgeClient.request("rules.clear").endObject().toString(), "ok").json.long("removed") ?: 0
 
-    /** `replay` of [id] with [edit], a JSON object or null; returns the `replay` reply (`of`, `id`). */
-    public fun replay(id: Long, edit: String?): Reply {
-        val w = BridgeClient.request("replay").field("id", id)
-        edit?.let { w.name("edit").rawValue(it) }
-        return request(w.endObject().toString(), "replay")
-    }
-
     /**
-     * A body object for a rule or replay: inline (`text` when [bytes] are UTF-8, else `base64`)
+     * A body object for a rule: inline (`text` when [bytes] are UTF-8, else `base64`)
      * while the bodies inlined for the next line stay within [MAX_INLINE_BODY_CHARS] together,
      * leaving room for the rest of the line (a rule can carry a request and a response body), else
      * uploaded first as a blob of this session and named by `{"blob":n,"size":N}`.

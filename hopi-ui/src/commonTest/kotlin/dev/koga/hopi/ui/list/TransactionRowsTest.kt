@@ -179,13 +179,11 @@ class TransactionRowsTest {
     }
 
     @Test
-    fun aRuledOrReplayedRequestIsTagged() {
+    fun aRuledRequestIsTagged() {
         assertEquals(emptyList(), buildRow(complete(1), Redactor.Default).tags)
         assertEquals(listOf("MOCK"), buildRow(complete(1).copy(ruleId = 3, ruleApplied = "delay,mock"), Redactor.Default).tags)
         assertEquals(listOf("FAIL"), ruleTags(failed(1).copy(ruleId = 3, ruleApplied = "delay,fail")))
         assertEquals(listOf("EDIT"), ruleTags(complete(1).copy(ruleId = 3, ruleApplied = "delay,edit-request")))
         assertEquals(listOf("DELAY"), ruleTags(complete(1).copy(ruleId = 3, ruleApplied = "delay")))
-        assertEquals(listOf("REPLAY"), ruleTags(complete(2).copy(replayOf = 1)))
-        assertEquals(listOf("REPLAY", "MOCK"), ruleTags(complete(2).copy(replayOf = 1, ruleId = 3, ruleApplied = "mock")))
     }
 }

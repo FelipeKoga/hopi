@@ -84,17 +84,12 @@ static char kObserverContext;
 
 // Rules. All of it is idle until a rule set is published.
 static _Atomic bool gHasRules;            // a rule set is published: the one load of every no-rule path
-static SEL gTaskSessionSelector;          // -[NSURLSessionTask session]; NULL when rules are off or it failed the self-check
-// Live factory plans plus replays in flight: hook 1 and -suspend look at a task's marks only while
-// this is non-zero.
+// Live factory plans: hook 1 and -suspend look at a task's marks only while this is non-zero.
 static _Atomic int64_t gTaskMarks;
 static _Atomic int64_t gCanInitCalls;
 static hopi_us_exhausted_callback gOnExhausted;
-static hopi_us_replay_callback gOnReplayDone;
 static char kPlanKey;
 static char kDecisionKey;
-static char kReplayKey;
-static char kReplayBoxKey;
 
 static int64_t hopi_us_now_ns(void) { return (int64_t)clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
 
@@ -169,8 +164,6 @@ static bool hopi_us_skips_mime(NSString *mime) {
     int64_t _ruleId;
     NSString *_ruleApplied;
     bool _byProtocol;
-    // The task's session at the end (rules on, byte path), for its replay box; dropped with the bytes.
-    NSURLSession *_session;
 }
 @end
 
@@ -644,15 +637,7 @@ static void hopi_us_finish(NSURLSessionTask *task, HopiUSTask *state, NSError *e
     int64_t sent = task.countOfBytesSent;
     NSURL *current = task.currentRequest.URL;
     NSString *protocol = state->_path == HOPI_US_PATH_BYTES ? hopi_us_protocol_of(task) : nil;
-    // Rules on: the session, for the record's replay box (background tasks take the metadata path).
-    NSURLSession *session = nil;
-    SEL sessionSelector = gTaskSessionSelector;
-    if (sessionSelector != NULL && state->_path == HOPI_US_PATH_BYTES) {
-        id value = ((id (*)(id, SEL))objc_msgSend)(task, sessionSelector);
-        if ([value isKindOfClass:NSURLSession.class]) session = value;
-    }
     os_unfair_lock_lock(&state->_lock);
-    state->_session = session;
     state->_endNs = end;
     state->_response = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
     state->_error = hopi_us_app_error(error);
@@ -772,14 +757,12 @@ static void hopi_us_on_resume(NSURLSessionTask *task) {
         state->_requestBodyKind = HOPI_US_BODY_NONE;
     }
     if (atomic_load_explicit(&gTaskMarks, memory_order_relaxed) > 0) {
-        // A factory's edit or delay plan marks the record; a replay records under its own id.
+        // A factory's edit or delay plan marks the record.
         HopiUSPlan *plan = objc_getAssociatedObject(task, &kPlanKey);
         if ([plan isKindOfClass:HopiUSPlan.class]) {
             state->_ruleId = plan->_rule->_id;
             state->_ruleApplied = plan->_rule->_applied;
         }
-        NSNumber *replay = objc_getAssociatedObject(task, &kReplayKey);
-        if ([replay isKindOfClass:NSNumber.class]) state->_storeId = replay.longLongValue;
     }
 
     os_unfair_lock_lock(&gAttachLock);
@@ -1857,7 +1840,6 @@ void hopi_us_drop_bytes(hopi_us_handle handle) {
     state->_keptBytes = 0;
     state->_uploadBody = nil;
     state->_request = nil;
-    state->_session = nil;
     os_unfair_lock_unlock(&state->_lock);
 }
 
@@ -1873,24 +1855,17 @@ int64_t hopi_us_hits_value(hopi_us_hits hits) { return atomic_load(&((__bridge H
 
 int32_t hopi_us_hits_claim(hopi_us_hits hits, int64_t times) { return hopi_us_claim_hits((__bridge HopiUSHits *)hits, times); }
 
-int32_t hopi_us_rules_enable(hopi_us_exhausted_callback on_exhausted, hopi_us_replay_callback on_replay_done) {
+int32_t hopi_us_rules_enable(hopi_us_exhausted_callback on_exhausted) {
     if (gQueue == nil) return 0;
     static dispatch_once_t once;
     static int32_t result;
     dispatch_once(&once, ^{
         gOnExhausted = on_exhausted;
-        gOnReplayDone = on_replay_done;
         dispatch_queue_attr_t attributes = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0);
         gRuleQueue = dispatch_queue_create("dev.koga.hopi.urlsession-rules", attributes);
         gBackgroundSessionClass = NSClassFromString(@"__NSURLBackgroundSession");
         int32_t bits = 0;
         if (hopi_us_install_session_factory()) bits |= HOPI_US_RULES_SESSIONS;
-        // Replay sends through the task's own session, read by a private accessor: self-checked.
-        Method session = class_getInstanceMethod(NSURLSessionTask.class, NSSelectorFromString(@"session"));
-        if (gBytePath && session != NULL && hopi_us_encoding_is(session, "@16@0:8")) {
-            gTaskSessionSelector = method_getName(session);
-            bits |= HOPI_US_RULES_REPLAY;
-        }
         result = bits;
     });
     return result;
@@ -2045,132 +2020,6 @@ bool hopi_us_ruled_by_protocol(hopi_us_handle handle) {
     bool by = state->_byProtocol;
     os_unfair_lock_unlock(&state->_lock);
     return by;
-}
-
-#pragma mark - Rules: replay
-
-/** Holds a session weakly: what a replay target keeps, so a record never keeps a session alive. */
-@interface HopiUSSessionRef : NSObject {
-@public
-    __weak NSURLSession *_session;
-}
-@end
-
-@implementation HopiUSSessionRef
-@end
-
-/** One per session, as its associated object: the session's replay target (made once, on the capture queue). */
-@interface HopiUSReplayBox : NSObject {
-@public
-    HopiUSSessionRef *_ref;
-    id _target;
-}
-@end
-
-@implementation HopiUSReplayBox
-@end
-
-/**
- * A replayed task's own delegate: response, data, completion and metrics only, so URLSession asks
- * the session's delegate for challenges and redirects, and the app's pinning applies.
- */
-@interface HopiUSReplayDelegate : NSObject <NSURLSessionDataDelegate> {
-@public
-    int64_t _storeId;
-}
-@end
-
-@implementation HopiUSReplayDelegate
-- (void)URLSession:(__unused NSURLSession *)session
-              dataTask:(__unused NSURLSessionDataTask *)dataTask
-    didReceiveResponse:(__unused NSURLResponse *)response
-     completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
-    completionHandler(NSURLSessionResponseAllow);
-}
-
-- (void)URLSession:(__unused NSURLSession *)session dataTask:(__unused NSURLSessionDataTask *)dataTask didReceiveData:(__unused NSData *)data {
-    // The bytes reach the record through the connection hooks; the replay keeps none.
-}
-
-- (void)URLSession:(__unused NSURLSession *)session task:(__unused NSURLSessionTask *)task didFinishCollectingMetrics:(__unused NSURLSessionTaskMetrics *)metrics {
-}
-
-- (void)URLSession:(__unused NSURLSession *)session task:(__unused NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    atomic_fetch_sub(&gTaskMarks, 1);
-    hopi_us_replay_callback callback = gOnReplayDone;
-    if (callback == NULL) return;
-    int64_t storeId = _storeId;
-    NSString *message = error != nil ? [NSString stringWithFormat:@"%@ %ld: %@", error.domain, (long)error.code, error.localizedDescription] : nil;
-    dispatch_async(gQueue, ^{
-        callback(storeId, message.UTF8String);
-    });
-}
-@end
-
-id hopi_us_replay_box(hopi_us_handle handle) {
-    HopiUSTask *state = STATE(handle);
-    os_unfair_lock_lock(&state->_lock);
-    NSURLSession *session = state->_session;
-    os_unfair_lock_unlock(&state->_lock);
-    if (session == nil) return nil;
-    if (gBackgroundSessionClass != nil && [session isKindOfClass:gBackgroundSessionClass]) return nil;
-    HopiUSReplayBox *box = objc_getAssociatedObject(session, &kReplayBoxKey);
-    if (![box isKindOfClass:HopiUSReplayBox.class]) {
-        box = [HopiUSReplayBox new];
-        box->_ref = [HopiUSSessionRef new];
-        box->_ref->_session = session;
-        objc_setAssociatedObject(session, &kReplayBoxKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    return box;
-}
-
-id hopi_us_replay_box_target(id box) { return [box isKindOfClass:HopiUSReplayBox.class] ? ((HopiUSReplayBox *)box)->_target : nil; }
-
-void hopi_us_replay_box_set_target(id box, id target) {
-    if ([box isKindOfClass:HopiUSReplayBox.class]) ((HopiUSReplayBox *)box)->_target = target;
-}
-
-id hopi_us_replay_box_session(id box) { return [box isKindOfClass:HopiUSReplayBox.class] ? ((HopiUSReplayBox *)box)->_ref : nil; }
-
-NSString *hopi_us_replay_refusal(id session_ref) {
-    NSURLSession *session = [session_ref isKindOfClass:HopiUSSessionRef.class] ? ((HopiUSSessionRef *)session_ref)->_session : nil;
-    return session == nil ? @"the session was invalidated or collected" : nil;
-}
-
-NSString *hopi_us_replay(id session_ref, int64_t store_id, NSString *method, NSString *url, NSArray<NSString *> *headers, NSData *body,
-                         NSArray<NSString *> *cross_origin_strip) {
-    NSURLSession *session = [session_ref isKindOfClass:HopiUSSessionRef.class] ? ((HopiUSSessionRef *)session_ref)->_session : nil;
-    if (session == nil) return @"the session was invalidated or collected";
-    NSString *added = hopi_us_session_adds(session, [NSSet setWithArray:cross_origin_strip ?: @[]], nil);
-    if (added != nil) {
-        return [NSString stringWithFormat:@"the session's configuration adds %@ (HTTPAdditionalHeaders), which an edit to another origin cannot remove", added];
-    }
-    NSURL *target = url != nil ? [NSURL URLWithString:url] : nil;
-    if (target == nil) return @"the recorded URL is not a valid URL";
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:target];
-    request.HTTPMethod = method ?: @"GET";
-    for (NSUInteger i = 0; i + 1 < headers.count; i += 2) {
-        // The session computes the length of the body it sends.
-        if ([headers[i] caseInsensitiveCompare:@"Content-Length"] == NSOrderedSame) continue;
-        [request addValue:headers[i + 1] forHTTPHeaderField:headers[i]];
-    }
-    if (body != nil) request.HTTPBody = body;
-    NSURLSessionDataTask *task = nil;
-    @try {
-        task = [session dataTaskWithRequest:request];
-    } @catch (NSException *exception) {
-        // An invalidated session refuses new tasks.
-        return [NSString stringWithFormat:@"the session refused the task: %@", exception.reason];
-    }
-    if (task == nil) return @"the session created no task";
-    HopiUSReplayDelegate *delegate = [HopiUSReplayDelegate new];
-    delegate->_storeId = store_id;
-    task.delegate = delegate;
-    // Hook 1 finds the id while marks exist and records the task under it.
-    atomic_fetch_add(&gTaskMarks, 1);
-    objc_setAssociatedObject(task, &kReplayKey, @(store_id), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [task resume];
-    return nil;
 }
 
 #pragma mark - Test support

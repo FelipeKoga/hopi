@@ -20,8 +20,12 @@ val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?
 // Automatic URLSession capture, iOS only (Android has no URLSession): the real module or its noop.
 val urlSessionModule = if (hopiEnabled) project(":hopi-urlsession") else project(":hopi-urlsession-noop")
 
-// HopiRules (mock, fail, delay, edit, replay), which the rules scenarios call: the real module or its noop.
+// HopiRules (mock, fail, delay, edit), which the rules scenarios call: the real module or its noop.
 val rulesModule = if (hopiEnabled) project(":hopi-rules") else project(":hopi-rules-noop")
+
+// HopiPerf (frames, hangs, CPU, memory), which the perf lab and bench start and Swift installs: the
+// real module or its noop. (On Android the Gradle plugin's `hopi { perf { } }` resolves it per variant.)
+val perfModule = if (hopiEnabled) project(":hopi-perf") else project(":hopi-perf-noop")
 
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
 abstract class GenerateSampleBuildInfo : DefaultTask() {
@@ -78,6 +82,8 @@ kotlin {
             // real or noop: the same API either way.
             export(urlSessionModule)
             export(rulesModule)
+            // HopiPerf.shared.start { … } from Swift; exported, so the real framework keeps the monitors.
+            export(perfModule)
         }
     }
 
@@ -89,6 +95,8 @@ kotlin {
                 implementation(if (hopiEnabled) project(":hopi-ui") else project(":hopi-ui-noop"))
                 // api: the Android app's rules scenarios name HopiRules too, and the iOS framework exports it.
                 api(rulesModule)
+                // api: the iOS framework exports it (HopiPerf.shared from Swift).
+                api(perfModule)
                 implementation(libs.compose.runtime)
                 implementation(libs.compose.foundation)
                 implementation(libs.compose.ui)
@@ -120,8 +128,12 @@ kotlin {
  * capture and none of its rules: no `_hopi_us_` symbol (the rule functions `_hopi_us_rule…`
  * included), no `HopiUS` capture or rule-protocol Objective-C class, no `kfun:dev.koga.hopi.core`
  * symbol (`xcrun nm`, an argument array), and neither the capture and rule queues' labels nor the
- * private selector names in its bytes. With the flag it requires all of them instead (the positive
- * control), so the check is known to see what it looks for. Run it both ways.
+ * private selector names in its bytes. Nor any of the performance monitors: no `_hopi_perf_`
+ * symbol (the C library), no `kfun:dev.koga.hopi.perf.internal` or `kfun:dev.koga.hopi.core.perf`
+ * symbol (the noop's own `HopiPerf` lives in `dev.koga.hopi.perf` and is expected), no
+ * `HopiPerfCadence` class and no `hopi-perf-hang` thread name. With the flag it requires all of
+ * them instead (the positive control), so the check is known to see what it looks for. Run it
+ * both ways.
  */
 abstract class VerifyIosCaptureSelection : DefaultTask() {
     @get:InputFile
@@ -147,17 +159,28 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
         val captureClasses = symbols.count { "HopiUSTask" in it || "HopiUSObserver" in it }
         val ruleSymbols = symbols.count { "HopiUSRuleProtocol" in it || "_hopi_us_rule" in it }
         val coreSymbols = symbols.count { "kfun:dev.koga.hopi.core" in it }
+        val perfNative = symbols.count { "_hopi_perf_" in it }
+        val perfKotlin = symbols.count { "kfun:dev.koga.hopi.perf.internal" in it || "kfun:dev.koga.hopi.core.perf" in it }
+        val perfClasses = symbols.count { "HopiPerfCadence" in it }
         val bytes = file.readBytes()
-        // C strings, NUL included: the capture queue's label and the private selectors' names.
+        // C strings, NUL included: the capture queue's label, the private selectors' names, the hang watchdog's thread name.
         val strings = listOf("dev.koga.hopi.urlsession-capture", "dev.koga.hopi.urlsession-rules", "_didReceiveData:", "_didFinishWithError:")
             .associateWith { contains(bytes, it.toByteArray() + 0) }
-        val found = "$nativeSymbols _hopi_us_ symbols, $captureClasses capture classes, $ruleSymbols rule symbols, $coreSymbols core symbols, strings $strings"
+        // A Kotlin string literal is stored as UTF-16, not as a C string.
+        val perfStrings = mapOf("hopi-perf-hang" to contains(bytes, "hopi-perf-hang".toByteArray(Charsets.UTF_16LE)))
+        val found = "$nativeSymbols _hopi_us_ symbols, $captureClasses capture classes, $ruleSymbols rule symbols, $coreSymbols core symbols, strings $strings; " +
+            "$perfNative _hopi_perf_ symbols, $perfKotlin perf Kotlin symbols, $perfClasses perf classes, strings $perfStrings"
+        val perfCounts = listOf(perfNative, perfKotlin, perfClasses)
         if (real.get()) {
-            if (nativeSymbols == 0 || captureClasses == 0 || ruleSymbols == 0 || coreSymbols == 0 || strings.values.any { !it }) {
-                throw GradleException("The -Phopi.enabled=true framework lacks the capture code (the check would not see it): $found")
+            if (nativeSymbols == 0 || captureClasses == 0 || ruleSymbols == 0 || coreSymbols == 0 || strings.values.any { !it } ||
+                perfCounts.any { it == 0 } || perfStrings.values.any { !it }
+            ) {
+                throw GradleException("The -Phopi.enabled=true framework lacks the capture or perf code (the check would not see it): $found")
             }
-        } else if (nativeSymbols != 0 || captureClasses != 0 || ruleSymbols != 0 || coreSymbols != 0 || strings.values.any { it }) {
-            throw GradleException("The framework built without -Phopi.enabled=true holds URLSession capture code: $found")
+        } else if (nativeSymbols != 0 || captureClasses != 0 || ruleSymbols != 0 || coreSymbols != 0 || strings.values.any { it } ||
+            perfCounts.any { it != 0 } || perfStrings.values.any { it }
+        ) {
+            throw GradleException("The framework built without -Phopi.enabled=true holds URLSession capture or perf code: $found")
         }
         logger.lifecycle("${file.name} (${if (real.get()) "real" else "noop"}): $found")
     }
@@ -174,7 +197,7 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
 // The release framework, simulator slice: what an App Store build links, minus the device slice.
 tasks.register<VerifyIosCaptureSelection>("verifyIosReleaseExcludesCapture") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Checks that the iOS release framework holds no URLSession capture code (with -Phopi.enabled=true: that it does)."
+    description = "Checks that the iOS release framework holds no URLSession capture or perf code (with -Phopi.enabled=true: that it does)."
     val link = tasks.named<KotlinNativeLink>("linkReleaseFrameworkIosSimulatorArm64")
     dependsOn(link)
     binary.set(link.flatMap { it.outputFile }.map { project.layout.projectDirectory.file(it.resolve("Shared").absolutePath) })

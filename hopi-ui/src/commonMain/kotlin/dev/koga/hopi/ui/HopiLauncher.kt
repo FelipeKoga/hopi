@@ -9,7 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -51,7 +51,12 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import dev.koga.hopi.core.perf.PerfController
+import dev.koga.hopi.core.perf.PerfHook
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.ui.perf.PerfHud
+import dev.koga.hopi.ui.perf.PerfHudState
+import dev.koga.hopi.ui.platform.PerfLauncherAnchor
 import dev.koga.hopi.ui.component.Icon
 import dev.koga.hopi.ui.theme.DarkColors
 import dev.koga.hopi.ui.theme.HopiIcons
@@ -94,6 +99,10 @@ internal fun HopiLauncher(
     // transition redraws and never recomposes.
     val screen = remember { MutableTransitionState(open) }
     val focusManager = LocalFocusManager.current
+    // Read once: an app without hopi-perf loads core's PerfHook object and nothing else.
+    val perf = remember { PerfHook.controller }
+    if (perf != null) PerfLauncherAnchor()
+    val toggleHud = remember(perf) { if (perf == null) null else { { PerfHudState.shown = !PerfHudState.shown } } }
     if (recompositionProbe != null) SideEffect(recompositionProbe)
     Layout(
         contents = listOf(
@@ -120,6 +129,7 @@ internal fun HopiLauncher(
                 )
             },
             {
+                if (!open && perf != null) PerfHudHost(perf)
                 if (!open) {
                     LauncherButton(
                         x,
@@ -130,6 +140,7 @@ internal fun HopiLauncher(
                             open = true
                             screen.targetState = true
                         },
+                        toggleHud,
                         recompositionProbe,
                     )
                 }
@@ -182,6 +193,8 @@ private fun LauncherButton(
     x: MutableState<Float>,
     y: MutableState<Float>,
     onOpen: () -> Unit,
+    /** A long press toggles the perf HUD; null (no perf controller) leaves the button a plain one. */
+    onLongPress: (() -> Unit)?,
     recompositionProbe: (() -> Unit)?,
 ) {
     if (recompositionProbe != null) SideEffect(recompositionProbe)
@@ -228,13 +241,22 @@ private fun LauncherButton(
                     }
                 }
                 .semantics { contentDescription = LAUNCHER_DESCRIPTION }
-                .clickable(role = Role.Button, onClick = onOpen),
+                .combinedClickable(role = Role.Button, onLongClickLabel = if (onLongPress != null) HUD_TOGGLE_LABEL else null, onLongClick = onLongPress, onClick = onOpen),
             contentAlignment = Alignment.Center,
         ) {
             Icon(HopiIcons.Traffic, colors.onText, size = 22.dp)
         }
     }
 }
+
+/** The HUD, composed only while shown: its own state reads, so toggling it never recomposes the button. */
+@Composable
+private fun PerfHudHost(perf: PerfController) {
+    if (PerfHudState.shown) PerfHud(perf)
+}
+
+/** What a long press on the button does, for screen readers. */
+internal const val HUD_TOGGLE_LABEL: String = "Show or hide the performance HUD"
 
 /** 48 dp: the minimum touch target, and small enough to stay out of the way. */
 private val BUTTON_SIZE = 48.dp

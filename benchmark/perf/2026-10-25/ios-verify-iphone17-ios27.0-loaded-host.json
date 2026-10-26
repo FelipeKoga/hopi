@@ -1,0 +1,272 @@
+{
+ "platform": "ios",
+ "done": true,
+ "snapshotExit": 0,
+ "snapshotError": "",
+ "hangsExit": 0,
+ "lab": [
+  {
+   "perfLab": "start",
+   "build": "real",
+   "heartbeat": false,
+   "running": "Frames,Hangs,Cpu,Memory"
+  },
+  {
+   "perfLab": "jank",
+   "blockMs": 20,
+   "frames": 30,
+   "from": 1792983227899,
+   "to": 1792983228976
+  },
+  {
+   "perfLab": "jank",
+   "blockMs": 50,
+   "frames": 30,
+   "from": 1792983230480,
+   "to": 1792983232423
+  },
+  {
+   "perfLab": "jank",
+   "blockMs": 100,
+   "frames": 30,
+   "from": 1792983233925,
+   "to": 1792983237424
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 200,
+   "actualMs": 202,
+   "from": 1792983238924,
+   "to": 1792983239126
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 300,
+   "actualMs": 302,
+   "from": 1792983240629,
+   "to": 1792983240931
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 1000,
+   "actualMs": 1003,
+   "from": 1792983242433,
+   "to": 1792983243436
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 3000,
+   "actualMs": 3012,
+   "from": 1792983244939,
+   "to": 1792983247951
+  },
+  {
+   "perfLab": "hang",
+   "fn": "burn",
+   "ms": 600,
+   "actualMs": 600,
+   "from": 1792983249454,
+   "to": 1792983250054
+  },
+  {
+   "perfLab": "dialog",
+   "ms": 5000,
+   "from": 1792983251556,
+   "to": 1792983256559
+  },
+  {
+   "perfLab": "cpu",
+   "threads": 2,
+   "ms": 5000,
+   "from": 1792983258061,
+   "to": 1792983263563
+  },
+  {
+   "perfLab": "alloc",
+   "kind": "heap",
+   "mb": 64,
+   "held": 67108864,
+   "from": 1792983265065,
+   "to": 1792983269075
+  },
+  {
+   "perfLab": "alloc",
+   "kind": "native",
+   "mb": 64,
+   "from": 1792983270578,
+   "to": 1792983274594
+  },
+  {
+   "perfLab": "memory",
+   "posted": true,
+   "at": 1792983276097
+  },
+  {
+   "perfLab": "done",
+   "running": "Frames,Hangs,Cpu,Memory",
+   "at": 1792983277653
+  }
+ ],
+ "references": {},
+ "checks": [
+  {
+   "check": "jank 20 ms x30: no stall",
+   "ok": true,
+   "seen": "0 stalls",
+   "expected": "<= 2"
+  },
+  {
+   "check": "jank 50 ms x30: stalls",
+   "ok": false,
+   "seen": "24 stalls, worst 54 ms",
+   "expected": ">= 28"
+  },
+  {
+   "check": "jank 100 ms x30: stalls",
+   "ok": false,
+   "seen": "27 stalls, worst 104 ms",
+   "expected": ">= 28"
+  },
+  {
+   "check": "hang hang 200 ms: none",
+   "ok": true,
+   "seen": "0 hangs",
+   "expected": "0 (under the 250 ms threshold)"
+  },
+  {
+   "check": "hang hang 300 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 376 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang hang 300 ms: duration",
+   "ok": false,
+   "seen": "376 ms",
+   "expected": "302 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang hang 300 ms: stack names PerfLab#hang",
+   "ok": true,
+   "seen": "1 stacks, captureUs [84]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang hang 1000 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 1003 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang hang 1000 ms: duration",
+   "ok": true,
+   "seen": "1003 ms",
+   "expected": "1003 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang hang 1000 ms: stack names PerfLab#hang",
+   "ok": true,
+   "seen": "2 stacks, captureUs [169, 57]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang hang 3000 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 3012 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang hang 3000 ms: duration",
+   "ok": true,
+   "seen": "3012 ms",
+   "expected": "3012 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang hang 3000 ms: stack names PerfLab#hang",
+   "ok": true,
+   "seen": "3 stacks, captureUs [52, 55, 55]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang burn 600 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 600 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang burn 600 ms: duration",
+   "ok": true,
+   "seen": "600 ms",
+   "expected": "600 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang burn 600 ms: stack names PerfLab#burn",
+   "ok": true,
+   "seen": "2 stacks, captureUs [80, 60]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "dialog 5 s: no fake jank",
+   "ok": true,
+   "seen": "0 janky frames inside",
+   "expected": "<= 1"
+  },
+  {
+   "check": "cpu 2 threads x 5 s: process %",
+   "ok": false,
+   "seen": "163.3 % over 3 samples; /proc None % (whole step)",
+   "expected": "200 +-15 %, of one core"
+  },
+  {
+   "check": "alloc heap 64 MB: resident",
+   "ok": true,
+   "seen": "+63.6 MB",
+   "expected": "+64 MB +-10 %"
+  },
+  {
+   "check": "alloc native 64 MB: resident",
+   "ok": true,
+   "seen": "+64.1 MB",
+   "expected": "+64 MB +-10 %"
+  },
+  {
+   "check": "memory events",
+   "ok": true,
+   "seen": "1: [('warning', None)]; sent []",
+   "expected": ">= 1"
+  },
+  {
+   "check": "summary: hangs counted",
+   "ok": null,
+   "seen": {
+    "count": 5,
+    "totalMs": 6501,
+    "worstMs": 3012,
+    "debugger": 0
+   },
+   "expected": "for the record"
+  },
+  {
+   "check": "summary: frames",
+   "ok": null,
+   "seen": {
+    "count": 0,
+    "slow": 0,
+    "janky": 0,
+    "frozen": 0,
+    "excluded": 0,
+    "firstFrames": 0,
+    "metricsLost": 0,
+    "p50Ms": null,
+    "p90Ms": null,
+    "p99Ms": null,
+    "maxMs": null
+   },
+   "expected": "for the record"
+  }
+ ]
+}

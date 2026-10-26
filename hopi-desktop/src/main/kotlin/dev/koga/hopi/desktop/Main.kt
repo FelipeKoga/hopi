@@ -33,6 +33,7 @@ public fun main() {
         val window = rememberWindowState(width = 1280.dp, height = 820.dp)
         val panes = rememberHopiPanesState()
         val rules = remember { RulesPanelState() }
+        val perf = remember { PerfPanelState() }
         Window(
             onCloseRequest = {
                 viewer.close()
@@ -62,20 +63,23 @@ public fun main() {
                     Item("New delay…", onClick = { rules.edit(RuleForm(FormKind.Delay)) })
                     Item("New edit…", onClick = { rules.edit(RuleForm(FormKind.Edit)) })
                 }
+                Menu("Perf") {
+                    Item("Perf panel   ${Shortcut.Perf.keys}", onClick = perf::toggle)
+                }
                 Menu("Connection") {
                     Item("Reconnect   ${Shortcut.Reconnect.keys}", onClick = viewer::reconnect)
                     Item("Disconnect", onClick = viewer::disconnect)
                     Item("Refresh devices", onClick = viewer::refresh)
                 }
             }
-            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody)
+            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody, perf = perf)
         }
     }
 }
 
 /**
- * The native open dialog for a rule or replay body; null when cancelled. A file over the 1 MiB a
- * rule body may hold is not read: the panel says so instead.
+ * The native open dialog for a rule body; null when cancelled. A file over the 1 MiB a rule body
+ * may hold is not read: the panel says so instead.
  */
 private fun bodyDialog(owner: Frame, rules: RulesPanelState): BodyFile? {
     val dialog = FileDialog(owner, "Choose a body file", FileDialog.LOAD)

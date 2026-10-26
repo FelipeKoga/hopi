@@ -104,7 +104,7 @@ class BridgeSessionTest {
         store.awaitIds(1)
         val f = fields(serve(store).request("{\"cmd\":\"hello\"}"))
         assertEquals(
-            mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 3L, "rules" to true),
+            mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 3L, "rules" to true, "perf" to false, "perfControl" to false),
             f,
         )
     }

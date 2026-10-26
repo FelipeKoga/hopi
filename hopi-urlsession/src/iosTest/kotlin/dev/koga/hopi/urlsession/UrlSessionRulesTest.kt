@@ -16,8 +16,6 @@ import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchSpec
 import dev.koga.hopi.core.rules.MockSpec
 import dev.koga.hopi.core.rules.Predicate
-import dev.koga.hopi.core.rules.ReplayResult
-import dev.koga.hopi.core.rules.Replays
 import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.RuleBody
 import dev.koga.hopi.core.rules.RuleEngine
@@ -81,8 +79,8 @@ import platform.Foundation.uploadTaskWithRequest
 
 /**
  * Rules on URLSession (docs/design/rules.md, "URLSession") against the loopback server: mock and
- * fail through the rule protocol, delays and request edits through the task factories, replay
- * through the original session, and the C matcher against the shared vectors.
+ * fail through the rule protocol, delays and request edits through the task factories, and the C
+ * matcher against the shared vectors.
  */
 @OptIn(ExperimentalForeignApi::class)
 class UrlSessionRulesTest {
@@ -115,17 +113,6 @@ class UrlSessionRulesTest {
     private fun HopiFxCompletion.text(): String = data!!.toBytes().decodeToString()
 
     private fun requests(path: String): Long = hopi_fx_server_requests(path)
-
-    private fun awaitRecord(id: Long): HttpTransaction = runBlocking {
-        var record: HttpTransaction? = null
-        withTimeoutOrNull(15_000) {
-            while (record == null) {
-                record = Capture.store.get(id)?.takeIf { it.state != TransactionState.Pending }
-                if (record == null) delay(20)
-            }
-        }
-        record ?: fail("no terminal record $id")
-    }
 
     private fun awaitEmptyState() = runBlocking {
         withTimeoutOrNull(5_000) { while (RuleEngine.state !== RuleState.EMPTY) delay(10) } ?: fail("the rule state never returned to EMPTY")
@@ -501,25 +488,6 @@ class UrlSessionRulesTest {
     }
 
     @Test
-    fun aReplayToAnotherOriginOnASessionThatAddsACredentialFailsBeforeSending() {
-        val session = sessionAddingAuthorization()
-        val url = Capture.url("/bytes?n=5")
-        val watch = Watch(url)
-        val done = HopiFxCompletion()
-        session.dataTaskWithURL(nsUrl(url), done.dataHandler()!!).resume()
-        done.awaitDone()
-        val original = watch.single()
-        val started = assertIs<ReplayResult.Started>(Replays.start(Capture.store, original.id, RequestEdit(port = 1)))
-        val replay = awaitRecord(started.id)
-        assertEquals(TransactionState.Failed, replay.state)
-        assertTrue("HTTPAdditionalHeaders" in replay.error.orEmpty(), replay.error)
-        // On the same origin the replay goes through with the session's header, as the original did.
-        val same = assertIs<ReplayResult.Started>(Replays.start(Capture.store, original.id, RequestEdit(setHeaders = listOf("X-Replay" to "1"))))
-        assertEquals(TransactionState.Complete, awaitRecord(same.id).state)
-        session.finishTasksAndInvalidate()
-    }
-
-    @Test
     fun aHeaderPredicateMatchesEachValueOfARepeatedHeader() {
         val id = add(
             RuleSpec(
@@ -547,11 +515,9 @@ class UrlSessionRulesTest {
     }
 
     @Test
-    fun aReplayOrAnotherSourcesRuleDoesNotRebuildTheNativeSet() {
+    fun anotherSourcesRuleDoesNotRebuildTheNativeSet() {
         mock("/mirror")
         val before = UrlSessionRules.publishes
-        assertTrue(RuleEngine.beginReplay())
-        RuleEngine.endReplay()
         add(RuleSpec(MatchSpec(path = "/other", sources = setOf(RuleSource.OKHTTP)), mock = MockSpec(500)))
         assertEquals(before, UrlSessionRules.publishes, "the URLSession rules did not change")
         mock("/mirror-2")
@@ -635,66 +601,7 @@ class UrlSessionRulesTest {
     }
 
     @Test
-    fun aReplayGoesThroughTheOriginalSessionAndIsMarked() {
-        val session = session(SessionKind.Default)
-        val url = Capture.url("/bytes?n=33")
-        val watch = Watch(url)
-        val done = HopiFxCompletion()
-        session.dataTaskWithURL(nsUrl(url), done.dataHandler()!!).resume()
-        done.awaitDone()
-        val original = watch.single()
-        assertNotNull(original.replayTarget, "a local session's record can be replayed")
-        val before = requests("/bytes")
-        val started = assertIs<ReplayResult.Started>(Replays.start(Capture.store, original.id, null))
-        val replay = awaitRecord(started.id)
-        assertEquals(original.id, replay.replayOf)
-        assertEquals(200, replay.responseCode)
-        assertContentEquals(expectedBytes(33), replay.responseBody!!.bytes)
-        assertEquals(before + 1, requests("/bytes"))
-        assertTrue(RuleEngine.state === RuleState.EMPTY, "the replay ended")
-        session.finishTasksAndInvalidate()
-    }
-
-    @Test
-    fun aReplayOfAMockedEndpointIsMockedAgain() {
-        val id = mock("/m-replay")
-        val url = Capture.url("/m-replay")
-        val watch = Watch(url)
-        val done = HopiFxCompletion()
-        session(SessionKind.Ephemeral).dataTaskWithURL(nsUrl(url), done.dataHandler()!!).resume()
-        done.awaitDone()
-        val original = watch.single()
-        val started = assertIs<ReplayResult.Started>(Replays.start(Capture.store, original.id, null))
-        val replay = awaitRecord(started.id)
-        assertEquals(original.id, replay.replayOf)
-        assertEquals(id, replay.ruleId)
-        assertEquals("mocked", replay.responseBody!!.bytes.decodeToString())
-    }
-
-    @Test
-    fun aReplayOfAnInvalidatedSessionEndsInAFailedRecord() {
-        val session = session(SessionKind.Ephemeral)
-        val url = Capture.url("/bytes?n=3")
-        val watch = Watch(url)
-        val done = HopiFxCompletion()
-        session.dataTaskWithURL(nsUrl(url), done.dataHandler()!!).resume()
-        done.awaitDone()
-        val original = watch.single()
-        session.invalidateAndCancel()
-        when (val result = Replays.start(Capture.store, original.id, null)) {
-            // The session may already be gone: refused up front.
-            is ReplayResult.Refused -> assertTrue("cannot be replayed" in result.error.message, result.error.message)
-            is ReplayResult.Started -> {
-                val replay = awaitRecord(result.id)
-                assertEquals(TransactionState.Failed, replay.state)
-                assertEquals(original.id, replay.replayOf)
-            }
-        }
-        assertTrue(RuleEngine.state === RuleState.EMPTY)
-    }
-
-    @Test
-    fun ktorDarwinIsMockedAndReplayedAsAUrlSessionClient() = runBlocking {
+    fun ktorDarwinIsMockedAsAUrlSessionClient() = runBlocking {
         val id = mock("/m-ktor", headers = listOf("Content-Type" to "text/plain"))
         HttpClient(Darwin) { install(Hopi) { logSink = HopiLogSink.Off } }.use { client ->
             val url = Capture.url("/m-ktor")
@@ -703,16 +610,6 @@ class UrlSessionRulesTest {
             val tx = watch.single()
             assertEquals(TransactionSource.URL_SESSION, tx.source)
             assertEquals(id, tx.ruleId)
-            RuleEngine.clear()
-            // Replay through Ktor Darwin's own session and delegate, now real.
-            val real = Capture.url("/bytes?n=21")
-            val realWatch = Watch(real)
-            client.get(real).bodyAsText()
-            val record = realWatch.single()
-            val started = assertIs<ReplayResult.Started>(Replays.start(Capture.store, record.id, null))
-            val replay = awaitRecord(started.id)
-            assertEquals(TransactionState.Complete, replay.state, replay.error)
-            assertContentEquals(expectedBytes(21), replay.responseBody!!.bytes)
         }
     }
 }

@@ -47,11 +47,8 @@ internal object HopiIcons {
     /** A wand: a made-up response from this one. */
     val Mock by lazy { icon("Mock", "M15 4V2", "M15 16v-2", "M8 9h2", "M20 9h2", "M17.8 11.8L19 13", "M17.8 6.2L19 5", "M3 21l9-9", "M12.2 6.2L11 5") }
 
-    /** A counter-clockwise arrow: send it again. */
-    val Replay by lazy { icon("Replay", "M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5") }
-
-    /** A pencil: change, then send. */
-    val Edit by lazy { icon("Edit", "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5L2 22l1.5-5.5z") }
+    /** A pulse: the performance monitors. */
+    val Perf by lazy { icon("Perf", "M22 12h-4l-3 9L9 3l-3 9H2") }
 
     /** Up and down arrows: traffic in both directions, the launcher's glyph. */
     val Traffic by lazy { icon("Traffic", "M7 3v18", "M3 7l4-4 4 4", "M17 21V3", "M21 17l-4 4-4-4") }

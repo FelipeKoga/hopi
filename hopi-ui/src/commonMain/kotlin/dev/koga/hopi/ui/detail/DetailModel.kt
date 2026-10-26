@@ -72,8 +72,7 @@ internal class ExchangeView(
     val gone: Boolean = false,
 )
 
-/** [opens]: the transaction the value links to ("Replay of #42"), or null. */
-internal class OverviewField(val label: String, val value: String, val opens: Long? = null)
+internal class OverviewField(val label: String, val value: String)
 
 /** The detail screen's content for one transaction snapshot. */
 internal class DetailModel(
@@ -205,7 +204,6 @@ private fun overview(transaction: HttpTransaction, url: String, redactor: Redact
     transaction.ruleId?.let { id ->
         fields += OverviewField("Rule", "#$id" + (transaction.ruleApplied?.let { ": " + it.replace(",", ", ") } ?: ""))
     }
-    transaction.replayOf?.let { fields += OverviewField("Replay of", "#$it", opens = it) }
     fields += OverviewField("Request size", sizeText(transaction.requestBody))
     if (transaction.state == TransactionState.Complete) {
         fields += OverviewField("Response size", sizeText(transaction.responseBody))

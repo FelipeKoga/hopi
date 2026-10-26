@@ -1,13 +1,9 @@
 package dev.koga.hopi.ktor
 
-import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.rules.CompiledRule
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.RequestEdits
 import dev.koga.hopi.core.rules.ResponseEdit
@@ -24,9 +20,7 @@ import io.ktor.client.request.HttpRequest
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
-import io.ktor.client.request.request
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HeadersBuilder
@@ -38,7 +32,6 @@ import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.encodedPath
 import io.ktor.http.takeFrom
-import io.ktor.util.AttributeKey
 import io.ktor.util.date.GMTDate
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
@@ -50,37 +43,11 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 // Rules on the Ktor plugin (docs/design/rules.md, "Ktor plugin"). Everything here runs only when
 // the rule state is not EMPTY; the plugin's no-rule path never reaches this file.
-
-/** The replay hand-off of a request [KtorReplayTarget] sends, read only while the rule state is not EMPTY. */
-internal val ReplayHandoffKey = AttributeKey<ReplayHandoff>("HopiReplayHandoff")
-
-/** The headers [KtorReplayTarget] seeded a replay's builder with, read with [ReplayHandoffKey]. */
-internal val ReplayHeadersKey = AttributeKey<List<Pair<String, String>>>("HopiReplayHeaders")
-
-/**
- * A replayed request's headers at Monitoring, after the client's plugins ran again on the recorded
- * ones, which already hold what they set the first time: a plugin that appends unconditionally (a
- * signature, a correlation id) has appended a second value. For each recorded name whose values now
- * start with the recorded ones and go on, the values after them go, so the request is sent as it was
- * recorded, as OkHttp's replay starts again at Hopi's position; a name a plugin replaced (`Auth`
- * removes `Authorization` and sets a fresh token) or did not touch is left as the plugins made it.
- */
-internal fun dropReappendedHeaders(request: HttpRequestBuilder, seeded: List<Pair<String, String>>) {
-    val byName = LinkedHashMap<String, MutableList<String>>()
-    for ((name, value) in seeded) byName.getOrPut(name.lowercase()) { ArrayList(1) } += value
-    for ((name, recorded) in byName) {
-        val now = request.headers.getAll(name) ?: continue
-        if (now.size <= recorded.size || now.subList(0, recorded.size) != recorded) continue
-        request.headers.remove(name)
-        for (value in recorded) request.headers.append(name, value)
-    }
-}
 
 /**
  * A [RuleRequest] over the builder and its content, read as the engine will send them. The scheme
@@ -183,9 +150,6 @@ internal fun failure(kind: FailKind, client: HttpClient, request: HttpRequestBui
 
 /** `reset` and `unknown-host` as the platform's own socket exceptions (`java.net` on the JVM and Android). */
 internal expect fun platformFailure(kind: FailKind, host: String): Throwable
-
-/** A weak reference: what a replay target holds its client by. */
-internal expect fun <T : Any> weakReference(value: T): () -> T?
 
 /**
  * A call built by Hopi rather than by an engine: a mock, from request and response data, or an
@@ -302,48 +266,3 @@ internal suspend fun drainUnsent(content: OutgoingContent) {
 
 /** What a ruled exchange carries to the response hooks: the rule, and whether its response is Hopi's own. */
 internal class RuleApplication(val rule: CompiledRule, val mocked: Boolean, val execution: Job)
-
-/**
- * Replays a Ktor record through the client that sent it (docs/design/rules.md, "Replay"): one per
- * plugin installation, holding the client weakly. The request runs in the client's own scope, so
- * its plugins (`Auth`, `HttpRequestRetry`, ...) run again, and the plugin records it under the
- * hand-off's id, after dropping what a plugin appended a second time ([dropReappendedHeaders]).
- */
-internal class KtorReplayTarget(client: HttpClient) : ReplayTarget {
-    private val client = weakReference(client)
-
-    override val source: String get() = TransactionSource.KTOR
-
-    override fun refusal(): String? {
-        val client = client() ?: return "the client was collected"
-        return if (client.isActive) null else "the client was closed"
-    }
-
-    @OptIn(InternalAPI::class)
-    override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-        val client = client() ?: throw IllegalStateException("the client was collected")
-        val job = client.launch {
-            client.request {
-                method = HttpMethod.parse(request.method)
-                url.takeFrom(request.url)
-                val seeded = request.headers.filterNot { (name, _) ->
-                    name.equals(HttpHeaders.ContentType, ignoreCase = true) || name.equals(HttpHeaders.ContentLength, ignoreCase = true)
-                }
-                for ((name, value) in seeded) headers.append(name, value)
-                attributes.put(ReplayHeadersKey, seeded)
-                request.body?.let { bytes ->
-                    body = ByteArrayContent(bytes, request.contentType?.let { runCatching { ContentType.parse(it) }.getOrNull() })
-                    bodyType = null
-                }
-                attributes.put(ReplayHandoffKey, handoff)
-            }.bodyAsChannel().discard()
-        }
-        job.invokeOnCompletion { cause -> handoff.finish(cause?.let(::describeReplayFailure)) }
-    }
-
-    private fun describeReplayFailure(cause: Throwable): String {
-        val name = cause::class.simpleName ?: "Throwable"
-        val message = cause.message
-        return if (message.isNullOrEmpty()) name else "$name: $message"
-    }
-}

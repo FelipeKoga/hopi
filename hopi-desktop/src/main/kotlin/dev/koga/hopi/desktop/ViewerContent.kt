@@ -27,7 +27,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +39,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.connect.Platform
-import dev.koga.hopi.connect.RemoteSession
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.desktop.HopiDesktopTheme
@@ -53,12 +51,6 @@ import dev.koga.hopi.ui.desktop.rememberHopiPanesState
 import java.nio.file.Path
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.ExecutionException
-import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.future.await
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 internal object ViewerTags {
     const val ROOT = "viewer-root"
@@ -71,7 +63,7 @@ internal object ViewerTags {
 /**
  * The viewer window's content: the target picker, the inspector's list and detail side by side
  * ([HopiPanes] over the session's own store), the rules panel beside them while open
- * ([RulesPanel]) and a status bar. Every shortcut ([Shortcut]) is handled here, so it works from
+ * ([RulesPanel]) and the perf panel ([PerfPanel]) beside them while open, and a status bar. Every shortcut ([Shortcut]) is handled here, so it works from
  * the search field too; the list's arrow and Enter keys stay with a rules field that has focus.
  * [chooseExportFile] asks where to save and [chooseBodyFile] which body file to send (native
  * dialogs in the app, fixed paths in tests).
@@ -84,6 +76,7 @@ internal fun ViewerContent(
     panes: HopiPanesState = rememberHopiPanesState(),
     rules: RulesPanelState = remember { RulesPanelState() },
     chooseBodyFile: () -> BodyFile? = { null },
+    perf: PerfPanelState = remember { PerfPanelState() },
 ) {
     HopiDesktopTheme {
         val colors = hopiDesktopColors
@@ -92,7 +85,6 @@ internal fun ViewerContent(
         val rootFocus = remember { FocusRequester() }
         var appFieldFocused by remember { mutableStateOf(false) }
         var rulesFocused by remember { mutableStateOf(false) }
-        val scope = rememberCoroutineScope()
 
         fun export(format: ExportFormat) {
             chooseExportFile(format, exportFileName(status, format))?.let { viewer.export(format, it) }
@@ -123,6 +115,7 @@ internal fun ViewerContent(
                         Shortcut.ExportNdjson -> export(ExportFormat.Ndjson)
                         Shortcut.Reconnect -> viewer.reconnect()
                         Shortcut.Rules -> rules.toggle()
+                        Shortcut.Perf -> perf.toggle()
                         null -> return@onPreviewKeyEvent false
                     }
                     true
@@ -142,8 +135,6 @@ internal fun ViewerContent(
                         val paneRules = remember(current, remoteRules.supported) {
                             HopiPanesRules(
                                 mockThis = { rules.edit(RuleForm.mockOf(it)) },
-                                replay = { transaction -> scope.launch { replay(viewer, current, panes, transaction.id) } },
-                                editAndReplay = { rules.edit(RuleForm.replayOf(it)) },
                                 unavailable = if (remoteRules.supported) null else "this app's Hopi does not support rules",
                             )
                         }
@@ -156,9 +147,12 @@ internal fun ViewerContent(
                         current,
                         rules,
                         chooseBodyFile,
-                        onReplayed = { id -> current?.let { scope.launch { selectWhenRecorded(it, panes, id) } } },
                         modifier = Modifier.width(RULES_PANEL_WIDTH).onFocusChanged { rulesFocused = it.hasFocus },
                     )
+                }
+                if (perf.open) {
+                    Box(Modifier.fillMaxHeight().width(1.dp).background(colors.border))
+                    PerfPanel(current, perf, modifier = Modifier.width(PERF_PANEL_WIDTH))
                 }
             }
             StatusBar(viewer, status)
@@ -338,25 +332,4 @@ private val LIST_KEYS = setOf(Shortcut.Next, Shortcut.Previous, Shortcut.Open, S
 
 private val RULES_PANEL_WIDTH = 420.dp
 
-/** "Replay": the app re-sends [id] through its own client; the new record is selected once the tail brings it. */
-private suspend fun replay(viewer: Viewer, session: RemoteSession, panes: HopiPanesState, id: Long) {
-    viewer.notify(
-        try {
-            val newId = session.replay(id).await()
-            selectWhenRecorded(session, panes, newId)
-            "Replaying #$id as #$newId"
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            "Replay refused: " + ((e as? ExecutionException)?.cause ?: e).message
-        },
-    )
-}
-
-/** Selects [id] when the tail brings it; a replay always ends in a record, but a lost link gives up after a while. */
-private suspend fun selectWhenRecorded(session: RemoteSession, panes: HopiPanesState, id: Long) {
-    val found = withTimeoutOrNull(REPLAY_WAIT_MS) { session.store.value.transactions.first { list -> list.any { it.id == id } } }
-    if (found != null) panes.selectedId = id
-}
-
-private const val REPLAY_WAIT_MS = 30_000L
+private val PERF_PANEL_WIDTH = 440.dp

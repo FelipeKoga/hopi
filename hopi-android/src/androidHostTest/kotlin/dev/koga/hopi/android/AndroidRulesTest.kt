@@ -10,8 +10,6 @@ import dev.koga.hopi.core.rules.EditSpec
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchShorthand
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.ReplayResult
-import dev.koga.hopi.core.rules.Replays
 import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.ResponseEdit
 import dev.koga.hopi.core.rules.RuleBody
@@ -19,7 +17,6 @@ import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleSpec
-import dev.koga.hopi.core.rules.RuleState
 import dev.koga.hopi.core.store.HopiStore
 import java.net.InetAddress
 import okhttp3.MediaType.Companion.toMediaType
@@ -34,12 +31,9 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -100,7 +94,6 @@ class AndroidRulesTest {
         assertNull(record.ruleId)
         assertNull(record.ruleApplied)
         assertEquals("HTTP/1.1", record.protocol)
-        assertNotNull(record.replayTarget)
     }
 
     @Test
@@ -291,45 +284,6 @@ class AndroidRulesTest {
         assertNull(one().ruleId)
     }
 
-    @Test
-    fun recordersWithRulesOffOfferNoReplay() {
-        // Such a recorder never reads a replay's hand-off: a replay would be recorded unmarked and
-        // its promised record would fail. So the record offers none, and a replay is refused.
-        runScenario("rule.okhttp", store, server.base, extra = mapOf("path" to "/json", "rules" to false))
-        runScenario("rule.url", store, server.base, extra = mapOf("path" to "/json", "rules" to false))
-        val records = store.awaitTerminal(2)
-        assertEquals(listOf("okhttp", "urlconnection"), records.map { it.source })
-        for (record in records) {
-            assertNull(record.replayTarget, record.source)
-            val refused = assertIs<ReplayResult.Refused>(Replays.start(store, record.id, null), record.source)
-            assertTrue("offers no replay" in refused.error.message, refused.error.message)
-        }
-        assertEquals(2, server.received.size)
-        assertTrue(RuleEngine.state === RuleState.EMPTY)
-    }
-
-    @Test
-    fun okHttpReplayGoesThroughTheClientBelowTheAppsInterceptors() {
-        okhttp("path" to "/echo", "method" to "POST", "body" to "payload")
-        val original = one()
-        val started = assertIs<ReplayResult.Started>(Replays.start(store, original.id, null))
-        val replayed = store.awaitTerminal(2).single { it.id == started.id }
-        assertEquals(original.id, replayed.replayOf)
-        assertEquals("payload", replayed.responseBody!!.bytes.decodeToString())
-        // The recorded request already carries what the app's interceptor added; it ran once, for the original.
-        assertTrue("X-App" to "1" in replayed.requestHeaders, replayed.requestHeaders.toString())
-        assertEquals(2, server.received.size)
-        awaitNoReplay()
-    }
-
-    @Test
-    fun okHttp314RecordsRefuseReplayWithTheReason() {
-        runScenario("okhttpLegacyPost", store, server.base, jars = testJars("okhttp314"))
-        val record = one()
-        val refused = assertIs<ReplayResult.Refused>(Replays.start(store, record.id, null))
-        assertTrue("before 4.0" in refused.error.message, refused.error.message)
-    }
-
     // HttpURLConnection
 
     @Test
@@ -340,7 +294,6 @@ class AndroidRulesTest {
         assertEquals(1, server.received.size)
         val record = one()
         assertNull(record.ruleId)
-        assertNotNull(record.replayTarget)
     }
 
     @Test
@@ -583,35 +536,6 @@ class AndroidRulesTest {
     }
 
     @Test
-    fun urlConnectionReplayIsANewRecordedConnection() {
-        url("path" to "/echo", "method" to "POST", "body" to "payload", "headers" to mapOf("Content-Type" to "text/plain"))
-        val original = one()
-        val started = assertIs<ReplayResult.Started>(Replays.start(store, original.id, RequestEdit(setHeaders = listOf("X-Replayed" to "1"))))
-        val replayed = store.awaitTerminal(2).single { it.id == started.id }
-        assertEquals(original.id, replayed.replayOf)
-        assertEquals("payload", replayed.responseBody!!.bytes.decodeToString())
-        assertEquals(2, server.received.size)
-        awaitNoReplay()
-    }
-
-    @Test
-    fun urlConnectionReplayUsesTheAppsTlsObjects() {
-        TlsServer().use { tls ->
-            val created = AtomicInteger()
-            val factory = RecordingSocketFactory(tls.sslContext.socketFactory, created)
-            url("url" to "${tls.base}/a", "tlsFactory" to factory)
-            val original = one()
-            val before = created.get()
-            val started = assertIs<ReplayResult.Started>(Replays.start(store, original.id, null))
-            val replayed = store.awaitTerminal(2).single { it.id == started.id }
-            // Without the app's factory the replay could not trust the server's certificate.
-            assertEquals(TransactionState.Complete, replayed.state, replayed.error)
-            assertTrue(created.get() > before)
-            awaitNoReplay()
-        }
-    }
-
-    @Test
     fun theRuledConnectionsAnswerEveryMethodOrInheritOneThatReadsTheirAnswers() {
         val androidJar = System.getProperty("hopi.androidJar")
         val expected = mutableMapOf<String, MutableSet<String>>()
@@ -640,10 +564,6 @@ class AndroidRulesTest {
         val httpExpected = expected.getValue("java/net/URLConnection") + expected.getValue("java/net/HttpURLConnection")
         assertEquals(emptySet(), httpExpected - http - inherited, "RuledHttpConnection neither answers nor inherits")
         assertEquals(emptySet(), httpExpected + expected.getValue("javax/net/ssl/HttpsURLConnection") - https - inherited, "RuledHttpsConnection neither answers nor inherits")
-    }
-
-    private fun awaitNoReplay() = runBlocking {
-        withTimeout(10_000) { while (RuleEngine.state !== RuleState.EMPTY) kotlinx.coroutines.delay(10) }
     }
 
     /** The app's socket factory, counting the sockets it makes. */

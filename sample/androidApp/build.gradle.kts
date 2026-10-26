@@ -58,6 +58,9 @@ hopi {
     enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
     // The CLI and the desktop viewer reach the app through its bridge.
     agentBridge.set(true)
+    // The performance monitors (docs/design/perf-monitors.md): registered for `hopi perf start`, none
+    // started, so the app pays nothing until an agent or a developer starts one.
+    perf { enabled.set(true) }
 }
 
 dependencies {
@@ -84,7 +87,9 @@ dependencies {
  *   referenced (an instrumented call site would reference a hook type), and no class calls a hook;
  * - the negative control: OkHttp's `RealCall` still calls `OkHttpClient.interceptors()` and the fake
  *   SDK still calls `URL.openConnection()`, so the check is known to look at the right code;
- * - the merged manifest declares no Hopi provider.
+ * - the merged manifest declares no Hopi provider;
+ * - no Hopi class calls the APIs the performance monitors are built on (`Window.addOnFrameMetricsAvailableListener`,
+ *   `Looper.setMessageLogging`), and no type of `dev.koga.hopi.perf.internal` is in the APK.
  */
 abstract class VerifyHopiSelection : DefaultTask() {
     @get:InputFiles
@@ -117,7 +122,7 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val problems = mutableListOf<String>()
 
         val projects = hopiProjects.get()
-        val expectedProjects = setOf(":hopi-ktor-noop", ":hopi-ui-noop", ":hopi-rules-noop", ":hopi-android-noop")
+        val expectedProjects = setOf(":hopi-ktor-noop", ":hopi-ui-noop", ":hopi-rules-noop", ":hopi-android-noop", ":hopi-perf-noop")
         if (projects != expectedProjects) {
             problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
         }
@@ -145,6 +150,8 @@ abstract class VerifyHopiSelection : DefaultTask() {
         if (sdkCalls.isEmpty()) problems += "the fake SDK does not call URL.openConnection() (the negative control found nothing)"
         val manifest = mergedManifest.get().asFile.readText()
         if (PROVIDER in manifest) problems += "the merged manifest declares $PROVIDER"
+        val perfCalls = dex.invokesByClass.filter { (owner, calls) -> owner.startsWith("dev/koga/hopi/") && calls.any { it in PerfApis.ALL } }.keys
+        if (perfCalls.isNotEmpty()) problems += "Hopi classes that call the perf monitors' APIs: ${perfCalls.take(10)}"
 
         val summary = buildString {
             appendLine("apk: ${apk.name}")
@@ -170,11 +177,19 @@ abstract class VerifyHopiSelection : DefaultTask() {
     }
 
     private companion object {
-        val FORBIDDEN_PACKAGES = listOf("dev/koga/hopi/core/", "dev/koga/hopi/android/internal/", "dev/koga/hopi/android/generated/")
+        val FORBIDDEN_PACKAGES = listOf("dev/koga/hopi/core/", "dev/koga/hopi/android/internal/", "dev/koga/hopi/android/generated/", "dev/koga/hopi/perf/internal/")
         val INTERCEPTORS = MethodRef(HookDescriptors.OKHTTP_CLIENT, HookDescriptors.INTERCEPTORS, HookDescriptors.INTERCEPTORS_DESCRIPTOR)
         val OPEN_CONNECTION = MethodRef(HookDescriptors.URL, "openConnection", "()Ljava/net/URLConnection;")
         const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
     }
+}
+
+/** What the performance monitors call: absent from every Hopi class of a release APK, present in debug. */
+object PerfApis {
+    val ALL = setOf(
+        MethodRef("android/view/Window", "addOnFrameMetricsAvailableListener", "(Landroid/view/Window\$OnFrameMetricsAvailableListener;Landroid/os/Handler;)V"),
+        MethodRef("android/os/Looper", "setMessageLogging", "(Landroid/util/Printer;)V"),
+    )
 }
 
 /**
@@ -210,7 +225,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val dex = DexReader.ofApk(apk)
         val problems = mutableListOf<String>()
         val projects = hopiProjects.get()
-        val required = setOf(":hopi-android", ":hopi-core", ":hopi-ktor", ":hopi-ui", ":hopi-rules")
+        val required = setOf(":hopi-android", ":hopi-core", ":hopi-ktor", ":hopi-ui", ":hopi-rules", ":hopi-perf")
         if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
 
         val hookCallers = dex.callersOf(OKHTTP_HOOK)
@@ -231,6 +246,11 @@ abstract class VerifyDebugCapture : DefaultTask() {
         if (PROVIDER !in manifest) problems += "the merged manifest does not declare $PROVIDER"
         val ruleEngine = RULE_ENGINE in dex.definedClasses
         if (!ruleEngine) problems += "the debug APK holds no $RULE_ENGINE"
+        // The perf monitors: the entry the provider loads by name, and the calls they are built on.
+        val perfEntry = PERF_ENTRY in dex.definedClasses
+        if (!perfEntry) problems += "the debug APK holds no $PERF_ENTRY"
+        val perfCalls = PerfApis.ALL.filter { api -> dex.invokesByClass.any { (owner, calls) -> owner.startsWith("dev/koga/hopi/perf/") && api in calls } }
+        if (perfCalls.size != PerfApis.ALL.size) problems += "hopi-perf calls ${perfCalls.map { it.name }}, expected ${PerfApis.ALL.map { it.name }}"
 
         val summary = buildString {
             appendLine("apk: ${apk.name}")
@@ -238,6 +258,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
             appendLine("RealCall calling the interceptors hook: ${realCalls.filter { it in hookCallers }}")
             appendLine("classes calling a URL hook: ${urlHookCallers.size}, e.g. ${urlHookCallers.filter { !it.startsWith("dev/koga/hopi/android/") }.take(8)}")
             appendLine("classes still opening URL connections directly: ${direct.size}; provider declared: ${PROVIDER in manifest}; rule engine packaged: $ruleEngine")
+            appendLine("perf entry packaged: $perfEntry; perf monitor calls: ${perfCalls.map { it.name }}")
         }
         if (problems.isNotEmpty()) throw GradleException("The debug APK is not instrumented as expected:\n- " + problems.joinToString("\n- ") + "\n" + summary)
         report.get().asFile.writeText(summary)
@@ -249,6 +270,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val INTERCEPTORS = MethodRef(HookDescriptors.OKHTTP_CLIENT, HookDescriptors.INTERCEPTORS, HookDescriptors.INTERCEPTORS_DESCRIPTOR)
         const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
         const val RULE_ENGINE = "dev/koga/hopi/core/rules/RuleEngine"
+        const val PERF_ENTRY = "dev/koga/hopi/perf/internal/PerfEntry"
     }
 }
 

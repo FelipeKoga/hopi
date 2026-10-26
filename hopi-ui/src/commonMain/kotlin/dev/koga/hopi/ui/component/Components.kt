@@ -187,7 +187,7 @@ internal fun Switch(checked: Boolean, description: String, onChange: (Boolean) -
     }
 }
 
-/** A small outlined label in capitals (`MOCK`, `REPLAY`): what a rule did to a request. */
+/** A small outlined label in capitals (`MOCK`, `EDIT`): what a rule did to a request. */
 @Composable
 internal fun Tag(text: String, modifier: Modifier = Modifier) {
     val colors = LocalHopiColors.current

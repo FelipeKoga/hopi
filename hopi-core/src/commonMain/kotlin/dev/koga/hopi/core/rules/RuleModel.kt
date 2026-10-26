@@ -109,7 +109,7 @@ public class MockSpec(
     public val body: RuleBody? = null,
 )
 
-/** The request side of an edit, also a replay's edit. Null fields are unchanged. */
+/** The request side of an edit. Null fields are unchanged. */
 @HopiInternalApi
 public class RequestEdit(
     public val method: String? = null,

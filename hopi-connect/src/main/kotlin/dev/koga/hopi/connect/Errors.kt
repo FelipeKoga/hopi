@@ -10,7 +10,7 @@ public object ExitCode {
     public const val NOT_REACHABLE: Int = 2
     public const val NOT_FOUND: Int = 3
 
-    /** The app cannot do it: rules off or absent in its Hopi, or a replay it refused. */
+    /** The app cannot do it: rules off or absent in its Hopi, no perf monitors, a monitor its platform lacks. */
     public const val UNSUPPORTED: Int = 4
 }
 

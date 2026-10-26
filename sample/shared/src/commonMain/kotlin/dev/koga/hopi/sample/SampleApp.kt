@@ -54,15 +54,17 @@ public class PlatformAction(public val label: String, public val run: suspend ()
 /**
  * The sample app both platforms host, wrapped in [HopiLauncher]: a small shop (item list,
  * item detail, a form that POSTs a new item) against the dev server, and a diagnostics tab that
- * fires one request of each kind the inspector must handle. [platformActions] add buttons to the
- * diagnostics tab; [launchAction] runs once at launch and opens that tab with its result.
+ * fires one request of each kind the inspector must handle and opens the perf lab. [platformActions]
+ * add buttons to the diagnostics tab; [launchAction] runs once at launch and opens that tab with its
+ * result. [perfVerify] (`all` or a comma list of the lab's steps) opens the perf lab at launch and
+ * runs those injections once ([PerfLabRun]).
  */
 @Composable
-public fun SampleApp(platformActions: List<PlatformAction> = emptyList(), launchAction: PlatformAction? = null) {
+public fun SampleApp(platformActions: List<PlatformAction> = emptyList(), launchAction: PlatformAction? = null, perfVerify: String? = null) {
     SampleTheme {
         HopiLauncher {
             Box(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()) {
-                SampleContent(platformActions, launchAction)
+                SampleContent(platformActions, launchAction, perfVerify?.let(::parsePerfLabSteps))
             }
         }
     }
@@ -73,6 +75,7 @@ private sealed interface Route {
     data class Detail(val id: Long) : Route
     data object NewItem : Route
     data object Diagnostics : Route
+    data object PerfLab : Route
 }
 
 /** Saves the route across Android configuration changes and process death as one string. */
@@ -83,12 +86,14 @@ private val RouteSaver = Saver<Route, String>(
             is Route.Detail -> "detail:${route.id}"
             Route.NewItem -> "new"
             Route.Diagnostics -> "diagnostics"
+            Route.PerfLab -> "perflab"
         }
     },
     restore = { saved ->
         when {
             saved == "new" -> Route.NewItem
             saved == "diagnostics" -> Route.Diagnostics
+            saved == "perflab" -> Route.PerfLab
             saved.startsWith("detail:") -> saved.removePrefix("detail:").toLongOrNull()?.let(Route::Detail) ?: Route.Items
             else -> Route.Items
         }
@@ -96,10 +101,18 @@ private val RouteSaver = Saver<Route, String>(
 )
 
 @Composable
-private fun SampleContent(platformActions: List<PlatformAction>, launchAction: PlatformAction?) {
+private fun SampleContent(platformActions: List<PlatformAction>, launchAction: PlatformAction?, perfVerify: Set<String>?) {
     var route by rememberSaveable(stateSaver = RouteSaver) {
-        mutableStateOf(if (launchAction != null) Route.Diagnostics else Route.Items)
+        mutableStateOf(
+            when {
+                perfVerify != null -> Route.PerfLab
+                launchAction != null -> Route.Diagnostics
+                else -> Route.Items
+            },
+        )
     }
+    // The launch's perf injections run once, the first time the lab is shown.
+    var pendingPerfVerify by remember { mutableStateOf(perfVerify) }
     // Bumped after a create, so the list loads again when it is shown.
     var itemsVersion by rememberSaveable { mutableIntStateOf(0) }
     val diagnostics = remember { mutableStateListOf<String>() }
@@ -122,14 +135,15 @@ private fun SampleContent(platformActions: List<PlatformAction>, launchAction: P
                     itemsVersion++
                     route = Route.Detail(it)
                 })
-                Route.Diagnostics -> DiagnosticsScreen(platformActions, diagnostics)
+                Route.Diagnostics -> DiagnosticsScreen(platformActions, diagnostics, onPerfLab = { route = Route.PerfLab })
+                Route.PerfLab -> PerfLabScreen(pendingPerfVerify, onVerifyStarted = { pendingPerfVerify = null }, onBack = { route = Route.Diagnostics })
             }
         }
         TabBar(
             selected = when (route) {
                 Route.Items, is Route.Detail -> 0
                 Route.NewItem -> 1
-                Route.Diagnostics -> 2
+                Route.Diagnostics, Route.PerfLab -> 2
             },
             onSelect = { index -> route = listOf(Route.Items, Route.NewItem, Route.Diagnostics)[index] },
         )
@@ -303,7 +317,7 @@ private fun NewItemScreen(onCreated: (Long) -> Unit) {
 }
 
 @Composable
-private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: MutableList<String>) {
+private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: MutableList<String>, onPerfLab: () -> Unit) {
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
         TopBar("Diagnostics")
@@ -337,6 +351,7 @@ private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: Mu
                 results.clear()
                 scope.launch { results.add(runGiant(SampleHttp.client, GiantSpec.parse("mb=8;runs=1"))) }
             })
+            SampleButton("Perf lab (jank, hangs, CPU, memory)", primary = false, modifier = Modifier.fillMaxWidth(), onClick = onPerfLab)
             platformActions.forEach { action ->
                 SampleButton(action.label, primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
                     results.clear()

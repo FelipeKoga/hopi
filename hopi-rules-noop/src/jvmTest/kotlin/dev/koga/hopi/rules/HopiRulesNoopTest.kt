@@ -28,7 +28,6 @@ class HopiRulesNoopTest {
         assertFalse(HopiRules.setEnabled(1, true))
         assertFalse(HopiRules.remove(1))
         HopiRules.clear()
-        assertEquals(-1, HopiRules.replay(1) { setHeader("X", "1") })
     }
 
     @Test

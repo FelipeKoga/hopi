@@ -1,13 +1,14 @@
-# Design: Hopi Rules (mock, delay, fail, edit, replay)
+# Design: Hopi Rules (mock, delay, fail, edit)
 
 Status: built (2026-10-25); device verification, the performance plan and the "As built" notes
-are pending (docs/ROADMAP.md). The roadmap item "Rules: mock, edit, replay". A rule
+are pending (docs/ROADMAP.md). The roadmap item "Rules: mock, edit". A rule
 matches a request and changes what happens to it: the app gets a made-up response (**mock**), the
 request or response is held back (**delay**), the request fails the way the platform fails it
-(**fail**), or the request or response is rewritten (**edit**). **Replay** re-sends a recorded
-request, optionally edited, through the app's own client. Rules apply to every source Hopi
+(**fail**), or the request or response is rewritten (**edit**). Rules apply to every source Hopi
 records (`ktor`, `okhttp`, `urlconnection`, `urlsession`), each to the extent it can do so without
-weakening the app's security, and every request a rule touched is marked in its record.
+weakening the app's security, and every request a rule touched is marked in its record. Replay
+(Hopi re-sending a recorded request) was built and then removed from the product on 2026-10-25;
+see "Replay (removed)" below and docs/ROADMAP.md, "Replay (no priority)".
 
 This design builds on `docs/design/android-capture.md` and `docs/design/urlsession-capture.md`
 (the interception points it reuses) and on the architecture's store, bridge and `PlatformCapture`
@@ -88,7 +89,7 @@ is final.
    `data(for:)` does. Request edits on URLSession therefore hook each factory by name, as the
    upload hooks already do.
 7. **`-[NSURLSessionTask session]`** is defined on `NSURLSessionTask` with encoding `@16@0:8`: the
-   task's session is reachable, which replay needs.
+   task's session is reachable, which replay needed (replay is removed; nothing reads it now).
 
 ## Rule model
 
@@ -202,8 +203,7 @@ at the real `resume`, so there the delay adds to them instead of racing them (st
   added `Cookie` never travels next to the app's own. On URLSession, an origin-changing edit is not
   applied to a request whose session configuration adds one of these headers
   (`HTTPAdditionalHeaders`) that the edit does not set or add itself: URLSession merges those below
-  Hopi, so they cannot be removed, and the request goes out unedited and unclaimed (a replay with
-  such an edit fails before anything is sent, with the reason).
+  Hopi, so they cannot be removed, and the request goes out unedited and unclaimed.
 - Response: `status`, `setHeaders` / `addHeaders` / `removeHeaders`, `body`. `Content-Length` is
   recomputed when the body is replaced, and a replaced body also removes `Content-Encoding`: where
   the recorder sees the body still encoded (an app that set its own `Accept-Encoding` on OkHttp, a
@@ -231,14 +231,12 @@ An exhausted rule stays listed (`"exhausted":true`) until removed or updated.
 | Delay | 120 s per side | `BAD_REQUEST` |
 | `times` | 1..1,000,000 | `BAD_REQUEST` |
 | Blob staging per bridge session | 2 blobs, 1 MiB each | `LIMIT` |
-| Replays in flight | 8 | `LIMIT` |
 
 Rule bodies are outside the store's `maxTotalBytes` and bounded by their own 8 MiB, counted per
 copy held: on iOS a rule whose `sources` include `urlsession` holds its bodies twice (the Kotlin
 bytes and the mirror's `NSData`), and both count, so the worst case stays 8 MiB on every platform.
 Blob staging is bounded separately: 2 blobs × 1 MiB × the bridge's 8 connections, 16 MiB at worst,
-all of it freed when the sessions end. Replays in flight hold at most their request bodies, each
-within the store's body cap.
+all of it freed when the sessions end.
 
 ## Engine (`hopi-core`, `dev.koga.hopi.core.rules`, all `@HopiInternalApi`)
 
@@ -254,7 +252,6 @@ object RuleEngine {
 
 class RuleState(                     // immutable
     val bySource: Array<Array<CompiledRule>>,   // indexed by source; empty arrays allowed
-    val replaysInFlight: Int,
     val revision: Long,
 )
 ```
@@ -265,8 +262,7 @@ class RuleState(                     // immutable
   long. A reader does `val s = RuleEngine.state` once per request and never sees a half-built set.
   `CompiledRule` objects are shared between successive states, so `hits` survives a republish.
 - **The fast path** on every source is `if (s === RuleState.EMPTY) <original behavior>`.
-  `EMPTY` is published whenever no enabled, unexhausted rule exists and no replay is in flight
-  (replays share the read; see Replay).
+  `EMPTY` is published whenever no enabled, unexhausted rule exists.
 - **Per-source arrays.** At publish, each source gets only the rules whose `sources` include it and
   whose action that source can apply (the capability table below). A rule therefore never matches
   where it cannot be applied, and no per-request capability check exists. A source with no rules
@@ -279,8 +275,7 @@ class RuleState(                     // immutable
   `HttpURLConnection` host, scheme and path), and a query or header predicate is asked in place
   (`hasQueryValue`/`hasHeaderValue`: the OkHttp and `HttpURLConnection` views scan their own
   headers and query with no list per predicate; `MatcherEquivalenceTest` holds the compiled matcher
-  to the list-based one it replaced on a generated case set). OkHttp reads a request's replay tag
-  only while a replay is in flight (`replaysInFlight > 0`): at 0 every hand-off was already taken.
+  to the list-based one it replaced on a generated case set).
 - **Thread safety.** Rules and their bodies are immutable; the only mutable per-rule datum is the
   atomic `hits`. Body bytes are shared by every application and are never handed to the app as a
   mutable array (each stack gets a fresh read-only source over them).
@@ -307,8 +302,6 @@ class RuleState(                     // immutable
 | --- | --- |
 | `ruleId: Long?` | The rule applied, or null |
 | `ruleApplied: String?` | What it did, comma-separated in this fixed order: `delay`, `edit-request`, `mock`, `fail`, `edit-response` |
-| `replayOf: Long?` | The record this request replays |
-| `replayTarget: ReplayTarget?` | In memory only, never serialized (see Replay) |
 
 A record holds the request **as sent** (after a request edit) and the response **as delivered to
 the app** (after a response edit, or the mock): what crossed each boundary. The pre-edit values are
@@ -318,15 +311,15 @@ the exception the app saw (`"java.net.SocketTimeoutException: timeout"`,
 `"NSURLErrorDomain -1001: The request timed out."`).
 
 On the wire, like `source` and `finalUrl`: the summary line, the bridge summary and the detail carry
-`"rule":3,"applied":"delay,mock"` after `finalUrl` (or `source`), then `"replayOf":42`, before
-`error`; omitted when null, decoded as null when absent. They count toward the line budget as fixed
-fields: at most 106 bytes together with worst-case ids (`"rule":` and `"replayOf":` with 19 digits
-each, `"applied"` with its longest value `delay,edit-request,edit-response`), reserved inside
-every platform's budget (iOS's 1000 included). HAR export adds `_rule`, `_ruleApplied`,
-`_replayOf` to an entry. The in-app and desktop list rows show a badge (`MOCK`, `EDIT`, `DELAY`,
-`FAIL`, `REPLAY`), the detail an overview row "Rule #3: delay, mock" and "Replay of #42" (a link).
-`hopi list`/`tail` text appends `[mock #3]` / `[replay of 42]`; `hopi get` shows both rows;
-`--json` passes the lines through.
+`"rule":3,"applied":"delay,mock"` after `finalUrl` (or `source`), before `error`; omitted when null,
+decoded as null when absent. They count toward the line budget as fixed fields: at most 72 bytes
+together with a worst-case id (`"rule":` with 19 digits, `"applied"` with its longest value
+`delay,edit-request,edit-response`), reserved inside every platform's budget (iOS's 1000
+included). HAR export adds `_rule` and `_ruleApplied` to an entry. The in-app and desktop list rows
+show a badge (`MOCK`, `EDIT`, `DELAY`, `FAIL`), the detail an overview row "Rule #3: delay, mock".
+`hopi list`/`tail` text appends `[mock #3]`; `hopi get` shows the row; `--json` passes the lines
+through. An app built before replay was removed may still send `"replayOf"`; every reader ignores
+it.
 
 ## Who applies a rule: the recorder
 
@@ -356,7 +349,6 @@ So a rule can never be applied twice, and a record's mark always describes what 
 | edit request: method, URL, headers | yes | yes | yes | yes, for tasks from the hooked factories |
 | edit request: body | yes | yes | yes | `HTTPBody` and upload-from-data only |
 | edit response | yes | yes | yes | **no** |
-| replay | yes, while the client is open | yes, OkHttp 4.x/5.x | yes | yes, local sessions, while the session lives |
 
 Every "no" and every limit is a place where the only way to do it would bypass the app's own
 stack. The reasons are in each section.
@@ -658,56 +650,18 @@ and request edits work (its `dataTaskWithRequest:` is hooked; a channel body can
 response edit does not. A KMP app that needs response edits on iOS can leave URLSession capture
 off for that build, which makes the Ktor plugin record and rule Darwin requests itself.
 
-## Replay
+## Replay (removed)
 
-**Only ever explicit**: the bridge `replay` command, `HopiRules.replay(id)`, or the Replay button
-of the in-app or desktop detail. Nothing replays on its own, ever.
-
-A replay re-sends the recorded request (method, URL, headers, body, unredacted from the store: the
-store keeps raw values, and the bridge never carries them back) with optional edits (the
-edit-request fields, with the same scheme and origin rules), **through the client or session that
-sent the original**, so its interceptors, plugins, TLS settings, pinning, proxy, cookies and
-challenge delegate apply. The replayed request is recorded by its source like any request, with
-`replayOf` set, and rules apply to it like any request (a replay of a mocked endpoint is mocked;
-disable the rule to reach the server). The reply returns the new record's id at once, before the
-request runs. "The client that sent the original" is the record's recorder's client: a Ktor client
-whose engine a platform recorder covers was recorded by that platform layer, so its replay goes
-through the engine's `OkHttpClient` or `NSURLSession` (with the app's TLS, pinning and delegate as
-everywhere) and Ktor's plugins do not run again; the recorded headers already hold what they set.
-
-**Every replay ends in a record.** The pre-allocated id is a promise to the caller (`--wait`, the
-UI's "open the new record"). The recorder marks the hand-off as taken when it records under it; when
-the replay's send ends without that (the client closed between the check and the send, the OkHttp
-call cancelled before the interceptor ran, `openConnection` or the task factory threw), the replay
-driver submits a `Failed` record under the id itself, `replayOf` set and the error as thrown.
-
-**Plumbing.** The recorder sets `replayTarget` on the terminal record: a reference to a small
-per-client object that holds a weak reference to the client. No per-request allocation: Ktor's is
-created once per installation, OkHttp's once per client on the store's consumer thread (a
-consumer-confined `WeakHashMap`, keyed by identity, whose entries go with the client), URLSession's
-once per session on the capture queue, stored as an associated object of the session (the target
-holds the session weakly), never in a session-keyed table: some apps create a session per request.
-The target lives in the record, so eviction and `clear` drop it with the record; no side table, no
-eviction hook. A replay pre-allocates the new id (`store.nextId()`) and hands it to the recorder (a
-Ktor request attribute, an OkHttp request tag, a field of the URL connection wrapper, the
-pre-created URLSession task state), which records under it. While a replay is in flight the rule
-state is not `EMPTY`, so recorders look for the hand-off only then: the replay shares the one read.
-The cost is that every request on every source takes the scan path (an empty per-source array when
-no rule applies to it) for the duration of a replay, at most 8 at once; the performance plan
-measures it.
-
-| Source | Sent through | Refused (`UNSUPPORTED`) when |
-| --- | --- | --- |
-| `ktor` | The original `HttpClient` (`client.request { … }` in the client's scope); plugins (`Auth`, `HttpRequestRetry`, …) run again on the recorded headers, which already hold what they set the first time, so at Hopi's position a recorded header whose values now start with the recorded ones and go on (a plugin that appends unconditionally: a signature, a correlation id) is sent as recorded, once, as on OkHttp; a header a plugin replaced (`Auth`'s fresh token) or added anew is sent as the plugins made it | the client was closed or collected |
-| `okhttp` | `client.newBuilder()` with its application interceptors cleared, then `.build().newCall(request).enqueue(…)`, from the original `OkHttpClient` (`RealCall.client`, OkHttp 4.x/5.x). The recorded request is the one at Hopi's position, after the app's interceptors, so the replay starts there again: running them a second time would add their headers twice (`addHeader`) or re-sign a signed request. The copy shares everything below that position (dispatcher, connection pool, `CertificatePinner`, `SSLSocketFactory`, `HostnameVerifier`, proxy and proxy selector, DNS, cookie jar, cache, `Authenticator`, network interceptors, event listener factory), and `RealCall`'s rewritten `interceptors()` gives it Hopi's interceptor. Hopi drains and closes the response | OkHttp 3.14 (`RealCall.client` is not public); the client was collected |
-| `urlconnection` | A new connection from the hooks' `openConnection` (so it is recorded), configured with the recorded method, headers, timeouts and streaming mode and the `SSLSocketFactory`, `HostnameVerifier` and `Proxy` the app gave the original (held weakly), on a Hopi thread | the app gave the original a custom `SSLSocketFactory`, `HostnameVerifier` or `Proxy` that has been collected (replaying without it would drop the app's TLS or proxy choice) |
-| `urlsession` | `[session dataTaskWithRequest:]` on the original session (`-[NSURLSessionTask session]`, self-checked like the private selectors and read on the capture queue at the end of the task), with a per-task delegate (iOS 15, Kotlin/Native's minimum for the library) that implements only the response, data, completion and metrics callbacks; authentication challenges and redirects are not implemented by it, so URLSession asks the app's session delegate, whose pinning applies | a background session; the session was invalidated or collected; the self-check failed; the session's delegate is one that the device tests showed mishandles a challenge or redirect for a task it did not create (checked against Ktor Darwin's `KtorNSURLSessionDelegate`; if it does, Ktor Darwin sessions are refused and the reason says so) |
-
-Common refusals: the recorded request body is truncated, skipped (stream, file, `not sent`,
-multipart beyond the cap) or `incomplete`, and the replay supplies no body (`UNSUPPORTED`, "request
-body not held in full"); the record has no `replayTarget` (an older record, a host viewer's copy);
-8 replays already in flight (`LIMIT`). A header value equal to the redaction placeholder
-`<redacted>` in a replay edit is `BAD_REQUEST`: it would send the placeholder.
+Replay, re-sending a recorded request (optionally edited) through the client or session that sent
+the original, was built on every source and removed from the product on 2026-10-25: it is the only
+feature in which Hopi itself originates a request, and the owner put it in the backlog with no
+priority (docs/ROADMAP.md, "Replay (no priority)"). The full implementation, its per-source
+plumbing (a weak per-client target in each record, a hand-off of the pre-allocated id to the
+recorder, a count of replays in flight in the rule state) and its tests are in git commit
+`c7daca0`. Removing it only removed work: recorders no longer read back a connection's timeouts and
+TLS objects, look up an OkHttp call's client, read the task's session on URLSession, or look for a
+hand-off. The bridge answers a `replay` line as an older app answers any command it does not know
+(`BAD_REQUEST`: "unknown cmd", or "malformed JSON object" when it carries an `edit` object).
 
 ## Surfaces
 
@@ -717,10 +671,10 @@ All write commands use the existing authenticated session (Android: peer uid and
 JVM: the token) and are accepted only after `hello` on that connection (`BAD_REQUEST`, "hello
 first"). That rule only orders lines on the app's side; it cannot tell the app that the CLI has
 checked the proof, and the read commands' handshake pipelines token, `hello` and the request in one
-write. **Write commands are never pipelined that way**: `hopi-connect` sends `rules.*`, `blob.put`
-and `replay` only after it has read `hello` and verified it (`protocol`, `app`, `rules`, and on
-Android the proof), so a squatter holding the socket name never receives a rule, a body or a
-replay edit; it gets `hello` and nothing else. Requests stay at most 4096 chars,
+write. **Write commands are never pipelined that way**: `hopi-connect` sends `rules.*` and
+`blob.put` only after it has read `hello` and verified it (`protocol`, `app`, `rules`, and on
+Android the proof), so a squatter holding the socket name never receives a rule or a body; it gets
+`hello` and nothing else. Requests stay at most 4096 chars,
 enforced while framing as today. Rule specs parse with a new bounded tree parser in core (depth
 6, the same 4096-char line), since `parseFlatJsonObject` is flat.
 
@@ -741,7 +695,6 @@ rule). The new fields in records are additive, as above; older decoders ignore u
 {"cmd":"rules.remove","id":3}             // → {"type":"ok"} | NOT_FOUND
 {"cmd":"rules.clear"}                     // → {"type":"ok","removed":N}
 {"cmd":"blob.put","blob":1,"offset":0,"data":"<base64, at most 3072 chars>"}  // → {"type":"ok","blob":1,"size":N}
-{"cmd":"replay","id":42,"edit":{...}}     // → {"type":"replay","of":42,"id":57}
 {"cmd":"tail","since":0,"rules":true}     // as today, plus {"type":"rules","rev":N} when the set changes
 ```
 
@@ -773,17 +726,17 @@ the store's redactor, like every other outward value.
 **Bodies larger than a line.** A body that does not fit inline is uploaded first as a *blob*:
 consecutive `blob.put` lines, each at most 3072 base64 chars (2304 bytes), `offset` equal to the
 bytes received so far, at most 2 blobs and 1 MiB each per session, held in memory only. A
-`rules.add` or `replay` names it with its final `size`, which the app checks against what it
+`rules.add` names it with its final `size`, which the app checks against what it
 received (the sequential `offset` already proves no line was lost; core has no digest and gains
 none for this), then the blob moves into
-the rule (or is used and freed) and leaves the session. Blobs die with the session. A 1 MiB body is
+the rule and leaves the session. Blobs die with the session. A 1 MiB body is
 456 lines; the CLI pipelines them in windows of 32 (half the 64-line reply queue) and reads the
 acknowledgements between windows, so neither side can block the other. Any failed `blob.put`
 (offset mismatch, size, bad base64) discards that blob.
 
 **Errors**: `BAD_REQUEST` (validation, with a message naming the field: `"match.path: pattern
 longer than 256 chars"`), `NOT_FOUND` (rule or transaction id), `LIMIT` (a limit in the table,
-with the limit in the message), `UNSUPPORTED` (replay refusals, `"rules":false`), plus the existing
+with the limit in the message), `UNSUPPORTED` (`"rules":false`), plus the existing
 codes. **Rules notices** (`{"type":"rules","rev":N}`) go only to a `tail` that asked for them, so an
 older client never sees an unknown line type on its stream.
 
@@ -801,17 +754,14 @@ hopi edit add  --match ... [--method M] [--host H] [--port N] [--path P] [--set-
                [--set-header 'K: V'] [--add-header 'K: V'] [--remove-header K] [--body @f]
                [--status N] [--set-response-header 'K: V'] [--remove-response-header K] [--response-body @f] [common options]
 hopi rules ls | rm <id>... | clear | enable <id>... | disable <id>... | reset <id>...
-hopi replay <txn-id> [--method M] [--host H] [--path P] [--set-header 'K: V'] [--remove-header K] [--body @f] [--wait]
 ```
 
 `--match` is the shorthand above; `--query` and `--match-header` add predicates. `--body` follows
 curl: `@file` reads a host file, `@-` stdin, anything else is the literal text. `--from` builds the
 mock from a record inside the app. Durations take `ms` and `s`. `add` prints the rule
 (`#3  GET */users/*  mock 500 (61 B)  times 3`) and one `hopi: warning: …` line on stderr per
-`unsupported` entry. `rules ls` prints `ID ON PRI HITS MATCH ACTION`. `replay` prints the new id;
-`--wait` tails until that record is terminal and prints its summary (exit 0 whatever the status;
-the record's `ERR` is visible). New exit code 4: unsupported (rules off or absent in the app, a
-replay refusal). Validation errors from the app are exit 1, like `BAD_REQUEST` today.
+`unsupported` entry. `rules ls` prints `ID ON PRI HITS MATCH ACTION`. New exit code 4: unsupported
+(rules off or absent in the app). Validation errors from the app are exit 1, like `BAD_REQUEST` today.
 
 ### In-process API (`hopi-rules`, `dev.koga.hopi.rules`; Swift: `HopiRules.shared`)
 
@@ -825,7 +775,6 @@ public object HopiRules {
     public fun setEnabled(id: Long, enabled: Boolean): Boolean
     public fun remove(id: Long): Boolean
     public fun clear()
-    public fun replay(transactionId: Long, block: HopiRequestEdit.() -> Unit = {}): Long   // new id; -1 when refused or noop
 }
 
 // a test
@@ -852,7 +801,7 @@ A Rules panel (⌘L) beside the list: rows with id, an enable toggle, match, act
 `hits`/`times`; add and edit forms for each action (headers as a table, a body from a text area or
 a file chooser, uploaded as a blob); remove, clear. The detail pane gains "Mock this response"
 (a `rules.add` with `fromTransaction`, method plus scheme, host and path of the record, editable
-before sending), "Replay" and "Edit and replay…" (method, URL parts, headers, body). The panel
+before sending). The panel
 lists on connect, re-lists on each `{"type":"rules"}` notice of its tail, and counts hits locally
 from the `rule` field of the summaries its tail brings, so nothing polls. `unsupported` entries show
 as a warning line under the row. All of it goes through `hopi-connect`, which gains the commands,
@@ -863,8 +812,7 @@ the blob upload and `BridgeDecoder` support for the rule line and the new fields
 A "Rules" entry in the inspector's top bar opens a list: one row per rule (match, action, hits,
 an enable switch), remove per row, "Remove all". The detail screen gains "Mock this response"
 (creates an enabled rule from the record, exact method, scheme, host and path, `times` unset, with
-a confirmation that offers Undo; disabled with the reason when the body is not held in full) and
-"Replay" (opens the new record when it appears). There is no rule editor in the app: phones are a
+a confirmation that offers Undo; disabled with the reason when the body is not held in full). There is no rule editor in the app: phones are a
 poor place to type globs and headers; the CLI and the desktop panel are. The list is read from
 `RuleEngine` only while the screen is composed (a `revision` flow the engine emits on publish), so
 the closed screen costs nothing. No public API change: `HopiScreen` and `HopiLauncher` are
@@ -875,10 +823,7 @@ unchanged, so `hopi-ui-noop` is unchanged.
 Each recorder's configuration gains `rules: Boolean = true`: `HopiConfig` (Ktor), `HopiUrlSessionConfig`,
 and the Gradle DSL `hopi { rules = true }` (generated into the variant's configuration). `false`
 means that recorder never reads the rule state (it becomes a constant-false branch) and, on iOS, no
-protocol is injected and no factory is hooked. Its records carry no `replayTarget` either: such a
-recorder never reads a replay's hand-off, so a replay through it would be recorded unmarked while
-the promised record failed; a replay of one is refused ("its recorder offers no replay"), on every
-platform, even when another recorder has rules on. The engine and the API stay; `hello` reports
+protocol is injected and no factory is hooked. The engine and the API stay; `hello` reports
 `"rules":false` when every recorder that started has it off. The default is true because an empty
 rule set costs one read (and on iOS one message), and an inspector whose mock command needs a
 rebuild first fails the agent use case; the switch exists for the app whose code reads
@@ -889,7 +834,7 @@ rebuild first fails the agent use case; the switch exists for the app whose code
 
 | Module | Content |
 | --- | --- |
-| `hopi-core` | `RuleEngine`, specs, compiled rules, matcher, the tree parser, bridge commands, record fields, `ReplayTarget` (all `@HopiInternalApi`; core's ABI dump updated) |
+| `hopi-core` | `RuleEngine`, specs, compiled rules, matcher, the tree parser, bridge commands, record fields (all `@HopiInternalApi`; core's ABI dump updated) |
 | `hopi-rules` (new) | `HopiRules` and its builders over `RuleEngine`; depends on core; targets android, iosArm64, iosSimulatorArm64, jvm |
 | `hopi-rules-noop` (new) | The same public API, no dependency at all; every call returns `-1`, `false` or an empty list and stores nothing |
 | `hopi-ktor`, `hopi-android`, `hopi-urlsession` | The per-source application above; the ObjC protocol, factory hooks and C matcher live in core's ObjC library next to the capture code |
@@ -921,18 +866,16 @@ rules in place; `hopi rules clear` removes them.
 ## Security summary
 
 - No action contacts the network outside the app's own stack: a mock and a fail contact nothing;
-  an edit and a replay go through the app's client or session with its own TLS, pinning, verifier,
+  an edited request goes through the app's client or session with its own TLS, pinning, verifier,
   proxy and challenge delegate. Hopi never offers an action that changes TLS settings, trust, a
   verifier, a proxy or a challenge answer, and never fabricates a certificate or handshake.
-- Scheme changes are rejected; origin changes strip credentials unless set explicitly; replay edits
-  refuse the redaction placeholder. An edited host is judged by the app's own stack like any host:
+- Scheme changes are rejected; origin changes strip credentials unless set explicitly. An edited host is judged by the app's own stack like any host:
   its pins (or none), Android's network security config (cleartext, trust anchors) and iOS's ATS.
 - Nothing a rule produces outlives it: mocks and response edits never set cookies (`Set-Cookie`
   rejected) and never enter an HTTP cache (see Mock), so no persisted store of the app's keeps a
   rule's output after the session.
 - Unsupported, with reasons above: URLSession response edit and before-response delay on real
-  requests, URLSession body edit of file and stream uploads, rules on background sessions,
-  OkHttp 3.14 replay, `HttpURLConnection` replay without the app's collected TLS objects.
+  requests, URLSession body edit of file and stream uploads, rules on background sessions.
 - The bridge gains write commands, gated by the same authentication as reads plus `hello` first,
   sent by the host only after it verified `hello` (never pipelined with it, so a squatter receives
   none), bounded by the limits, never echoing bodies and redacting header values. Its reach (debuggable
@@ -943,7 +886,7 @@ rules in place; `hopi rules clear` removes them.
 `docs/ARCHITECTURE.md` changes before the code:
 
 - Modules table: `hopi-rules`, `hopi-rules-noop`. Consumer API: `HopiRules`, the `rules` switches.
-- Data model: `ruleId`, `ruleApplied`, `replayOf`, `replayTarget`. Agent access: the new summary
+- Data model: `ruleId`, `ruleApplied`. Agent access: the new summary
   fields, the commands, `blob.put`, the `rules` notice, `hello.rules`, the new error codes, CLI
   commands and exit code 4.
 - URLSession capture: "No … `protocolClasses` … changes" becomes "no `protocolClasses` change
@@ -979,9 +922,7 @@ Base check (every item runs in it unless marked):
   `HttpRequestTimeoutException`; `HttpStatement.execute { }` over a mock completes its call job;
   `HttpCache` does not store a mock or an edited response, and `HttpCookies` stores no cookie
   (Set-Cookie rejected); a body edit under `ContentEncoding` drops `Content-Encoding` and the app
-  reads the replacement; a `Content-Type` edit; replay through the client with `Auth`; replay after
-  `client.close()` is refused and still yields a `Failed` record under the returned id; the
-  `HttpClientCall` constructor test.
+  reads the replacement; a `Content-Type` edit; the `HttpClientCall` constructor test.
 - **Android host tests** (`:hopi-android:testAndroidHostTest`, OkHttp `MockWebServer`): a mock
   leaves the server's request count at 0 and app interceptors see it; request edit reaches the
   server; **an edit to a host the client pins with a wrong pin still fails with
@@ -989,17 +930,14 @@ Base check (every item runs in it unless marked):
   with the cache not storing the edit (header-only edit caches the original, body edit caches
   nothing); a body edit with an app-set `Accept-Encoding: gzip` drops `Content-Encoding`; a mocked
   302 and 401 reach the app unfollowed and the client's `Authenticator` is not called; each fail's
-  exception class and message; delays with `call.cancel()`, `callTimeout` and `readTimeout`; replay
-  through the client runs each app interceptor zero times and the client's network interceptor
-  once, is refused on 3.14, and a cancelled replay call still yields a `Failed` record.
+  exception class and message; delays with `call.cancel()`, `callTimeout` and `readTimeout`.
   `HttpURLConnection`: a mock never connects the delegate (a counting fake delegate plus the server
   count); the mock-mode method coverage test over `android.jar`; 4xx mock throws from
   `getInputStream` and serves `getErrorStream`; certificate getters throw on an HTTPS mock; URL edit
   builds a new delegate with the app's `SSLSocketFactory` (a recording factory sees the
   connection) and `HostnameVerifier`; a header removal reaches the server without the header (the
   rebuild path); `getErrorStream` is null before a connecting call on a 4xx mock; body edit with
-  fixed-length mode; delay ends on
-  `disconnect()`; replay with and without app TLS objects.
+  fixed-length mode; delay ends on `disconnect()`.
 - **iOS** (`:hopi-urlsession:iosSimulatorArm64Test`, `:hopi-core:iosSimulatorArm64Test`, the
   existing in-process server and fixtures): the spikes 1 to 7 as tests; which `canInit` form each
   OS calls and whether a redirect hop asks again; mock and fail through a
@@ -1013,9 +951,7 @@ Base check (every item runs in it unless marked):
   factory hook's self-check and an edit through each; a factory that calls another does not edit
   twice; a delegate that rejects every server-trust challenge still rejects the edited request
   (loopback TLS in the test server); the factory hooks are absent until the first edit or delay
-  rule; replay through a delegate session (the app delegate receives the challenge, not the data)
-  and through Ktor Darwin's delegate; refusal for a background configuration; the C matcher against
-  the shared vectors.
+  rule; the C matcher against the shared vectors.
 - **Parity and release**: `:checkNoopParity` with the new pair; the noop's JVM test that no
   `hopi-core` is on its classpath; `verifyReleaseUsesNoop`, `verifyHopiSelection`,
   `verifyDebugCapture` and `verifyIosReleaseExcludesCapture` as extended; the Gradle plugin's
@@ -1038,8 +974,7 @@ simulator, `adb kill-server`, the dev server, Gradle).
    fake SDK's `HttpURLConnection` shapes): `hopi mock add` → the app shows the mock and the dev
    server logs nothing; `hopi fail add` per kind → the app's error text names the platform
    exception; `hopi delay add` → the measured latency moves by the delay; `hopi edit add` → the dev
-   server logs the edited header and path, the app shows the edited response; `hopi replay` → the
-   dev server logs the request twice, `hopi list` shows `[replay of N]`; `hopi rules clear` → every
+   server logs the edited header and path, the app shows the edited response; `hopi rules clear` → every
    request reaches the server again. The pinned client in the sample (a `CertificatePinner` with a
    wrong pin against the dev server's TLS port, debug network security config) fails before and
    after an edit rule, and a mock on it succeeds without any connection. The release build, with
@@ -1049,7 +984,7 @@ simulator, `adb kill-server`, the dev server, Gradle).
    `data(for:)` and Ktor Darwin, including the "unsupported" warnings for response edits; the
    app's delegate with a pinning challenge handler keeps rejecting a wrong certificate after a
    request edit; a background session's request is untouched by a mock rule.
-3. **Desktop**: the panel against both, "Mock this response" from a selected record, replay.
+3. **Desktop**: the panel against both, "Mock this response" from a selected record.
 
 Evidence (CLI `--json` output, dev server logs) goes under `build/evidence/rules/`, results under
 `benchmark/rules/<date>/`.
@@ -1082,9 +1017,7 @@ load under 3).
   **not met**. Ktor on Android goes through the OkHttp interceptor (the OkHttp figure applies); on
   the JVM 0.2 to 0.3 µs.
 - **With rules, matching.** Mock latency from the app's call to its first body byte, against a
-  loopback request (expected well below it, since nothing connects); the edit path's added CPU;
-  the cost of a replay on the app (none on the app's threads besides the request itself), and the
-  added CPU per unrelated request while a replay is in flight (the state is not `EMPTY` then).
+  loopback request (expected well below it, since nothing connects); the edit path's added CPU.
 - **Idle.** 60 s with rules set and no traffic: no Hopi thread wakes (the 50 ms OkHttp wait exists
   only while a delayed request waits; tested by counting wakes with a delayed request and without).
 
@@ -1097,7 +1030,7 @@ Features first, end to end, then one review and hardening pass at the end:
 3. Ktor plugin: mock, fail, delay, edit.
 4. OkHttp, then `HttpURLConnection`: mock, fail, delay, edit.
 5. URLSession: protocol injection, mock, fail, delay; then the factory hooks and request edit.
-6. Replay on every source.
+6. Replay on every source (built, then removed: see "Replay (removed)").
 7. Bridge commands, blobs, `hello.rules`; `hopi-connect`; the CLI.
 8. In-app rules list and "Mock this response"; the desktop panel.
 9. Device verification and the performance plan; `ARCHITECTURE.md` amended with the figures.
@@ -1105,9 +1038,8 @@ Features first, end to end, then one review and hardening pass at the end:
 
 ## Risks
 
-1. **Private URLSession pieces.** `-[NSURLSessionTask session]` and the private task factories may
-   change; each is self-checked, and a failed check removes only what depends on it (replay, or
-   edits through that factory), with a notice line.
+1. **Private URLSession pieces.** The private task factories may change; each is self-checked, and
+   a failed check removes only the edits through that factory, with a notice line.
 2. **Ktor `@InternalAPI`.** `HttpClientCall`'s constructor and finishing the send pipeline with a
    built call are Ktor internals; pinned by a test to the Ktor version Hopi builds against.
 3. **Observable differences when a rule applies**, stated, not hidden: `task.originalRequest` is
@@ -1117,11 +1049,8 @@ Features first, end to end, then one review and hardening pass at the end:
    followed on OkHttp, `HttpURLConnection` and URLSession; an `HttpURLConnection` mock has no
    certificates; a Ktor mock or edit on a client with `HttpCache` carries `Cache-Control:
    no-store`; a mocked URLSession upload reports no send progress.
-4. **The app's delegate and a replayed task.** A session delegate written for the tasks it created
-   may mishandle a challenge or redirect for another; the device tests cover Ktor Darwin's, and the
-   refusal rule handles the rest.
-5. **Two matchers** (Kotlin and C) can drift; the shared vectors fail the build when they do.
-6. **The OkHttp delay wait** checks for cancel every 50 ms because OkHttp has no cancel callback; a
+4. **Two matchers** (Kotlin and C) can drift; the shared vectors fail the build when they do.
+5. **The OkHttp delay wait** checks for cancel every 50 ms because OkHttp has no cancel callback; a
    cancel is noticed up to 50 ms late, only for requests a delay rule holds.
-7. **Sessions created before `start()`** (an SDK's `+load`) cannot be mocked; documented, and the
+6. **Sessions created before `start()`** (an SDK's `+load`) cannot be mocked; documented, and the
    in-app rules list cannot detect it.

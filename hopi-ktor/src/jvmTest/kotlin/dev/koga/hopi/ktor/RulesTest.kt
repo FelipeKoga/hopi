@@ -8,8 +8,6 @@ import dev.koga.hopi.core.rules.EditSpec
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchShorthand
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.Replays
-import dev.koga.hopi.core.rules.ReplayResult
 import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.ResponseEdit
 import dev.koga.hopi.core.rules.RuleBody
@@ -23,7 +21,6 @@ import io.ktor.client.call.HttpClientCall
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
-import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.ServerResponseException
@@ -107,9 +104,7 @@ class RulesTest {
             assertEquals(200, record.responseCode)
             assertNull(record.ruleId)
             assertNull(record.ruleApplied)
-            assertNull(record.replayOf)
             assertEquals("HTTP/1.1", record.protocol)
-            assertNotNull(record.replayTarget)
         }
     }
 
@@ -518,83 +513,6 @@ class RulesTest {
             val client = mockClient(t.store, { rules = false }) { respond("real") }
             assertEquals("real", client.get("https://api.example.com/users/1").bodyAsText())
             assertNull(t.awaitTerminal().single().ruleId)
-        }
-    }
-
-    @Test
-    fun aReplayGoesThroughTheClientAndIsRecordedAsAReplay() = runBlocking<Unit> {
-        TestStore().use { t ->
-            val client = mockClient(t.store) { request -> respond("seen " + request.headers["X-App"] + " " + request.body.toByteArray().decodeToString()) }
-            client.post("https://api.example.com/echo") {
-                header("X-App", "1")
-                setBody("payload")
-            }.bodyAsText()
-            val original = t.awaitTerminal().single()
-            val started = assertIs<ReplayResult.Started>(Replays.start(t.store, original.id, RequestEdit(setHeaders = listOf("X-App" to "2"))))
-            val replayed = t.awaitTerminal(2).single { it.id == started.id }
-            assertEquals(original.id, replayed.replayOf)
-            assertEquals("seen 2 payload", replayed.responseBody!!.bytes.decodeToString())
-            assertEquals(2, (client.engine as MockEngine).requestHistory.size)
-            withTimeout(5_000) { while (RuleEngine.state !== RuleState.EMPTY) delay(10) }
-        }
-    }
-
-    @Test
-    fun rulesOffOffersNoReplay() = runBlocking<Unit> {
-        // That recorder never reads a replay's hand-off, even when another recorder has rules on.
-        RuleEngine.recorderStarted(rules = true)
-        TestStore().use { t ->
-            val client = mockClient(t.store, { rules = false }) { respond("real") }
-            client.get("https://api.example.com/a").bodyAsText()
-            val record = t.awaitTerminal().single()
-            assertNull(record.replayTarget)
-            val refused = assertIs<ReplayResult.Refused>(Replays.start(t.store, record.id, null))
-            assertTrue("offers no replay" in refused.error.message, refused.error.message)
-            assertEquals(1, (client.engine as MockEngine).requestHistory.size)
-        }
-    }
-
-    @Test
-    fun aReplaySendsWhatAPluginAppendedOnceAndKeepsWhatAPluginReplaced() = runBlocking<Unit> {
-        TestStore().use { t ->
-            var token = 0
-            val seen = Collections.synchronizedList(mutableListOf<HttpRequestData>())
-            val client = HttpClient(MockEngine { request -> seen += request; respond("ok") }) {
-                install(createClientPlugin("Sign") { onRequest { request, _ -> request.headers.append("X-Signature", "sig") } })
-                install(createClientPlugin("Token") {
-                    onRequest { request, _ ->
-                        request.headers.remove("X-Token")
-                        request.headers.append("X-Token", "t${token++}")
-                    }
-                })
-                install(Hopi) {
-                    store = t.store
-                    logSink = HopiLogSink.Off
-                }
-            }
-            client.get("https://api.example.com/signed") { header("X-App", "a") }.bodyAsText()
-            val original = t.awaitTerminal().single()
-            assertEquals(listOf("sig"), original.requestHeaders.filter { it.first.equals("X-Signature", ignoreCase = true) }.map { it.second })
-            val started = assertIs<ReplayResult.Started>(Replays.start(t.store, original.id, null))
-            val replayed = t.awaitTerminal(2).single { it.id == started.id }
-            val sent = seen.last()
-            assertEquals(listOf("sig"), sent.headers.getAll("X-Signature"), "the plugin's value is sent once")
-            assertEquals(listOf("t1"), sent.headers.getAll("X-Token"), "a plugin that replaces its header gives the fresh value")
-            assertEquals(listOf("a"), sent.headers.getAll("X-App"))
-            assertEquals(listOf("sig"), replayed.requestHeaders.filter { it.first.equals("X-Signature", ignoreCase = true) }.map { it.second })
-            withTimeout(5_000) { while (RuleEngine.state !== RuleState.EMPTY) delay(10) }
-        }
-    }
-
-    @Test
-    fun aReplayAfterTheClientClosedIsRefused() = runBlocking<Unit> {
-        TestStore().use { t ->
-            val client = mockClient(t.store) { respond("ok") }
-            client.get("https://api.example.com/a").bodyAsText()
-            val original = t.awaitTerminal().single()
-            client.close()
-            val refused = assertIs<ReplayResult.Refused>(Replays.start(t.store, original.id, null))
-            assertTrue("closed" in refused.error.message, refused.error.message)
         }
     }
 

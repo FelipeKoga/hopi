@@ -121,13 +121,6 @@ class RuleSpecTest {
         invalid(RuleSpec(MatchSpec(sources = emptySet()), fail = FailKind.RESET), "match.sources")
     }
 
-    @Test
-    fun replayEditsRefuseTheRedactionPlaceholder() {
-        val error = assertNotNull(RuleValidation.validateReplayEdit(RequestEdit(setHeaders = listOf("Authorization" to Redactor.REDACTED))))
-        assertTrue(error.message.startsWith("edit.setHeaders"), error.message)
-        assertNull(RuleValidation.validateReplayEdit(RequestEdit(setHeaders = listOf("Authorization" to "Bearer real"))))
-    }
-
     private val context = object : RuleJsonContext {
         val blobs = mutableMapOf(1L to "from a blob".encodeToByteArray())
         val records = mutableMapOf<Long, HttpTransaction>()

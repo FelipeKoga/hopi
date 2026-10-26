@@ -27,13 +27,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
-import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchSpec
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSpec
@@ -41,7 +37,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import javax.imageio.ImageIO
-import java.util.concurrent.LinkedBlockingQueue
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -182,48 +177,6 @@ class RulesPanelUiTest {
         // Copied from the app's own record, unredacted, never through the bridge.
         assertEquals("""{"id":42}""", rule.spec.mock!!.body!!.bytes.decodeToString())
         assertTrue(rule.spec.mock!!.headers.none { it.first.equals("Set-Cookie", ignoreCase = true) })
-    }
-
-    @Test
-    fun replayAndEditAndReplayGoThroughTheAppsClient() = runComposeUiTest {
-        val app = FakeApp(root.resolve("4")).also { closeables += it }
-        val sent = LinkedBlockingQueue<ReplayRequest>()
-        val target = object : ReplayTarget {
-            override val source = "okhttp"
-
-            override fun refusal(): String? = null
-
-            override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-                sent += request
-                check(handoff.take())
-                app.store.submit(
-                    HttpTransaction.pending(handoff.id, 1_700_000_000_000, request.method, request.url, request.headers, null)
-                        .copy(replayOf = handoff.replayOf, source = source)
-                        .completed(201, emptyList(), null, 3, "h2"),
-                )
-                handoff.finish(null)
-            }
-        }
-        val original = app.add { completeTx(it, url = "https://api.example.com/orders").copy(replayTarget = target) }
-        connected(app)
-        waitForText("/orders")
-        onNodeWithText("/orders").performClick()
-        waitForText("GET 200")
-
-        onNodeWithText("Replay").performScrollTo().performClick()
-        waitForText("GET 201")
-        waitForText("Replay of")
-        assertEquals("https://api.example.com/orders", sent.take().url)
-
-        // The replay's detail links back; edit and replay the original with another method.
-        onNodeWithText("#${original.id}").performClick()
-        waitForText("GET 200")
-        onNodeWithText("Edit and replay…").performScrollTo().performClick()
-        waitForText("Edit and replay #${original.id}")
-        onNodeWithTag(RulesTags.METHOD).performTextInput("PUT")
-        onNodeWithTag(RulesTags.SAVE).performClick()
-        waitForText("PUT 201")
-        assertEquals("PUT", sent.take().method)
     }
 
     @Test

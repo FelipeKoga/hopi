@@ -11,15 +11,13 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * What the sources read once per request ([RuleEngine.state]): immutable, [EMPTY] when no enabled,
- * unexhausted rule exists and no replay is in flight, so the whole no-rule cost of a request is
- * one volatile read and one reference comparison. [bySource] is indexed by [RuleSource.ordinal]
+ * unexhausted rule exists, so the whole no-rule cost of a request is one volatile read and one reference comparison. [bySource] is indexed by [RuleSource.ordinal]
  * and holds, in the order they are tried (priority, then newest first), only the rules that source
  * can apply ([Capabilities]); a source with none of its own sees an empty array.
  */
 @HopiInternalApi
 public class RuleState internal constructor(
     public val bySource: Array<Array<CompiledRule>>,
-    public val replaysInFlight: Int,
     public val revision: Long,
 ) {
     /** The rules [source] tries, in order. */
@@ -42,7 +40,7 @@ public class RuleState internal constructor(
     public companion object {
         private val NO_RULES = emptyArray<CompiledRule>()
 
-        public val EMPTY: RuleState = RuleState(Array(RuleSource.entries.size) { NO_RULES }, replaysInFlight = 0, revision = 0)
+        public val EMPTY: RuleState = RuleState(Array(RuleSource.entries.size) { NO_RULES }, revision = 0)
     }
 }
 
@@ -63,11 +61,11 @@ public object RuleEngine {
         val spec: RuleSpec get() = compiled.spec
     }
 
-    private class Book(val entries: List<Entry>, val replays: Int, val revision: Long, val state: RuleState) {
+    private class Book(val entries: List<Entry>, val revision: Long, val state: RuleState) {
         val bodyBytes: Long get() = entries.sumOf { it.spec.bodyBytes }
     }
 
-    private val book = AtomicReference(Book(emptyList(), replays = 0, revision = 0, RuleState.EMPTY))
+    private val book = AtomicReference(Book(emptyList(), revision = 0, RuleState.EMPTY))
     private val published = AtomicReference(RuleState.EMPTY)
     private val nextRuleId = AtomicLong(0)
     private val listeners = AtomicReference<List<(RuleState) -> Unit>>(emptyList())
@@ -165,33 +163,19 @@ public object RuleEngine {
         return { updateListeners { current -> current.filterNot { it === listener } } }
     }
 
-    /**
-     * Counts a replay in flight, so the state is not [RuleState.EMPTY] and recorders look for its
-     * hand-off; false when [RuleLimits.MAX_REPLAYS_IN_FLIGHT] are already in flight.
-     */
-    public fun beginReplay(): Boolean = mutate { current ->
-        if (current.replays >= RuleLimits.MAX_REPLAYS_IN_FLIGHT) return@mutate limit("replay: at most ${RuleLimits.MAX_REPLAYS_IN_FLIGHT} in flight")
-        Change(current.entries, current.replays + 1)
-    } == null
-
-    public fun endReplay() {
-        mutate { current -> Change(current.entries, maxOf(0, current.replays - 1)) }
-    }
-
     /** Republishes without the rule whose claim reached its `times`; on the claiming thread, once per rule. */
     internal fun republishAfterExhaustion() {
         mutate { current -> Change(current.entries) }
     }
 
-    /** Tests: drops every rule, replay count and recorder registration. Rule ids keep counting. */
+    /** Tests: drops every rule and recorder registration. Rule ids keep counting. */
     public fun resetForTests() {
         clear()
-        mutate { current -> Change(current.entries, 0) }
         recordersStarted.store(0)
         recordersWithRules.store(0)
     }
 
-    private class Change(val entries: List<Entry>, val replays: Int = -1)
+    private class Change(val entries: List<Entry>)
 
     /**
      * Applies [change] to the book with a compare-and-set loop and publishes the result; returns
@@ -204,9 +188,8 @@ public object RuleEngine {
             val result = change(current)
             if (result is RuleError) return result
             result as Change
-            val replays = if (result.replays < 0) current.replays else result.replays
             val revision = current.revision + 1
-            val next = Book(result.entries, replays, revision, compile(result.entries, replays, revision))
+            val next = Book(result.entries, revision, compile(result.entries, revision))
             if (book.compareAndSet(current, next)) {
                 publish()
                 return null
@@ -229,16 +212,16 @@ public object RuleEngine {
         for (listener in listeners.load()) listener(current.state)
     }
 
-    private fun compile(entries: List<Entry>, replays: Int, revision: Long): RuleState {
+    private fun compile(entries: List<Entry>, revision: Long): RuleState {
         val live = entries.filter { it.spec.enabled && !it.compiled.exhausted }
-        if (live.isEmpty() && replays == 0) return RuleState.EMPTY
+        if (live.isEmpty()) return RuleState.EMPTY
         // Priority first (higher tried first), then newest first.
         val ordered = live.sortedWith(compareByDescending<Entry> { it.spec.priority }.thenByDescending { it.id })
         val bySource = Array(RuleSource.entries.size) { index ->
             val source = RuleSource.entries[index]
             ordered.filter { Capabilities.applies(source, it.spec) }.map { it.compiled }.toTypedArray()
         }
-        return RuleState(bySource, replays, revision)
+        return RuleState(bySource, revision)
     }
 
     private fun info(entry: Entry): RuleInfo =

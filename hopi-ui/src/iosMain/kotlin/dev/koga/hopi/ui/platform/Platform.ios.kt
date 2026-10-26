@@ -51,3 +51,8 @@ internal actual fun rememberShareSheet(): ShareSheet? {
 @Composable
 internal actual fun SystemBarIcons(lightBackground: Boolean) {
 }
+
+/** iOS monitors need no window to attach to: the run-loop observers see every unit of work. */
+@Composable
+internal actual fun PerfLauncherAnchor() {
+}

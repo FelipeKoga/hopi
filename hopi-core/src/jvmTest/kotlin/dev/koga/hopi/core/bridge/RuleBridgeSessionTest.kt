@@ -2,13 +2,7 @@ package dev.koga.hopi.core.bridge
 
 import dev.koga.hopi.core.complete
 import dev.koga.hopi.core.json.parseJsonTree
-import dev.koga.hopi.core.model.CapturedBody
-import dev.koga.hopi.core.model.TransactionState
-import dev.koga.hopi.core.pending
 import dev.koga.hopi.core.redact.Redactor
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleLimits
 import dev.koga.hopi.core.rules.RuleSource
@@ -18,8 +12,6 @@ import dev.koga.hopi.core.store.HopiStore
 import java.util.Base64
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -34,11 +26,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 
-/** The rule commands, blobs and replay over a real [BridgeSession]. */
+/** The rule commands and blobs over a real [BridgeSession]. */
 class RuleBridgeSessionTest {
     private val storeExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val storeScope = CoroutineScope(SupervisorJob() + storeExecutor.asCoroutineDispatcher())
@@ -91,7 +80,7 @@ class RuleBridgeSessionTest {
     @Test
     fun writeCommandsNeedHelloFirstOnTheSameConnection() {
         val client = serve()
-        for (line in listOf(addLine("{\"fail\":\"reset\"}"), "{\"cmd\":\"rules.list\"}", "{\"cmd\":\"rules.clear\"}", "{\"cmd\":\"blob.put\",\"blob\":1,\"offset\":0,\"data\":\"\"}", "{\"cmd\":\"replay\",\"id\":1}")) {
+        for (line in listOf(addLine("{\"fail\":\"reset\"}"), "{\"cmd\":\"rules.list\"}", "{\"cmd\":\"rules.clear\"}", "{\"cmd\":\"blob.put\",\"blob\":1,\"offset\":0,\"data\":\"\"}")) {
             assertError(BridgeError.BAD_REQUEST, client.request(line), "hello first")
         }
         assertSame(RuleState.EMPTY, RuleEngine.state)
@@ -247,89 +236,14 @@ class RuleBridgeSessionTest {
         assertEquals("transaction", fields(plain.nextLine())["type"], "no rules line on a tail that did not ask")
     }
 
-    /** A replay target that records what it was asked to send and finishes on demand. */
-    private class FakeTarget(private val refusal: String? = null, private val throwOnSend: Boolean = false) : ReplayTarget {
-        val sent = LinkedBlockingQueue<Pair<ReplayRequest, ReplayHandoff>>()
-        override val source: String = "okhttp"
-
-        override fun refusal(): String? = refusal
-
-        override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-            if (throwOnSend) throw IllegalStateException("client closed")
-            sent += request to handoff
-        }
-    }
-
-    private fun record(target: ReplayTarget?, body: CapturedBody? = null): Long {
-        val id = store.nextId()
-        store.submit(
-            pending(id, method = "POST", url = "https://api.example.com/users?page=2", headers = listOf("Authorization" to "Bearer real", "X-Trace" to "1"), body = body)
-                .completed(200, emptyList(), null, 5, "h2")
-                .copy(replayTarget = target),
-        )
-        runBlocking { withTimeout(10_000) { store.transactions.first { list -> list.any { it.id == id } } } }
-        return id
-    }
-
     @Test
-    fun replayHandsTheUnredactedRequestToTheTargetAndRepliesAtOnce() {
-        val target = FakeTarget()
-        val of = record(target, CapturedBody("{\"a\":1}".encodeToByteArray(), 7, false, "application/json", null))
-        val reply = fields(session().request("{\"cmd\":\"replay\",\"id\":$of,\"edit\":{\"setHeaders\":[[\"X-Trace\",\"2\"]],\"path\":\"/v2/users\"}}"))
-        assertEquals("replay", reply["type"])
-        assertEquals(of, reply["of"])
-        val newId = reply["id"] as Long
-        val (request, handoff) = assertNotNull(target.sent.poll(10, TimeUnit.SECONDS))
-        assertEquals("https://api.example.com/v2/users?page=2", request.url)
-        assertEquals(listOf("Authorization" to "Bearer real", "X-Trace" to "2"), request.headers)
-        assertEquals("{\"a\":1}", request.body?.decodeToString())
-        assertEquals(newId, handoff.id)
-        assertEquals(of, handoff.replayOf)
-        // While it is in flight, recorders take the scan path.
-        assertEquals(1, RuleEngine.state.replaysInFlight)
-        assertTrue(handoff.take(), "the recorder takes it")
-        handoff.finish(null)
-        assertSame(RuleState.EMPTY, RuleEngine.state)
-    }
-
-    @Test
-    fun aReplayNoRecorderTookStillEndsInAFailedRecord() {
-        val target = FakeTarget()
-        val of = record(target)
-        val newId = fields(session().request("{\"cmd\":\"replay\",\"id\":$of}"))["id"] as Long
-        val (_, handoff) = assertNotNull(target.sent.poll(10, TimeUnit.SECONDS))
-        handoff.finish("java.io.IOException: Canceled")
-        val failed = runBlocking { withTimeout(10_000) { store.transactions.first { list -> list.any { it.id == newId } } } }.first { it.id == newId }
-        assertEquals(TransactionState.Failed, failed.state)
-        assertEquals(of, failed.replayOf)
-        assertEquals("java.io.IOException: Canceled", failed.error)
-        assertSame(RuleState.EMPTY, RuleEngine.state)
-    }
-
-    @Test
-    fun aTargetThatThrowsStillYieldsTheRecord() {
-        val of = record(FakeTarget(throwOnSend = true))
-        val newId = fields(session().request("{\"cmd\":\"replay\",\"id\":$of}"))["id"] as Long
-        val failed = runBlocking { withTimeout(10_000) { store.transactions.first { list -> list.any { it.id == newId } } } }.first { it.id == newId }
-        assertTrue("client closed" in failed.error.orEmpty(), failed.error)
-        assertSame(RuleState.EMPTY, RuleEngine.state)
-    }
-
-    @Test
-    fun replayRefusals() {
+    fun replayIsAnUnknownCommand() {
+        // Removed from the product (docs/ROADMAP.md, "Replay (no priority)"): a newer client that
+        // still sends it gets what an older app answers any command it does not know.
         val client = session()
-        assertError(BridgeError.NOT_FOUND, client.request("{\"cmd\":\"replay\",\"id\":999}"))
-        assertError(BridgeError.UNSUPPORTED, client.request("{\"cmd\":\"replay\",\"id\":${record(null)}}"), "offers no replay")
-        assertError(BridgeError.UNSUPPORTED, client.request("{\"cmd\":\"replay\",\"id\":${record(FakeTarget(refusal = "the client was closed"))}}"), "the client was closed")
-        val truncated = record(FakeTarget(), CapturedBody(ByteArray(10), 100, truncated = true, null, null))
-        assertError(BridgeError.UNSUPPORTED, client.request("{\"cmd\":\"replay\",\"id\":$truncated}"), "not held in full")
-        // A replacement body lifts that refusal.
-        assertEquals("replay", fields(client.request("{\"cmd\":\"replay\",\"id\":$truncated,\"edit\":{\"body\":{\"text\":\"x\"}}}"))["type"])
-        val ok = record(FakeTarget())
-        assertError(BridgeError.BAD_REQUEST, client.request("{\"cmd\":\"replay\",\"id\":$ok,\"edit\":{\"setHeaders\":[[\"Authorization\",\"<redacted>\"]]}}"), "placeholder")
-        assertError(BridgeError.BAD_REQUEST, client.request("{\"cmd\":\"replay\",\"id\":$ok,\"edit\":{\"scheme\":\"http\"}}"), "scheme")
-        repeat(RuleLimits.MAX_REPLAYS_IN_FLIGHT - 1) { assertEquals("replay", fields(client.request("{\"cmd\":\"replay\",\"id\":$ok}"))["type"]) }
-        assertError(BridgeError.LIMIT, client.request("{\"cmd\":\"replay\",\"id\":$ok}"), "in flight")
+        assertError(BridgeError.BAD_REQUEST, client.request("{\"cmd\":\"replay\",\"id\":1}"), "unknown cmd")
+        assertError(BridgeError.BAD_REQUEST, client.request("{\"cmd\":\"replay\",\"id\":1,\"edit\":{\"path\":\"/v2\"}}"), "malformed JSON object")
+        assertSame(RuleState.EMPTY, RuleEngine.state)
     }
 
     private companion object {

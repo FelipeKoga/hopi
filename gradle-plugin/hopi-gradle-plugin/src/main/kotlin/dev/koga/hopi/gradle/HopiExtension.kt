@@ -1,7 +1,9 @@
 package dev.koga.hopi.gradle
 
+import org.gradle.api.Action
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Nested
 
 /**
  * The optional `hopi { }` block of an Android application module. Every value has a default, so
@@ -31,7 +33,7 @@ public abstract class HopiExtension {
     public abstract val agentBridge: Property<Boolean>
 
     /**
-     * Applies Hopi rules (mock, fail, delay, edit, replay; docs/design/rules.md) to the requests the
+     * Applies Hopi rules (mock, fail, delay, edit; docs/design/rules.md) to the requests the
      * interceptor and the wrappers record. False: they never read the rule state.
      */
     public abstract val rules: Property<Boolean>
@@ -41,6 +43,14 @@ public abstract class HopiExtension {
 
     /** Class name patterns AGP's instrumentation leaves alone (`com.vendor.pinned.**`). */
     public abstract val excludedClasses: ListProperty<String>
+
+    /** The performance monitors (docs/design/perf-monitors.md); off unless `perf { enabled = true }`. */
+    @get:Nested
+    public abstract val perf: HopiPerfExtension
+
+    public fun perf(action: Action<HopiPerfExtension>) {
+        action.execute(perf)
+    }
 
     /** Adds header names (case-insensitive) to the default redaction list. */
     public fun redactHeaders(vararg names: String) {
@@ -74,5 +84,6 @@ public abstract class HopiExtension {
         agentBridge.convention(false)
         rules.convention(true)
         redactionDisabled.convention(false)
+        perf.applyDefaults()
     }
 }

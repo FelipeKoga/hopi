@@ -370,50 +370,6 @@ class DeviceRulesPanelUiTest {
         )
         screenshot("08-cleared.png")
 
-        // Replay from a record: the app re-sends it; the new record is selected and links back.
-        val marker = serverLines()
-        select("/echo?rv=host-${all.first()}")
-        onNodeWithText("Replay").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 30_000) { viewer.notice.value.orEmpty().startsWith("Replaying #") }
-        val (from, to) = Regex("Replaying #(\\d+) as #(\\d+)").find(viewer.notice.value!!)!!.destructured
-        waitUntil(timeoutMillis = 30_000) { session.store.value.get(to.toLong())?.state?.isTerminal == true }
-        waitFor("Replay of")
-        val replayed = session.store.value.get(to.toLong())!!
-        val original = session.store.value.get(from.toLong())!!
-        val replayServer = serverSince(marker)
-        record(
-            "replay: the server sees the request again, the new record links back",
-            replayed.replayOf == from.toLong() && replayed.responseCode == 200 && replayServer.size == 1 && replayServer.single().path() == URI(original.url).rawPath + "?" + URI(original.url).rawQuery,
-            "notice='${viewer.notice.value}' new=#$to replayOf=${replayed.replayOf} code=${replayed.responseCode} server=${replayServer.map { "${it.str("method")} ${it.path()}" }}",
-        )
-        searchList("/echo?rv=host-${all.first()}")
-        val replayTagged = runCatching { waitUntil(timeoutMillis = 10_000) { onAllNodes(hasContentDescription("replay")).fetchSemanticsNodes().isNotEmpty() } }.isSuccess
-        record("replay: the list tags the replay", replayTagged, "${onAllNodes(hasContentDescription("replay")).fetchSemanticsNodes().size} rows tagged replay")
-        searchList(null)
-        screenshot("09-replayed.png")
-
-        // Edit and replay: another path and a header, through the app's client.
-        val marker2 = serverLines()
-        select("/json?rv=host-$first")
-        onNodeWithText("Edit and replay…").performScrollTo().performClick()
-        waitFor("Edit and replay #")
-        field("Path").performTextInput("/echo")
-        onNode(hasText("Add header") and hasAnyAncestor(hasTestTag(RulesTags.PANEL))).performScrollTo().performClick()
-        onNodeWithTag(RulesTags.header("Set headers", 0, value = false)).performScrollTo().performTextInput("X-Desktop")
-        onNodeWithTag(RulesTags.header("Set headers", 0, value = true)).performTextInput("replayed")
-        screenshot("10-edit-replay-form.png")
-        onNodeWithTag(RulesTags.SAVE).performClick()
-        waitUntil(timeoutMillis = 30_000) { panel.message.orEmpty().startsWith("Replaying #") }
-        val to2 = Regex("as #(\\d+)").find(panel.message!!)!!.groupValues[1].toLong()
-        waitUntil(timeoutMillis = 30_000) { session.store.value.get(to2)?.state?.isTerminal == true }
-        val replay2 = session.store.value.get(to2)!!
-        val server2 = serverSince(marker2)
-        record(
-            "edit and replay: the server sees GET /echo with X-Desktop",
-            server2.size == 1 && server2.single().path() == "/echo?rv=host-$first" && server2.single().header("X-Desktop") == "replayed" && replay2.replayOf != null && replay2.responseCode == 200,
-            "message='${panel.message}' new=#$to2 replayOf=${replay2.replayOf} url=${replay2.url} server=${server2.map { "${it.str("method")} ${it.path()} X-Desktop=${it.header("X-Desktop")}" }}",
-        )
-        screenshot("11-edit-replayed.png")
         viewer.close()
     }
 
@@ -542,7 +498,7 @@ class DeviceRulesPanelUiTest {
         record("clearing the list search keeps the selection ($path)", kept, "selected #$chosen, after clearing the search: #${panes.selectedId}")
         if (!kept) panes.selectedId = chosen
         // The detail's rule buttons appear once the selected record's detail is fetched.
-        waitFor("Edit and replay…")
+        waitFor("Mock this response")
     }
 
     private fun ComposeUiTest.searchList(query: String?) {

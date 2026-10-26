@@ -149,6 +149,5 @@ final object dev.koga.hopi.rules/HopiRules { // dev.koga.hopi.rules/HopiRules|nu
     final fun list(): kotlin.collections/List<dev.koga.hopi.rules/HopiRuleInfo> // dev.koga.hopi.rules/HopiRules.list|list(){}[0]
     final fun mock(kotlin/String, kotlin/Function1<dev.koga.hopi.rules/HopiMock, kotlin/Unit> = ...): kotlin/Long // dev.koga.hopi.rules/HopiRules.mock|mock(kotlin.String;kotlin.Function1<dev.koga.hopi.rules.HopiMock,kotlin.Unit>){}[0]
     final fun remove(kotlin/Long): kotlin/Boolean // dev.koga.hopi.rules/HopiRules.remove|remove(kotlin.Long){}[0]
-    final fun replay(kotlin/Long, kotlin/Function1<dev.koga.hopi.rules/HopiRequestEdit, kotlin/Unit> = ...): kotlin/Long // dev.koga.hopi.rules/HopiRules.replay|replay(kotlin.Long;kotlin.Function1<dev.koga.hopi.rules.HopiRequestEdit,kotlin.Unit>){}[0]
     final fun setEnabled(kotlin/Long, kotlin/Boolean): kotlin/Boolean // dev.koga.hopi.rules/HopiRules.setEnabled|setEnabled(kotlin.Long;kotlin.Boolean){}[0]
 }

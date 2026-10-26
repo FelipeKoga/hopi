@@ -127,10 +127,4 @@ class HopiRulesTest {
         assertEquals("hi", mock.body?.bytes?.decodeToString())
         assertFailsWith<IllegalArgumentException> { HopiRules.mock("*/a") { from(Long.MAX_VALUE) } }
     }
-
-    @Test
-    fun replayOfARecordWithoutTargetIsRefused() {
-        assertEquals(-1, HopiRules.replay(Long.MAX_VALUE))
-        assertFailsWith<IllegalArgumentException> { HopiRules.replay(1) { setHeader("Host", "x") } }
-    }
 }

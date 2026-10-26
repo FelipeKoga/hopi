@@ -19,7 +19,7 @@ class RuleActionsTest {
     }
 
     @Test
-    fun mockAndReplayNeedTheBodiesHeldInFull() {
+    fun mockNeedsTheResponseBodyHeldInFull() {
         assertNull(mockRefusal(complete(1)))
         assertEquals("no response to mock", mockRefusal(pending(1)))
         assertEquals("response body not held in full", mockRefusal(complete(1, responseBody = textBody("{", truncated = true, total = 10))))
@@ -27,8 +27,5 @@ class RuleActionsTest {
         // A host viewer's summary: the app holds what `resHeld` says.
         assertNull(mockRefusal(complete(1, responseBody = CapturedBody.notFetched(10))))
         assertEquals("response body not held in full", mockRefusal(complete(1, responseBody = CapturedBody.notFetched(10, heldBytes = 4))))
-
-        assertNull(replayRefusal(complete(1, requestBody = textBody("{}"))))
-        assertEquals("request body not held in full", replayRefusal(complete(1, requestBody = textBody("{", truncated = true, total = 10))))
     }
 }

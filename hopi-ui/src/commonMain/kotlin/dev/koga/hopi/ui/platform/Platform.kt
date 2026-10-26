@@ -26,6 +26,14 @@ internal expect fun rememberShareSheet(): ShareSheet?
 internal expect fun SystemBarIcons(lightBackground: Boolean)
 
 /**
+ * While composed, tells `hopi-perf` which activity the launcher is in, so a frames or hangs start
+ * attaches to it at once (core's `PerfLauncher`: one weak reference, written once, cleared on
+ * dispose). Called only when a perf controller is registered. Android only.
+ */
+@Composable
+internal expect fun PerfLauncherAnchor()
+
+/**
  * The most text handed to a share sheet or the clipboard. An Android intent and a clip both travel
  * through a binder transaction of about 1 MB, which a UTF-16 string of this length stays well
  * below; past it, `setPrimaryClip` throws in the app.

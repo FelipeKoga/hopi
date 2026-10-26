@@ -16,6 +16,11 @@ internal actual fun formatTimeOfDay(epochMs: Long, withMillis: Boolean): String 
 @Composable
 internal actual fun rememberShareSheet(): ShareSheet? = null
 
+/** No activity to attach to on the JVM. */
+@Composable
+internal actual fun PerfLauncherAnchor() {
+}
+
 /** Desktop windows have no system bars to adapt. */
 @Composable
 internal actual fun SystemBarIcons(lightBackground: Boolean) {

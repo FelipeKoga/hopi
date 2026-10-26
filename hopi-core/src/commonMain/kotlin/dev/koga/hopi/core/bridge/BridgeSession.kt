@@ -7,8 +7,19 @@ import dev.koga.hopi.core.json.TransactionJson
 import dev.koga.hopi.core.json.encodeUtf8
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
-import dev.koga.hopi.core.rules.ReplayResult
-import dev.koga.hopi.core.rules.Replays
+import dev.koga.hopi.core.perf.HangEvent
+import dev.koga.hopi.core.perf.PerfController
+import dev.koga.hopi.core.perf.PerfData
+import dev.koga.hopi.core.perf.PerfEvent
+import dev.koga.hopi.core.perf.PerfHook
+import dev.koga.hopi.core.perf.PerfItem
+import dev.koga.hopi.core.perf.PerfJson
+import dev.koga.hopi.core.perf.PerfLimits
+import dev.koga.hopi.core.perf.PerfOwner
+import dev.koga.hopi.core.perf.PerfResult
+import dev.koga.hopi.core.perf.PerfSample
+import dev.koga.hopi.core.perf.PerfStartRequest
+import dev.koga.hopi.core.perf.perfWallClockMs
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleError
 import dev.koga.hopi.core.rules.RuleErrorCode
@@ -63,14 +74,14 @@ public enum class BridgeError {
     /** A limit of docs/design/rules.md ("Limits") was reached; the message names it. */
     LIMIT,
 
-    /** The app cannot do it: rules are off or absent, or a replay was refused (the message says why). */
+    /** The app cannot do it: rules are off or absent (the message says why). */
     UNSUPPORTED,
 }
 
 /**
  * The transport-agnostic protocol handler for one connection: authenticates it (token transports),
  * then serves `hello`/`list`/`get`/`tail`/`clear` from [store], redacted with the store's redactor,
- * and, after `hello` on the same connection, the rule commands (`rules.*`, `blob.put`, `replay`)
+ * and, after `hello` on the same connection, the rule commands (`rules.*`, `blob.put`)
  * against [RuleEngine]. Blobs a client stages live in this session only and die with it.
  *
  * [run] blocks the calling thread, which reads and answers requests; a second thread writes. The
@@ -116,6 +127,14 @@ public class BridgeSession(
     // Writer thread only: what this client has been sent of the live stream, for SLOW_CLIENT's `since`.
     private var sentPending: HashSet<Long>? = null
     private var highestSent = 0L
+    private var highestPerfSent = 0L
+
+    // Writer thread only: the hangs this client was sent as ongoing and not yet as ended.
+    private val ongoingHangsSent = HashSet<Long>()
+
+    // Set by the reader before the writer streams: this session's tail is `perf.tail`.
+    @kotlin.concurrent.Volatile
+    private var perfTail = false
 
     /** Serves the connection until either side ends it, then releases it. */
     public fun run() {
@@ -200,6 +219,14 @@ public class BridgeSession(
             if (command.isWrite) {
                 when {
                     !helloSeen -> reply(error(BridgeError.BAD_REQUEST, "hello first"))
+                    command is BridgeCommand.PerfTail -> {
+                        if (!startPerfTail(command)) continue
+                        // The stream runs until disconnect; later input is read only to notice that.
+                        while (true) {
+                            if (reader.readLine() == BridgeLine.End) return
+                        }
+                    }
+                    command is BridgeCommand.Perf -> servePerf(command)
                     !RuleEngine.rulesAvailable -> reply(error(BridgeError.UNSUPPORTED, "rules are off in this app (rules = false)"))
                     else -> serveRules(command)
                 }
@@ -275,26 +302,141 @@ public class BridgeSession(
             BridgeCommand.RulesClear ->
                 reply(JsonWriter().beginObject().field("type", "ok").field("removed", RuleEngine.clear()).endObject().toString())
             is BridgeCommand.BlobPut -> reply(putBlob(command))
-            is BridgeCommand.Replay -> {
-                val edit = command.edit?.let { fields ->
-                    when (val parsed = RuleJson.parseReplayEdit(fields, ruleContext)) {
-                        is RuleParse.Failed -> {
-                            reply(ruleError(parsed.error))
-                            return
-                        }
-                        is RuleParse.Ok -> parsed
-                    }
-                }
-                when (val result = Replays.start(store, command.id, edit?.value)) {
-                    is ReplayResult.Refused -> reply(ruleError(result.error))
-                    is ReplayResult.Started -> {
-                        edit?.blobs?.forEach { blobs.remove(it) }
-                        reply(JsonWriter().beginObject().field("type", "replay").field("of", result.of).field("id", result.id).endObject().toString())
-                    }
-                }
-            }
             else -> reply(error(BridgeError.BAD_REQUEST, "unknown cmd"))
         }
+    }
+
+    /** The perf commands but `perf.tail`, after `hello`. Reader thread only. */
+    private suspend fun servePerf(command: BridgeCommand.Perf) {
+        val controller = PerfHook.controller ?: return reply(error(BridgeError.UNSUPPORTED, NO_PERF))
+        when (command) {
+            is BridgeCommand.PerfStart -> {
+                if (!controller.remoteControl) return reply(error(BridgeError.UNSUPPORTED, NO_REMOTE_CONTROL))
+                limitProblem(command)?.let { return reply(error(BridgeError.LIMIT, it)) }
+                if (command.monitors.isEmpty()) return reply(error(BridgeError.BAD_REQUEST, "perf.start: name at least one monitor"))
+                unavailable(controller, command.monitors)?.let { return reply(error(BridgeError.UNSUPPORTED, it)) }
+                val request = PerfStartRequest(command.monitors, command.hangMs, command.intervalMs)
+                reply(perfResult(controller.start(request, PerfOwner.Lease(command.ttlSec))))
+            }
+            is BridgeCommand.PerfStop -> {
+                if (!controller.remoteControl) return reply(error(BridgeError.UNSUPPORTED, NO_REMOTE_CONTROL))
+                reply(PerfJson.statusLine(controller.stop(command.monitors)))
+            }
+            BridgeCommand.PerfStatus -> reply(PerfJson.statusLine(controller.status()))
+            is BridgeCommand.PerfSnapshot -> {
+                if (command.points !in 1..PerfLimits.SERIES_POINTS.toLong()) {
+                    return reply(error(BridgeError.LIMIT, "points: 1..${PerfLimits.SERIES_POINTS}"))
+                }
+                val unknown = command.series.filter { it !in PerfData.SERIES }
+                if (unknown.isNotEmpty()) return reply(error(BridgeError.BAD_REQUEST, "unknown series $unknown"))
+                snapshot(controller, command)
+            }
+            is BridgeCommand.PerfEvent -> {
+                val event = controller.data.event(command.seq)
+                reply(if (event == null) error(BridgeError.NOT_FOUND, "no perf event ${command.seq}") else PerfJson.eventLine(event))
+            }
+            is BridgeCommand.PerfTail -> Unit
+        }
+    }
+
+    private fun limitProblem(command: BridgeCommand.PerfStart): String? = when {
+        command.hangMs != null && command.hangMs !in PerfLimits.MIN_HANG_THRESHOLD_MS..PerfLimits.MAX_HANG_THRESHOLD_MS ->
+            "hangMs: ${PerfLimits.MIN_HANG_THRESHOLD_MS}..${PerfLimits.MAX_HANG_THRESHOLD_MS}"
+        command.intervalMs != null && command.intervalMs !in PerfLimits.MIN_SAMPLE_INTERVAL_MS..PerfLimits.MAX_SAMPLE_INTERVAL_MS ->
+            "intervalMs: ${PerfLimits.MIN_SAMPLE_INTERVAL_MS}..${PerfLimits.MAX_SAMPLE_INTERVAL_MS}"
+        command.ttlSec > PerfLimits.MAX_LEASE_SEC -> "ttlSec: 0..${PerfLimits.MAX_LEASE_SEC} (0: no expiry)"
+        else -> null
+    }
+
+    private fun unavailable(controller: PerfController, monitors: Set<dev.koga.hopi.core.perf.PerfMonitor>): String? {
+        val missing = monitors - controller.available
+        return if (missing.isEmpty()) null else "not available on ${controller.platform}: ${missing.joinToString { it.wireName }}"
+    }
+
+    private fun perfResult(result: PerfResult): String = when (result) {
+        is PerfResult.Ok -> PerfJson.statusLine(result.status)
+        is PerfResult.Failed -> error(if (result.code == BridgeError.LIMIT.name) BridgeError.LIMIT else BridgeError.UNSUPPORTED, result.message)
+    }
+
+    /** Series, the open second, summaries, events, threads and PSS as asked, then `end`. */
+    private suspend fun snapshot(controller: PerfController, command: BridgeCommand.PerfSnapshot) {
+        val data = controller.data
+        // Readers close a second strictly in the past, never the current one.
+        data.tick(perfWallClockMs() / 1000)
+        val points = command.points.toInt()
+        val series = command.series.ifEmpty { PerfData.SERIES }
+        if ("frames" in series) reply(PerfJson.seriesLine("frames", PerfData.FRAME_COLUMNS, data.frames.last(points)))
+        if ("cpu" in series) reply(PerfJson.seriesLine("cpu", PerfData.CPU_COLUMNS, data.cpu.last(points)))
+        if ("memory" in series) reply(PerfJson.seriesLine("memory", PerfData.MEMORY_COLUMNS, data.memory.last(points)))
+        data.seconds.provisional()?.let { reply(PerfJson.framesLine(it, provisional = true)) }
+        reply(PerfJson.summaryLine(data.summary()))
+        if (command.events) {
+            val frames = if (command.fullStacks) Int.MAX_VALUE else PerfLimits.SNAPSHOT_STACK_FRAMES
+            for (event in data.eventsSince(command.since)) reply(PerfJson.eventLine(event, frames))
+        }
+        if (command.threads) reply(PerfJson.threadsLine(controller.threads(PerfLimits.DEFAULT_TOP_THREADS)))
+        if (command.pss) reply(PerfJson.pssLine(controller.measurePss()))
+        reply(PerfJson.statusLine(controller.status()))
+        reply(END_LINE)
+    }
+
+    /**
+     * `perf.tail`: subscribes before reading the backlog, as [startTail] does, so nothing published
+     * in between is missed; the writer skips a live event the backlog already showed (the same
+     * instance: a hang completed later is a new one, and is sent). Monitors named in `start` are
+     * held by this session and released when it ends. False when it was refused.
+     */
+    private suspend fun startPerfTail(command: BridgeCommand.PerfTail): Boolean {
+        val controller = PerfHook.controller
+        if (controller == null) {
+            reply(error(BridgeError.UNSUPPORTED, NO_PERF))
+            return false
+        }
+        if (command.start.isNotEmpty()) {
+            if (!controller.remoteControl) {
+                reply(error(BridgeError.UNSUPPORTED, NO_REMOTE_CONTROL))
+                return false
+            }
+            unavailable(controller, command.start)?.let {
+                reply(error(BridgeError.UNSUPPORTED, it))
+                return false
+            }
+        }
+        val session = nextPerfSession.incrementAndFetch()
+        tailSince.store(command.since)
+        perfTail = true
+        tailing.store(true)
+        val data = controller.data
+        val remove = data.addListener { item -> offerPerf(item, command) }
+        tailJob.invokeOnCompletion { remove() }
+        if (command.start.isNotEmpty()) {
+            val result = controller.start(PerfStartRequest(command.start), PerfOwner.Tail(session))
+            tailJob.invokeOnCompletion { controller.releaseTail(session) }
+            reply(perfResult(result))
+        } else {
+            reply(PerfJson.statusLine(controller.status()))
+        }
+        if (command.threads) {
+            controller.watchThreads(true)
+            tailJob.invokeOnCompletion { controller.watchThreads(false) }
+        }
+        if (command.fps) {
+            // iOS tier 2: the display-link cadence runs while at least one viewer asks for it.
+            controller.watchCadence(true)
+            tailJob.invokeOnCompletion { controller.watchCadence(false) }
+        }
+        val shown = HashMap<Long, PerfEvent>()
+        for (event in data.eventsSince(command.since)) {
+            reply(PerfJson.eventLine(event))
+            shown[event.seq] = event
+        }
+        enqueue(Outgoing.StartPerfLive(shown, if (command.threads) controller else null))
+        return true
+    }
+
+    private fun offerPerf(item: PerfItem, command: BridgeCommand.PerfTail) {
+        if (item is PerfSample && !command.samples && !command.threads) return
+        offer(Live.Perf(item, command.samples))
     }
 
     /**
@@ -474,6 +616,10 @@ public class BridgeSession(
                     streamLive(item.since, item.shown)
                     return
                 }
+                is Outgoing.StartPerfLive -> {
+                    streamPerfLive(item.shown, item.threads)
+                    return
+                }
             }
         }
     }
@@ -498,6 +644,7 @@ public class BridgeSession(
             when (item) {
                 is Live.Dropped -> send(droppedNotice(item.total))
                 is Live.Rules -> send(rulesNotice(item.revision))
+                is Live.Perf -> Unit
                 is Live.Event -> if (isNew(item.transaction, since, shown)) {
                     liveLine.setLength(0)
                     TransactionJson.appendBridgeSummary(item.transaction, store.redactor, liveLine)
@@ -510,6 +657,47 @@ public class BridgeSession(
         }
     }
 
+    /** The live perf stream. Writer thread only. */
+    private fun streamPerfLive(shown: HashMap<Long, PerfEvent>, threads: PerfController?) {
+        var highest = tailSince.load()
+        for ((seq, event) in shown) {
+            if (seq > highest) highest = seq
+            if (event is HangEvent && !event.ended) ongoingHangsSent += seq
+        }
+        highestPerfSent = highest
+        while (true) {
+            val next = live.tryReceive()
+            val item = next.getOrNull()
+            if (item == null) {
+                if (next.isClosed) return
+                writerSignal.await()
+                continue
+            }
+            if (item !is Live.Perf) continue
+            when (val perf = item.item) {
+                is PerfEvent -> {
+                    // The backlog's own instance: already sent. A newer version (a hang's end) is not.
+                    if (shown[perf.seq] === perf) continue
+                    // A hang is updated in place under its seq (later stacks, its end): a client
+                    // that resumed from a seq at or above it still needs those. Any other event at
+                    // or below `since` is one the client has.
+                    if (perf.seq <= tailSince.load() && perf !is HangEvent) continue
+                    send(PerfJson.eventLine(perf))
+                    if (perf.seq > highestPerfSent) highestPerfSent = perf.seq
+                    if (perf is HangEvent) {
+                        if (perf.ended) ongoingHangsSent -= perf.seq else ongoingHangsSent += perf.seq
+                    }
+                }
+                is dev.koga.hopi.core.perf.FrameSecond -> send(PerfJson.framesLine(perf))
+                is PerfSample -> {
+                    if (item.samples) send(PerfJson.sampleLine(perf))
+                    // The per-thread list rides the sampler's tick, scanned there while watched.
+                    if (threads != null) send(PerfJson.threadsLine(threads.threads(PerfLimits.DEFAULT_TOP_THREADS)))
+                }
+            }
+        }
+    }
+
     /**
      * Where this client can tail again without losing a transaction: one below the lowest id it
      * was sent as pending and never as terminal (ids are allocated when a request starts, so the
@@ -517,6 +705,12 @@ public class BridgeSession(
      * began it is the `since` it asked for. Runs on the writer thread.
      */
     private fun resumeSince(): Long {
+        if (perfTail) {
+            // Below a hang it was sent as ongoing: its end may be among what was dropped.
+            val sent = maxOf(highestPerfSent, tailSince.load())
+            val ongoing = ongoingHangsSent.minOrNull() ?: return sent
+            return minOf(sent, ongoing - 1)
+        }
         val pending = sentPending ?: return tailSince.load()
         return if (pending.isEmpty()) highestSent else pending.min() - 1
     }
@@ -599,6 +793,12 @@ public class BridgeSession(
         .field("dropped", store.droppedTerminalWrites.value)
         // Whether the rule commands work here; absent on an older app, which a host reads as false.
         .field("rules", RuleEngine.rulesAvailable)
+        // Whether the perf commands work here, and may start and stop monitors (docs/design/perf-monitors.md).
+        .also { writer ->
+            val perf = PerfHook.controller
+            writer.field("perf", perf != null)
+            writer.field("perfControl", perf?.remoteControl == true)
+        }
         .also { writer -> info.proof?.let { writer.field("proof", it) } }
         .endObject()
         .toString()
@@ -611,6 +811,9 @@ public class BridgeSession(
 
         /** Everything before it was backlog; the writer switches to the live queue. */
         class StartLive(val since: Long, val shown: HashMap<Long, HttpTransaction>) : Outgoing
+
+        /** The same for `perf.tail`; [threads]: send the per-thread list with each sample. */
+        class StartPerfLive(val shown: HashMap<Long, PerfEvent>, val threads: PerfController?) : Outgoing
     }
 
     private sealed interface Live {
@@ -621,12 +824,19 @@ public class BridgeSession(
 
         /** The rule set changed; [revision] is the engine's. */
         class Rules(val revision: Long) : Live
+
+        /** A perf item for a `perf.tail`; [samples]: the client asked for sample lines. */
+        class Perf(val item: PerfItem, val samples: Boolean) : Live
     }
 
     private object StopWriting : RuntimeException()
 
     public companion object {
         public const val PROTOCOL_VERSION: Int = 1
+
+        private val nextPerfSession = AtomicLong(0)
+        private const val NO_PERF = "perf monitors are absent from this app (no hopi-perf, or HopiPerf not installed)"
+        private const val NO_REMOTE_CONTROL = "perf monitors are not remotely controllable in this app (remoteControl = false)"
 
         /** Live events a client may lag behind, beyond one store batch, before it is disconnected. */
         public const val DEFAULT_LIVE_LAG: Int = 512

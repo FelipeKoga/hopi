@@ -228,7 +228,7 @@ public object TransactionJson {
         transaction.source?.let { w.field("source", takeCodePoints(it, MAX_SOURCE_CHARS)) }
         // Additive like `source`: only after a redirect inside the client changed the URL.
         finalUrl?.let { w.field("finalUrl", it) }
-        // Additive like `source`, and part of every line's fixed fields (at most 106 bytes with
+        // Additive like `source`, and part of every line's fixed fields (at most 72 bytes with
         // 19-digit ids), so the cut below leaves room for them.
         writeRuleMarks(w, transaction)
         if (bridge) {
@@ -246,13 +246,12 @@ public object TransactionJson {
         w.endObject()
     }
 
-    /** `"rule":3,"applied":"delay,mock"` and `"replayOf":42`, each only when set. */
+    /** `"rule":3,"applied":"delay,mock"`, only when set. */
     private fun writeRuleMarks(w: JsonWriter, transaction: HttpTransaction) {
         transaction.ruleId?.let { id ->
             w.field("rule", id)
             transaction.ruleApplied?.let { w.field("applied", takeCodePoints(it, MAX_APPLIED_CHARS)) }
         }
-        transaction.replayOf?.let { w.field("replayOf", it) }
     }
 
     private fun heldBytes(body: CapturedBody?): Long? = body?.heldBytes?.takeIf { it != body.reportedBytes }

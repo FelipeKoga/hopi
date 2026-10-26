@@ -33,19 +33,27 @@ internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<S
     RulesEnable("rules enable", Ids.MANY, TARGET_FLAGS + "--json"),
     RulesDisable("rules disable", Ids.MANY, TARGET_FLAGS + "--json"),
     RulesReset("rules reset", Ids.MANY, TARGET_FLAGS + "--json"),
-    Replay("replay", Ids.ONE, TARGET_FLAGS + REQUEST_EDIT_FLAGS + setOf("--json", "--wait")),
+    PerfStart("perf start", Ids.NONE, TARGET_FLAGS + MONITOR_FLAGS + setOf("--json", "--hang-ms", "--interval", "--for", "--no-expiry")),
+    PerfStop("perf stop", Ids.NONE, TARGET_FLAGS + MONITOR_FLAGS + "--json"),
+    PerfStatus("perf status", Ids.NONE, TARGET_FLAGS + "--json"),
+    PerfSnapshot("perf snapshot", Ids.NONE, TARGET_FLAGS + setOf("--json", "--threads", "--pss")),
+    PerfTail("perf tail", Ids.NONE, TARGET_FLAGS + setOf("--json", "--since", "--samples", "--fps", "--threads", "--start")),
+    Hangs("hangs", Ids.NONE, TARGET_FLAGS + setOf("--json", "--since")),
     ;
 
     val takesId: Boolean get() = ids != Ids.NONE
 
-    /** A command that changes the app's rules or sends a request: write lines go out only after `hello` was verified. */
-    val isRuleCommand: Boolean get() = ordinal >= MockAdd.ordinal
+    /** A command that changes or reads the app's rules: write lines go out only after `hello` was verified. */
+    val isRuleCommand: Boolean get() = ordinal in MockAdd.ordinal..RulesReset.ordinal
+
+    /** A perf command (docs/design/perf-monitors.md, "CLI"): sent only after `hello` was verified, like the rules. */
+    val isPerfCommand: Boolean get() = ordinal >= PerfStart.ordinal
 
     val isAdd: Boolean get() = this == MockAdd || this == FailAdd || this == DelayAdd || this == EditAdd
 }
 
 /** The nouns whose commands are two words (`mock add`, `rules ls`). */
-private val NOUNS = setOf("mock", "fail", "delay", "edit", "rules")
+private val NOUNS = setOf("mock", "fail", "delay", "edit", "rules", "perf")
 
 /** Flags that may be given more than once; their values are kept in order. */
 internal val REPEATABLE: Set<String> = setOf(
@@ -54,7 +62,12 @@ internal val REPEATABLE: Set<String> = setOf(
 )
 
 /** Flags without a value. */
-private val SWITCHES = setOf("--json", "--disabled", "--wait")
+private val SWITCHES = setOf(
+    "--json", "--disabled", "--frames", "--hangs", "--cpu", "--memory", "--no-expiry", "--threads", "--pss", "--samples", "--fps",
+)
+
+/** `perf start` and `perf stop`: one switch per monitor, named as on the wire. */
+private val MONITOR_FLAGS: Set<String> get() = setOf("--frames", "--hangs", "--cpu", "--memory")
 
 private val RULE_FLAGS: Set<String>
     get() = TARGET_FLAGS + setOf("--json", "--match", "--query", "--match-header", "--times", "--priority", "--source", "--label", "--disabled")
@@ -83,7 +96,7 @@ internal class CliArgs(
     val values: Map<String, String> = emptyMap(),
     /** The repeatable flags' values, in order. */
     val lists: Map<String, kotlin.collections.List<String>> = emptyMap(),
-    /** The switches given (`--disabled`, `--wait`). */
+    /** The switches given (`--disabled`). */
     val switches: Set<String> = emptySet(),
 )
 
@@ -168,10 +181,10 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
         it.toIntOrNull()?.takeIf { n -> n in 1..MAX_LIMIT } ?: throw usageError("--limit must be 1..$MAX_LIMIT")
     } ?: DEFAULT_LIMIT
     val since = values["--since"]?.let {
-        it.toLongOrNull()?.takeIf { n -> n >= 0 } ?: throw usageError("--since must be a transaction id ≥ 0")
+        it.toLongOrNull()?.takeIf { n -> n >= 0 } ?: throw usageError(if (command.isPerfCommand) "--since must be a perf event seq ≥ 0" else "--since must be a transaction id ≥ 0")
     } ?: 0L
     val ids = positional.map { raw ->
-        raw.toLongOrNull()?.takeIf { it >= 1 } ?: throw usageError("${if (command.isRuleCommand && command != Command.Replay) "rule" else "transaction"} id must be a number ≥ 1, not '$raw'")
+        raw.toLongOrNull()?.takeIf { it >= 1 } ?: throw usageError("${if (command.isRuleCommand) "rule" else "transaction"} id must be a number ≥ 1, not '$raw'")
     }
     if (command.takesId && ids.isEmpty()) {
         throw usageError("${command.wireName} needs a ${if (command.ids == Ids.MANY) "rule id" else "transaction id"}")
@@ -204,13 +217,22 @@ internal val USAGE_TEXT: String = """
     |            [--remove-header K]... [--body B] [--status N] [--set-response-header 'K: V']...
     |            [--add-response-header 'K: V']... [--remove-response-header K]... [--response-body B]
     |  rules ls | rm <id>... | clear | enable <id>... | disable <id>... | reset <id>...
-    |  replay <id> [request edits as for edit add] [--wait]
     |
     |  M is '[METHODS ]URL-PATTERN': GET or GET|POST or *, then [scheme://]host[:port]path[?query];
     |  in a host * matches any run, in a path * one segment and ** any; ?page=2&debug&!trace adds
     |  query predicates. Every add also takes --query, --match-header 'K: glob', --times N,
     |  --priority N, --source ktor,okhttp,urlconnection,urlsession, --label TEXT and --disabled.
     |  B is @file, @- (stdin) or the text itself. D is a duration: 500ms, 2s (at most 120s).
+    |
+    |Performance (the app needs hopi-perf; every monitor is off until started):
+    |  perf start    [--frames] [--hangs [--hang-ms 250]] [--cpu] [--memory] [--interval 1s]
+    |                [--for 10m | --no-expiry]   the app stops them when the lease ends (10m)
+    |  perf stop     [--frames] [--hangs] [--cpu] [--memory]   none named: all, whoever started them
+    |  perf status   one line per monitor: setting, owners and lease, counts
+    |  perf snapshot [--threads] [--pss]   summaries, recent events, the top threads
+    |  perf tail     [--since SEQ] [--samples] [--fps] [--threads] [--start hangs,frames]
+    |                events (and samples) as they happen; --start holds monitors until it ends
+    |  hangs         [--since SEQ]   every hang the app holds, with its main-thread stacks
     |
     |Options:
     |  --app <id>              applicationId (Android) or bundle id (iOS); required except for jvm
@@ -219,9 +241,11 @@ internal val USAGE_TEXT: String = """
     |  --bridge-file <path>    bridge.json of a JVM process (implies --platform jvm)
     |  --json                  NDJSON output, one object per line (the stable contract for agents)
     |  --limit <n>             list: at most n transactions, 1..$MAX_LIMIT
-    |  --since <id>            list, tail: only transactions with a greater id
+    |  --since <id>            list, tail: only transactions with a greater id;
+    |                          perf tail, hangs: only events with a greater seq
     |  -h, --help              this help
     |
     |Exit codes: 0 ok, 1 usage (or rejected by the app), 2 not reachable (no device, app not running,
-    |bridge off), 3 not found, 4 unsupported (rules off or absent in the app, a replay it refused).
+    |bridge off), 3 not found, 4 unsupported (rules off or absent, no perf monitors in the app, or
+    |a monitor the platform lacks).
 """.trimMargin()

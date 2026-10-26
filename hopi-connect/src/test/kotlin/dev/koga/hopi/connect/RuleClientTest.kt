@@ -121,8 +121,8 @@ class RuleClientTest {
             val bad = assertFailsWith<CliException> { rules.add("""{"match":{"path":"nope"},"fail":"reset"}""") }
             assertEquals(ExitCode.USAGE, bad.exitCode)
             assertTrue("match.path" in bad.message.orEmpty(), bad.message)
-            val replay = assertFailsWith<CliException> { rules.replay(Long.MAX_VALUE, null) }
-            assertEquals(ExitCode.NOT_FOUND, replay.exitCode)
+            val missing = assertFailsWith<CliException> { rules.remove(Long.MAX_VALUE) }
+            assertEquals(ExitCode.NOT_FOUND, missing.exitCode)
         }
     }
 
@@ -176,6 +176,18 @@ class RuleClientTest {
     }
 
     @Test
+    fun aHelloWithThePerfFlagsIsReadAsBefore() {
+        // An app with hopi-perf adds "perf" and "perfControl" (docs/design/perf-monitors.md, "Bridge"):
+        // a client that knows nothing of them must read the rest unchanged.
+        val peer = scripted("""{"type":"hello","protocol":1,"app":"$APP","platform":"jvm","count":0,"dropped":0,"rules":true,"perf":true,"perfControl":true}""")
+        BridgeClient.connect(BridgeEndpoint(peer.port, token = null, Platform.Jvm, APP, "nothing"), 5_000).use { client ->
+            client.handshake(null)
+            assertEquals(true, client.hello.json.bool("rules"))
+            RuleClient(client)
+        }
+    }
+
+    @Test
     fun anOlderAppWithoutHelloRulesIsUnsupported() {
         val peer = scripted("""{"type":"hello","protocol":1,"app":"$APP","platform":"jvm","count":0,"dropped":0}""")
         BridgeClient.connect(BridgeEndpoint(peer.port, token = null, Platform.Jvm, APP, "nothing"), 5_000).use { client ->
@@ -187,17 +199,18 @@ class RuleClientTest {
 
     @Test
     fun decoderReadsTheMarksAndAnOlderLineWithoutThem() {
-        val marked = completeTx(5).copy(ruleId = 3, ruleApplied = "delay,mock", replayOf = 2, source = "okhttp")
+        val marked = completeTx(5).copy(ruleId = 3, ruleApplied = "delay,mock", source = "okhttp")
         val summary = assertNotNull(BridgeDecoder.summary(parse(TransactionJson.bridgeSummary(marked, Redactor.Disabled)), 0))
         assertEquals(3, summary.ruleId)
         assertEquals("delay,mock", summary.ruleApplied)
-        assertEquals(2, summary.replayOf)
         val detail = assertNotNull(BridgeDecoder.detail(parse(TransactionJson.bridgeDetail(marked, Redactor.Disabled))))
         assertEquals(marked, detail)
         val old = assertNotNull(BridgeDecoder.summary(parse("""{"type":"transaction","id":1,"method":"GET","url":"https://h/","code":200,"ms":1,"reqBytes":0,"resBytes":0,"state":"complete"}"""), 0))
         assertNull(old.ruleId)
         assertNull(old.ruleApplied)
-        assertNull(old.replayOf)
+        // An app from before replay was removed (docs/ROADMAP.md) may still send `replayOf`: ignored.
+        val replayed = assertNotNull(BridgeDecoder.summary(parse("""{"type":"transaction","id":2,"method":"GET","url":"https://h/","code":200,"ms":1,"reqBytes":0,"resBytes":0,"state":"complete","replayOf":1}"""), 0))
+        assertEquals(2, replayed.id)
     }
 
     private fun parse(line: String): JsonObject = Json.parseToJsonElement(line) as JsonObject

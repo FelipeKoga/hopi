@@ -163,9 +163,9 @@ public class HopiEdit internal constructor() : HopiRuleOptions() {
 }
 
 /**
- * Changes to a request (an edit rule's request side, or a replay's). The scheme never changes; an
- * edit that moves the request to another host or port drops its credentials (`Authorization`,
- * `Cookie`, redacted headers) unless it sets them itself.
+ * Changes to a request (an edit rule's request side). The scheme never changes; an edit that
+ * moves the request to another host or port drops its credentials (`Authorization`, `Cookie`,
+ * redacted headers) unless it sets them itself.
  */
 public class HopiRequestEdit internal constructor() {
     public var method: String? = null

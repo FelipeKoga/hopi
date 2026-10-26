@@ -72,7 +72,7 @@ internal class RulesPanelState {
         open = !open
     }
 
-    /** Opens the panel on [form] (a new rule, "Mock this response", "Edit and replay…"). */
+    /** Opens the panel on [form] (a new rule, "Mock this response", an update). */
     fun edit(form: RuleForm) {
         this.form = form
         message = null
@@ -83,17 +83,15 @@ internal class RulesPanelState {
 /**
  * The rules panel beside the list (docs/design/rules.md, "Desktop viewer"): the app's rules as
  * [RemoteSession.rules] lists them (re-listed on each notice, hits counted from the tail), an
- * enable switch, update and remove per row, clear, and the add, update and replay forms. Every
- * command goes over the session's bridge to the app; nothing reads this process's own engine.
- * [chooseBodyFile] picks a body file (a native dialog in the app, a fixed file in tests);
- * [onReplayed] gets a replay's new record id.
+ * enable switch, update and remove per row, clear, and the add and update forms. Every command
+ * goes over the session's bridge to the app; nothing reads this process's own engine.
+ * [chooseBodyFile] picks a body file (a native dialog in the app, a fixed file in tests).
  */
 @Composable
 internal fun RulesPanel(
     session: RemoteSession?,
     state: RulesPanelState,
     chooseBodyFile: () -> BodyFile?,
-    onReplayed: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = hopiDesktopColors
@@ -136,7 +134,7 @@ internal fun RulesPanel(
                 val form = state.form
                 if (form != null) {
                     FormView(form, state, chooseBodyFile) {
-                        submit(form, session, state, scope, onReplayed)
+                        submit(form, session, state, scope)
                     }
                 } else {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -167,11 +165,10 @@ internal fun RulesPanel(
 }
 
 /** Checks the form on this side first (nothing is uploaded for a form that cannot be sent), then sends it. */
-private fun submit(form: RuleForm, session: RemoteSession, state: RulesPanelState, scope: CoroutineScope, onReplayed: (Long) -> Unit) {
+private fun submit(form: RuleForm, session: RemoteSession, state: RulesPanelState, scope: CoroutineScope) {
     val dryRun = { _: ByteArray -> "{}" }
     try {
         when (form.kind) {
-            FormKind.Replay -> form.replayEditJson(dryRun)
             FormKind.Update -> form.update()
             else -> form.json(dryRun)
         }
@@ -181,11 +178,6 @@ private fun submit(form: RuleForm, session: RemoteSession, state: RulesPanelStat
     }
     state.busy = true
     when (form.kind) {
-        FormKind.Replay -> scope.launchCommand(state, { session.replay(form.replayOf ?: 0) { body -> form.replayEditJson(body) } }) { id ->
-            state.form = null
-            onReplayed(id)
-            "Replaying #${form.replayOf} as #$id"
-        }
         FormKind.Update -> {
             val update = form.update()
             val id = form.ruleId ?: return
@@ -265,7 +257,6 @@ private fun FormView(form: RuleForm, state: RulesPanelState, chooseBodyFile: () 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ChromeButton(
                 when (form.kind) {
-                    FormKind.Replay -> "Replay"
                     FormKind.Update -> "Update"
                     else -> "Add rule"
                 },
@@ -289,10 +280,6 @@ private fun FormView(form: RuleForm, state: RulesPanelState, chooseBodyFile: () 
                     ChromeSwitch(form.resetHits, "Reset hits", onChange = { form.resetHits = it })
                     BasicText("Reset hits", style = HopiDesktopType.label.copy(color = colors.text))
                 }
-            }
-            FormKind.Replay -> {
-                Hint("Sent through the app's own client. Empty fields keep the recorded request.")
-                RequestEdit(form.request, chooseBodyFile)
             }
             else -> {
                 Field("Match", form.match, "GET */users/*", Modifier.testTag(RulesTags.MATCH))

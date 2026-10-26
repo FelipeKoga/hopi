@@ -102,6 +102,7 @@ val noopTwins = listOf(
     "hopi-urlsession" to "hopi-urlsession-noop",
     "hopi-android" to "hopi-android-noop",
     "hopi-rules" to "hopi-rules-noop",
+    "hopi-perf" to "hopi-perf-noop",
 )
 
 val noopParityChecks = noopTwins.map { (real, noop) ->

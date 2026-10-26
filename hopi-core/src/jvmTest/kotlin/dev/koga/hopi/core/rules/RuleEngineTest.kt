@@ -212,18 +212,6 @@ class RuleEngineTest {
     }
 
     @Test
-    fun replaysInFlightMakeTheStateNonEmptyUpToTheLimit() {
-        repeat(RuleLimits.MAX_REPLAYS_IN_FLIGHT) { assertTrue(RuleEngine.beginReplay()) }
-        assertFalse(RuleEngine.beginReplay())
-        val state = RuleEngine.state
-        assertNotSame(RuleState.EMPTY, state)
-        assertEquals(RuleLimits.MAX_REPLAYS_IN_FLIGHT, state.replaysInFlight)
-        assertEquals(0, state.rulesFor(RuleSource.OKHTTP).size)
-        repeat(RuleLimits.MAX_REPLAYS_IN_FLIGHT) { RuleEngine.endReplay() }
-        assertSame(RuleState.EMPTY, RuleEngine.state)
-    }
-
-    @Test
     fun rulesAvailableUnlessEveryStartedRecorderTurnedThemOff() {
         assertTrue(RuleEngine.rulesAvailable)
         RuleEngine.recorderStarted(rules = false)

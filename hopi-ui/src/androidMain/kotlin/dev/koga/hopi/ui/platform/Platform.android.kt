@@ -13,6 +13,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import dev.koga.hopi.core.perf.PerfLauncher
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,6 +84,15 @@ internal actual fun SystemBarIcons(lightBackground: Boolean) {
             @Suppress("DEPRECATION")
             onDispose { decor.systemUiVisibility = (decor.systemUiVisibility and mask.inv()) or previous }
         }
+    }
+}
+
+@Composable
+internal actual fun PerfLauncherAnchor() {
+    val activity = LocalContext.current.findActivity() ?: return
+    DisposableEffect(activity) {
+        PerfLauncher.attach(activity)
+        onDispose { PerfLauncher.detach(activity) }
     }
 }
 

@@ -46,8 +46,8 @@ public object HopiOkHttpInterceptor : Interceptor {
         if (PlatformCapture.passThroughMarked && request.header(PlatformCapture.PASS_THROUGH_HEADER) != null) {
             return chain.proceed(request.newBuilder().removeHeader(PlatformCapture.PASS_THROUGH_HEADER).build())
         }
-        // One read and a reference comparison: with no rule and no replay in flight the call takes
-        // exactly the path it took before rules existed.
+        // One read and a reference comparison: with no rule the call takes exactly the path it took
+        // before rules existed.
         val state = if (AndroidCapture.rules) RuleEngine.state else RuleState.EMPTY
         if (state !== RuleState.EMPTY) return OkHttpRules.intercept(chain, request, state)
         return proceedRecorded(chain, request, OkHttpRecord(AndroidCapture.target(), request, chain.call()))
@@ -104,10 +104,10 @@ internal class OkHttpRecord(
     private val target: AndroidCapture.Target,
     private val request: Request,
     private val call: Call,
-    private val id: Long = target.store.nextId(),
     /** The rule's mark, or null: then the record is what it was before rules existed. */
     private val mark: RuleRecordMark? = null,
 ) : HopiStore.DeferredRecord {
+    private val id = target.store.nextId()
     private val startedAtEpochMs = System.currentTimeMillis()
     private val startNanos = System.nanoTime()
     private val terminal = AtomicBoolean(false)
@@ -249,9 +249,6 @@ internal class OkHttpRecord(
             source = TransactionSource.OKHTTP,
             ruleId = mark?.ruleId,
             ruleApplied = mark?.applied,
-            replayOf = mark?.replayOf,
-            // A recorder with rules off never reads a replay's hand-off, so it offers no replay.
-            replayTarget = if (AndroidCapture.rules) OkHttpReplay.targetFor(call) else null,
         )
     }
 

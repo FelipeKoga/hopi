@@ -102,8 +102,6 @@ public final class dev/koga/hopi/rules/HopiRules {
 	public final fun mock (Ljava/lang/String;Lkotlin/jvm/functions/Function1;)J
 	public static synthetic fun mock$default (Ldev/koga/hopi/rules/HopiRules;Ljava/lang/String;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)J
 	public final fun remove (J)Z
-	public final fun replay (JLkotlin/jvm/functions/Function1;)J
-	public static synthetic fun replay$default (Ldev/koga/hopi/rules/HopiRules;JLkotlin/jvm/functions/Function1;ILjava/lang/Object;)J
 	public final fun setEnabled (JZ)Z
 }
 

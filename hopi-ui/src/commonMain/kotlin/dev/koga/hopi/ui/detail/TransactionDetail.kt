@@ -30,7 +30,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,8 +54,6 @@ internal object DetailTags {
     const val COPY_BODY = "Copy body"
     const val SHARE = "Share"
     const val MOCK = "Mock this response"
-    const val REPLAY = "Replay"
-    const val EDIT_REPLAY = "Edit and replay…"
 }
 
 /** What the detail's action row does; the screen wires them to the clipboard and share sheet. */
@@ -66,7 +63,7 @@ internal class DetailActions(
     val copyBody: () -> Unit,
     /** Null where the platform has no share sheet. */
     val share: (() -> Unit)?,
-    /** Mock and replay; null where nobody wired them (a host viewer without a bridge to the app's rules). */
+    /** "Mock this response"; null where nobody wired it (a host viewer without a bridge to the app's rules). */
     val rules: RuleActions? = null,
 )
 
@@ -79,8 +76,6 @@ internal fun TransactionDetailPane(
     /** Null hides the back button (the desktop panes show the list beside the detail). */
     onBack: (() -> Unit)?,
     actions: DetailActions,
-    /** Opens another transaction (the "Replay of #42" link); null leaves the value plain. */
-    onOpen: ((Long) -> Unit)? = null,
 ) {
     val colors = LocalHopiColors.current
     Column(Modifier.fillMaxSize()) {
@@ -116,18 +111,10 @@ internal fun TransactionDetailPane(
                     actions.share?.let { ActionButton(HopiIcons.Share, DetailTags.SHARE, it) }
                     actions.rules?.let { rules ->
                         rules.mock?.let { ActionButton(HopiIcons.Mock, DetailTags.MOCK, it.run, enabled = it.refusal == null) }
-                        rules.replay?.let { ActionButton(HopiIcons.Replay, DetailTags.REPLAY, it.run, enabled = it.refusal == null) }
-                        rules.editAndReplay?.let { ActionButton(HopiIcons.Edit, DetailTags.EDIT_REPLAY, it.run, enabled = it.refusal == null) }
                     }
                 }
-                // A disabled rule button says why, once per reason.
-                val refusals = actions.rules?.let { rules ->
-                    listOfNotNull(
-                        rules.mock?.refusal?.let { "Mock: $it" },
-                        rules.replay?.refusal?.let { "Replay: $it" },
-                        rules.editAndReplay?.refusal?.takeIf { it != rules.replay?.refusal }?.let { "Edit and replay: $it" },
-                    )
-                }.orEmpty()
+                // A disabled rule button says why.
+                val refusals = actions.rules?.let { rules -> listOfNotNull(rules.mock?.refusal?.let { "Mock: $it" }) }.orEmpty()
                 if (refusals.isNotEmpty()) {
                     BasicText(
                         refusals.joinToString("  ·  "),
@@ -142,7 +129,7 @@ internal fun TransactionDetailPane(
                 SelectionContainer(Modifier.fillMaxSize()) {
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                         when (tab) {
-                            DetailTab.Overview -> overview(model, colors, onOpen)
+                            DetailTab.Overview -> overview(model, colors)
                             DetailTab.Request -> exchange(model.request, colors)
                             DetailTab.Response -> exchange(model.response, colors)
                         }
@@ -185,23 +172,14 @@ private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiCo
     }
 }
 
-private fun LazyListScope.overview(model: DetailModel, colors: HopiColors, onOpen: ((Long) -> Unit)?) {
+private fun LazyListScope.overview(model: DetailModel, colors: HopiColors) {
     item(key = "top", contentType = "space") { Spacer(Modifier.height(8.dp)) }
     for (field in model.overview) {
         item(key = "field-${field.label}", contentType = "field") {
-            val opens = field.opens?.takeIf { onOpen != null }
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (opens != null) Modifier.clickable(role = Role.Button, onClickLabel = "Open ${field.value}") { onOpen?.invoke(opens) } else Modifier)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 BasicText(field.label, style = HopiType.meta.copy(color = colors.textFaint))
                 Spacer(Modifier.height(2.dp))
-                BasicText(
-                    field.value,
-                    style = HopiType.mono.copy(color = colors.text, textDecoration = if (opens != null) TextDecoration.Underline else null),
-                )
+                BasicText(field.value, style = HopiType.mono.copy(color = colors.text))
             }
         }
     }

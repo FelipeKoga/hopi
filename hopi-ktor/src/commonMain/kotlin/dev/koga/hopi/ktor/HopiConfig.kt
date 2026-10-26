@@ -42,7 +42,7 @@ public class HopiConfig {
     public var agentBridge: Boolean = false
 
     /**
-     * Applies Hopi rules (mock, delay, fail, edit, replay) to the requests this plugin records. With
+     * Applies Hopi rules (mock, delay, fail, edit) to the requests this plugin records. With
      * no rule set a request pays one read of the rule state; false makes the plugin never read it.
      */
     public var rules: Boolean = true

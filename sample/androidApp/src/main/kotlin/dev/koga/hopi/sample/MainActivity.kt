@@ -66,6 +66,20 @@ private const val DEFAULT_VERIFY_HTTPS = "https://example.com/"
 private const val RULES_VERIFY_EXTRA = "rulesVerify"
 private const val RULES_TARGETS_EXTRA = "rulesTargets"
 
+/**
+ * `--es perfVerify all` (or a comma list of steps: `jank,hang,dialog,cpu,alloc,memory`) opens the
+ * perf lab at launch and runs its injections once ([PerfLabRun]), one `{"perfLab":…}` line each
+ * under `HopiSample`; benchmark/perf/verify.py checks Hopi's record against them. No dev server needed.
+ */
+private const val PERF_VERIFY_EXTRA = "perfVerify"
+
+/**
+ * `--es perfBench 'monitors=hangs;n=10000;runs=3'` runs [runPerfBench] at launch: the perf
+ * monitors' overhead A/B workload (benchmark/perf/bench.py), or with `mode=idle` the idle arm
+ * (benchmark/perf/idle.py).
+ */
+private const val PERF_BENCH_EXTRA = "perfBench"
+
 /** The host dev server, through `adb reverse tcp:8765 tcp:8765`. */
 private const val DEV_SERVER_URL = "http://127.0.0.1:8765"
 
@@ -101,13 +115,18 @@ class MainActivity : ComponentActivity() {
         val rulesTargets = rulesTargetsAction()
         val launchAction = intent.getStringExtra(GIANT_EXTRA)?.let(::giantJsonAction)
             ?: intent.getStringExtra(CAPTURE_BENCH_EXTRA)?.let(::captureBench)
+            ?: intent.getStringExtra(PERF_BENCH_EXTRA)?.let { spec -> PlatformAction("Perf bench") { runPerfBench(spec) } }
             ?: verifyAction(https).takeIf { intent.hasExtra(VERIFY_EXTRA) }
             ?: rulesVerify.takeIf { intent.hasExtra(RULES_VERIFY_EXTRA) }
             ?: rulesTargets.takeIf { intent.hasExtra(RULES_TARGETS_EXTRA) }
             ?: capture.takeIf { intent.hasExtra(CAPTURE_EXTRA) }
             ?: selfCheck.takeIf { runSelfCheckNow }
         setContent {
-            SampleApp(platformActions = listOf(selfCheck, capture, rulesVerify, rulesTargets), launchAction = launchAction)
+            SampleApp(
+                platformActions = listOf(selfCheck, capture, rulesVerify, rulesTargets),
+                launchAction = launchAction,
+                perfVerify = intent.getStringExtra(PERF_VERIFY_EXTRA),
+            )
         }
     }
 }

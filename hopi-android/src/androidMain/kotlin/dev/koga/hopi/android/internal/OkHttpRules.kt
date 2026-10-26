@@ -1,13 +1,9 @@
 package dev.koga.hopi.android.internal
 
-import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.rules.CompiledRule
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.Glob
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.RequestEdits
 import dev.koga.hopi.core.rules.ResponseEdit
@@ -16,32 +12,27 @@ import dev.koga.hopi.core.rules.RuleRequest
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleState
 import java.io.IOException
-import java.lang.ref.WeakReference
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
-import java.util.WeakHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.LockSupport
 import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.Headers
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
-import okhttp3.internal.connection.RealCall
 import okio.Buffer
 import okio.BufferedSink
 import okio.BufferedSource
 
-/** What a record carries of the rule applied to it and of the replay it is (docs/design/rules.md, "How records are marked"). */
-internal class RuleRecordMark(val ruleId: Long?, val applied: String?, val replayOf: Long?, val mocked: Boolean)
+/** What a record carries of the rule applied to it (docs/design/rules.md, "How records are marked"). */
+internal class RuleRecordMark(val ruleId: Long?, val applied: String?, val mocked: Boolean)
 
 /**
  * Rules on OkHttp (docs/design/rules.md, "OkHttp"), at the interceptor's position: last among the
@@ -52,20 +43,13 @@ internal class RuleRecordMark(val ruleId: Long?, val applied: String?, val repla
  */
 internal object OkHttpRules {
     fun intercept(chain: Interceptor.Chain, request: Request, state: RuleState): Response {
-        // A replay's hand-off rides only on a replay's own request, sent while the count is above 0.
-        val handoff = if (state.replaysInFlight == 0) null else request.tag(ReplayHandoff::class.java)?.takeIf { it.take() }
         val rule = state.firstMatch(RuleSource.OKHTTP, OkHttpRuleRequest(request))
         val target = AndroidCapture.target()
         val call = chain.call()
-        if (rule == null) {
-            if (handoff == null) return HopiOkHttpInterceptor.proceedRecorded(chain, request, OkHttpRecord(target, request, call))
-            val mark = RuleRecordMark(null, null, handoff.replayOf, mocked = false)
-            return HopiOkHttpInterceptor.proceedRecorded(chain, request, OkHttpRecord(target, request, call, handoff.id, mark))
-        }
+        if (rule == null) return HopiOkHttpInterceptor.proceedRecorded(chain, request, OkHttpRecord(target, request, call))
         val sent = rule.requestEdit?.let { editRequest(request, it, target) } ?: request
         val mock = rule.mock
-        val mark = RuleRecordMark(rule.id, rule.applied, handoff?.replayOf, mocked = mock != null)
-        val record = OkHttpRecord(target, sent, call, handoff?.id ?: target.store.nextId(), mark)
+        val record = OkHttpRecord(target, sent, call, RuleRecordMark(rule.id, rule.applied, mocked = mock != null))
         val delay = rule.delay
         val fail = rule.fail
         if (mock == null && fail == null) {
@@ -321,88 +305,5 @@ internal class OkHttpRuleRequest(private val request: Request) : RuleRequest {
         val values = request.headers(name)
         if (values.isNotEmpty() || !name.equals("Content-Type", ignoreCase = true)) return values
         return request.body?.contentType()?.let { listOf(it.toString()) }.orEmpty()
-    }
-}
-
-/**
- * The replay targets of OkHttp records (docs/design/rules.md, "Replay"): one per client, found from
- * the call (`RealCall.client`, OkHttp 4.x and 5.x) when a record is built on the store's consumer
- * thread, and kept in a map whose entries go with their client. OkHttp 3.14, whose `RealCall` is
- * not public, gets a target that refuses with the reason.
- */
-internal object OkHttpReplay {
-    private val targets = WeakHashMap<OkHttpClient, OkHttpReplayTarget>()
-
-    @Volatile
-    private var callClientUnreachable = false
-
-    fun targetFor(call: Call): ReplayTarget? {
-        if (callClientUnreachable) return Unsupported
-        val client = try {
-            (call as? RealCall)?.client
-        } catch (_: LinkageError) {
-            callClientUnreachable = true
-            return Unsupported
-        } ?: return null
-        return synchronized(targets) { targets.getOrPut(client) { OkHttpReplayTarget(client) } }
-    }
-
-    private object Unsupported : ReplayTarget {
-        override val source: String get() = TransactionSource.OKHTTP
-
-        override fun refusal(): String = "this OkHttp (before 4.0) does not expose a call's client"
-
-        override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-            throw UnsupportedOperationException(refusal())
-        }
-    }
-}
-
-/**
- * Re-sends a request through the client that sent it, from Hopi's position: a copy of the client
- * with its application interceptors cleared (the recorded request is the one they produced, and
- * running them again would add their headers twice or re-sign it), sharing everything below
- * (dispatcher, pool, pinner, TLS, verifier, proxy, DNS, cookie jar, cache, authenticator, network
- * interceptors). `RealCall`'s rewritten interceptor list gives the copy Hopi's interceptor, which
- * records the replay under the hand-off's id.
- */
-internal class OkHttpReplayTarget(client: OkHttpClient) : ReplayTarget {
-    private val client = WeakReference(client)
-
-    override val source: String get() = TransactionSource.OKHTTP
-
-    override fun refusal(): String? = if (client.get() == null) "the client was collected" else null
-
-    override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-        val original = client.get() ?: throw IllegalStateException("the client was collected")
-        val builder = Request.Builder().url(request.url)
-        for ((name, value) in request.headers) {
-            if (name.equals("Content-Length", ignoreCase = true)) continue
-            builder.addHeader(name, value)
-        }
-        val type = request.contentType?.toMediaTypeOrNull()
-        builder.method(request.method, request.body?.let { BytesRequestBody(it, type) })
-        builder.tag(ReplayHandoff::class.java, handoff)
-        val replayClient = original.newBuilder().apply { interceptors().clear() }.build()
-        replayClient.newCall(builder.build()).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                handoff.finish(AndroidCapture.describe(e))
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                // Read to the end so the record completes with its body, then release the connection.
-                val error = try {
-                    response.use { r ->
-                        val source = r.body?.source()
-                        val sink = Buffer()
-                        if (source != null) while (source.read(sink, 8192) != -1L) sink.clear()
-                    }
-                    null
-                } catch (e: IOException) {
-                    AndroidCapture.describe(e)
-                }
-                handoff.finish(error)
-            }
-        })
     }
 }

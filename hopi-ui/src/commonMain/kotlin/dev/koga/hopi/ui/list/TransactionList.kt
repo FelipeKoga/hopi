@@ -62,6 +62,7 @@ internal object ListTags {
     const val CLOSE = "Close Hopi"
     const val CLEAR = "Clear all requests"
     const val RULES = "Rules"
+    const val PERF = "Performance"
 }
 
 @Composable
@@ -80,6 +81,8 @@ internal fun TransactionListPane(
     searchFocus: FocusRequester? = null,
     /** Opens the rules list (the in-app screen); null hides the button. */
     onRules: (() -> Unit)? = null,
+    /** Opens the Perf tab (the in-app screen, with a perf controller registered); null hides the button. */
+    onPerf: (() -> Unit)? = null,
 ) {
     val colors = LocalHopiColors.current
     Column(Modifier.fillMaxSize()) {
@@ -95,6 +98,7 @@ internal fun TransactionListPane(
                 BasicText(model.total.toString(), style = HopiType.meta.copy(color = colors.textFaint))
             }
             Spacer(Modifier.weight(1f))
+            if (onPerf != null) IconButton(HopiIcons.Perf, ListTags.PERF, onPerf)
             if (onRules != null) IconButton(HopiIcons.Rules, ListTags.RULES, onRules)
             IconButton(HopiIcons.Trash, ListTags.CLEAR, onClear, enabled = model != null && model.total > 0)
             if (onClose != null) IconButton(HopiIcons.Close, ListTags.CLOSE, onClose)

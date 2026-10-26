@@ -29,6 +29,10 @@ class HopiPluginUnitTest {
             task.redactedQueryParameters.set(listOf("token"))
             task.redactionDisabled.set(false)
             task.rules.set(false)
+            task.perfPresent.set(true)
+            task.perfAutoStart.set(HopiPerfExtension.bits(setOf(HopiMonitor.Hangs, HopiMonitor.Frames)))
+            task.perfHangThresholdMs.set(300L)
+            task.perfHangHeartbeat.set(false)
         }.get()
         val source = task.render()
         assertTrue("extends dev.koga.hopi.android.internal.HopiConfigValues" in source, source)
@@ -40,7 +44,24 @@ class HopiPluginUnitTest {
         assertTrue("true, // agentBridge" in source, source)
         assertTrue("""new String[] { "X-Api-Key", "Quote\"d" }, // redactHeaders""" in source, source)
         assertTrue("""new String[] { "token" }, // redactQueryParameters""" in source, source)
-        assertTrue("false // rules" in source, source)
+        assertTrue("false, // rules" in source, source)
+        assertTrue("true, // perfPresent" in source, source)
+        // Frames and Hangs: bits 0 and 1, the runtime's PerfBootstrap.bit order.
+        assertTrue("3, // perfAutoStart" in source, source)
+        assertTrue("300L, // perfHangThresholdMs" in source, source)
+        assertTrue("false // perfHangHeartbeat" in source, source)
+    }
+
+    @Test
+    fun perfIsOffByDefault() {
+        val project = ProjectBuilder.builder().build()
+        val extension = project.extensions.create("hopi", HopiExtension::class.java)
+        extension.applyDefaults()
+        assertEquals(false, extension.perf.enabled.get())
+        assertEquals(emptySet(), extension.perf.autoStart.get())
+        assertEquals(250L, extension.perf.hangThresholdMs.get())
+        extension.perf { it.autoStart(HopiMonitor.Memory) }
+        assertEquals(8, HopiPerfExtension.bits(extension.perf.autoStart.get()))
     }
 
     @Test

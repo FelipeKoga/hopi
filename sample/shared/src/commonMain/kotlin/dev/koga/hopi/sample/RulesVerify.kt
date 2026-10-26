@@ -95,8 +95,6 @@ private suspend fun ktorSend(client: HttpClient, call: RulesCall, passThrough: B
  * of the oracle (a mocked or failed request never reaches it, an edited one arrives edited).
  * The rules it adds are removed again, whatever happens. With the noop twins every rule id is
  * `-1` and nothing applies, so every line says `"ok":false`: the release control.
- * Replay needs a record id, which the app does not read: the host drives it (`hopi replay <id>`
- * on a record of [runRulesTargets], or the in-app detail's Replay).
  */
 public suspend fun runRulesVerify(targets: List<RulesTarget>): String {
     var failed = 0
@@ -141,7 +139,7 @@ public suspend fun runRulesVerify(targets: List<RulesTarget>): String {
  * Requests for rules the host adds (`hopi mock add --match 'GET /json?rv=host-okhttp'`), one of each
  * kind per target, every one carrying its target's `rv=host-<name>` key: a GET of `/json`, a GET
  * of `/missing` (a 404, or an edit's `/echo`), and a POST of `/echo`. One `{"rulesTarget":…}` line
- * each under `HopiSample`; their records are what `hopi replay` re-sends.
+ * each under `HopiSample`.
  */
 public suspend fun runRulesTargets(targets: List<RulesTarget>): String {
     val lines = ArrayList<String>()

@@ -43,8 +43,10 @@ This document is the contract every module is built against. Change it before ch
 | `hopi-urlsession-noop` | nothing                        | Same public API as `hopi-urlsession`, does nothing; no dependency at all |
 | `hopi-android`   | core (Android only)                  | Automatic OkHttp and `HttpURLConnection` capture on Android; added by the Gradle plugin to debuggable variants, started by its manifest's provider |
 | `hopi-android-noop` | nothing                           | Same public API as `hopi-android` (`HopiAndroid`), does nothing; what non-debuggable variants get |
-| `hopi-rules`     | core                                 | `HopiRules`, the in-process API over core's rule engine (mock, fail, delay, edit, replay; docs/design/rules.md) |
+| `hopi-rules`     | core                                 | `HopiRules`, the in-process API over core's rule engine (mock, fail, delay, edit; docs/design/rules.md) |
 | `hopi-rules-noop` | nothing                             | Same public API as `hopi-rules`, does nothing; no dependency at all |
+| `hopi-perf`      | core                                 | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory; docs/design/perf-monitors.md); each off by default. Android and iOS monitors built |
+| `hopi-perf-noop` | nothing                              | Same public API as `hopi-perf`, does nothing; no dependency at all |
 | `gradle-plugin/` (included build) | AGP API and ASM at build time only | `hopi-instrument` (the bytecode rewriter and `DexReader`) and `hopi-gradle-plugin` (`dev.koga.hopi`); never a runtime dependency |
 | `hopi-connect`   | core (JVM), kotlinx-serialization    | Host side of the bridge: targets, `bridge.json`, bridge client (all `@HopiInternalApi`) |
 | `hopi-cli`       | connect, core (JVM)                  | Host CLI for developers and AI agents                      |
@@ -61,8 +63,11 @@ The exceptions are the two iOS cinterop bindings, which cinterop cannot annotate
 (no os/log.h declarations are re-exported), and the URLSession capture library (see URLSession
 capture) lives in `dev.koga.hopi.core.internal.urlsession` and binds only its own `hopi_us_*` C
 functions and constants (no Objective-C class).
-Consumers only ever touch the API of `hopi-ktor`, `hopi-ui`, `hopi-urlsession`, `hopi-android` and
-`hopi-rules`, which is what the noop twins mirror.
+Consumers only ever touch the API of `hopi-ktor`, `hopi-ui`, `hopi-urlsession`, `hopi-android`,
+`hopi-rules` and `hopi-perf`, which is what the noop twins mirror. The os_log shim also binds
+`hopi_os_log_perf_line` (category `perf`, see "Performance monitors"). `hopi-perf` has a third
+binding of the same kind: its iOS monitors' native library in `dev.koga.hopi.perf.internal.native`
+(only its own `hopi_perf_*` C functions, constants and one struct; no Objective-C class).
 
 ## Consumer API (what the noop twins mirror)
 
@@ -168,7 +173,6 @@ object HopiRules {
     fun setEnabled(id: Long, enabled: Boolean): Boolean
     fun remove(id: Long): Boolean
     fun clear()
-    fun replay(transactionId: Long, block: HopiRequestEdit.() -> Unit = {}): Long   // the new record's id, -1 when refused
 }
 ```
 
@@ -330,8 +334,6 @@ class HttpTransaction(            // immutable snapshot; the store replaces, nev
     val finalUrl: String? = null, // the URL the response came from, when a redirect followed inside the client changed it
     val ruleId: Long? = null,     // the rule applied to this request (docs/design/rules.md)
     val ruleApplied: String? = null, // what it did: "delay,edit-request,mock,fail,edit-response" (that order, a subset)
-    val replayOf: Long? = null,   // the record this request replays
-    val replayTarget: ReplayTarget? = null, // in memory only: how to replay it through its client; never serialized or compared
 )
 
 class CapturedBody(
@@ -385,11 +387,12 @@ ends with the source when it is not the Ktor plugin; a platform-captured duratio
 appends `[urlsession]` (any source but `ktor`) and `get` shows both rows, `--json` passes the lines
 through.
 
-The rule marks follow the same rule: `"rule":3,"applied":"delay,mock"` and `"replayOf":42` come
-after `"finalUrl"` (or `"source"`) and before `"error"` on the summary line and bridge summary,
-after `"source"` in the detail, only when set; they are fixed fields of the line budget (at most
-106 bytes with 19-digit ids). HAR export adds `_rule`, `_ruleApplied`, `_replayOf`; `hopi list`/`tail`
-text appends `[delay,mock #3]` / `[replay of 42]`, and `get` shows "Rule" and "Replay of" rows.
+The rule marks follow the same rule: `"rule":3,"applied":"delay,mock"` come after `"finalUrl"` (or
+`"source"`) and before `"error"` on the summary line and bridge summary, after `"source"` in the
+detail, only when set; they are fixed fields of the line budget (at most 72 bytes with a 19-digit
+id). HAR export adds `_rule` and `_ruleApplied`; `hopi list`/`tail` text appends `[delay,mock #3]`,
+and `get` shows a "Rule" row. An app built before replay was removed (docs/ROADMAP.md, "Replay (no
+priority)") may still send `"replayOf"`; every reader ignores it.
 
 ### Store
 
@@ -889,14 +892,15 @@ A rule matches a request and changes what happens to it: **mock** (a response ma
 no network), **fail** (`timeout`, `reset`, `unknown-host`, `cancel`, as the source's own exception
 or `NSError`), **delay** (before the request and/or before the response, each 0..120 s, optional on
 any rule) or **edit** (method, host, port, path, query, headers, body of the request; status,
-headers, body of the response). **Replay** re-sends a recorded request, optionally edited, through
-the client or session that sent it. The full design, the reasons and the rejected alternatives are
-in `docs/design/rules.md`; this is the contract.
+headers, body of the response). Replay (re-sending a recorded request) was removed from the
+product; it is in the backlog with no priority (docs/ROADMAP.md, "Replay (no priority)"). The full
+design, the reasons and the rejected alternatives are in `docs/design/rules.md`; this is the
+contract.
 
 **Engine** (`dev.koga.hopi.core.rules`, all `@HopiInternalApi`). `RuleEngine` holds the rules as
 added and their compiled form in one immutable `RuleState` behind one atomic reference; a mutation
 copies, validates, compiles and publishes with a compare-and-set loop. `RuleState.EMPTY` is
-published whenever no enabled, unexhausted rule exists and no replay is in flight, so a recorder's
+published whenever no enabled, unexhausted rule exists, so a recorder's
 whole cost without rules is one volatile read and one reference comparison
 (`if (state === RuleState.EMPTY)`). At publish each source gets only the rules it can apply
 (`Capabilities`), so a rule never matches where it cannot be applied and nothing checks
@@ -906,7 +910,7 @@ shared hit counter, and the claim that exhausts a rule republishes the state wit
 Matching reads each stack's own request objects through a `RuleRequest` view, allocated only when
 the state is not `EMPTY`. Globs are compiled at `add` (two-pointer matching, patterns at most 256
 chars). Limits: 64 rules, 1 MiB per body, 8 MiB of rule bodies in all, 32 headers per side, 8
-query and 8 header predicates, 8 replays in flight. On iOS each publish also hands the URLSession
+query and 8 header predicates. On iOS each publish also hands the URLSession
 rules, compiled to C structs, to the Objective-C library synchronously (`hopi_us_rules_publish`),
 whose matcher is a second implementation checked against the same JSON vectors as the Kotlin one
 (`commonTest` resources); the hit counters live in C memory there, shared by both sides.
@@ -924,7 +928,6 @@ and a record's mark always describes what its recorder did.
 | delay before response | yes | yes | yes | with a mock or fail only |
 | edit request | yes | yes | yes | yes, for tasks from the hooked factories; a body only for `HTTPBody` and upload-from-data |
 | edit response | yes | yes | yes | **no** |
-| replay | yes, while the client is open | yes, OkHttp 4.x/5.x (3.14 refused) | yes | yes, local sessions, while the session lives |
 
 Where it applies: the Ktor plugin at `HttpSendPipeline.Monitoring` (an edit rewrites the builder
 before the record's snapshot; a mock builds the call without calling the engine); OkHttp in the
@@ -936,22 +939,12 @@ delivered on the run loop of the thread that called `startLoading`, never cached
 and `resume` hooks (edits, delays).
 
 **Marks.** A ruled record carries `ruleId` and `ruleApplied` (see Data model) and holds the request
-as sent and the response as delivered to the app; a replay carries `replayOf`. A mock's record has
+as sent and the response as delivered to the app. A mock's record has
 the recorder's `source`, `protocol` null and a duration that includes the delay; a fail's is
 `Failed` with the exception the app saw.
 
-**Replay.** `Replays.start` (core) re-sends a record through its in-memory `replayTarget` (the Ktor
-client, the OkHttp client, the connection's TLS objects, the URLSession session) and returns the
-new record's id at once; the replay is recorded like any request, and rules apply to it. It is
-refused (`UNSUPPORTED`) for a record whose recorder offers no replay, a closed client or
-invalidated session (the target's own refusal), and a request body not held in full; an edit
-whose header value is the redaction placeholder is `BAD_REQUEST`, and a ninth replay in flight
-`LIMIT`. A URLSession replay goes through the task's own session with a task delegate that
-implements only the response, data, completion and metrics callbacks, so authentication challenges
-still reach the app's delegate.
-
 **Security.** No action contacts the network outside the app's own stack: a mock and a fail
-contact nothing; an edit and a replay go through the app's client or session with its own TLS,
+contact nothing; an edited request goes through the app's client or session with its own TLS,
 certificate pinning, verifier, proxy and challenge delegate. Hopi offers no action that changes
 trust, a verifier, a proxy or a challenge answer. The scheme cannot change; an edit that changes
 the origin removes `Authorization`, `Proxy-Authorization`, `Cookie` and every redacted header
@@ -979,17 +972,17 @@ engine and `HopiRules` stay; `hello` says `"rules":false` when every recorder th
 off, and the bridge then answers rule commands `UNSUPPORTED`.
 
 **Surfaces.** Bridge commands (Agent access, "Wire protocol"); the CLI's `mock|fail|delay|edit add`,
-`rules ls|rm|clear|enable|disable|reset` and `replay` (Agent access, "CLI"); `HopiRules` (Consumer
-API); the desktop viewer's Rules panel (Desktop viewer); the in-app rules list, "Mock this
-response" and "Replay" (UI).
+`rules ls|rm|clear|enable|disable|reset` (Agent access, "CLI"); `HopiRules` (Consumer API); the
+desktop viewer's Rules panel (Desktop viewer); the in-app rules list and "Mock this response" (UI).
 
 **Compatibility.** The bridge's `"protocol"` stays 1, so a current CLI keeps working with a new
 app and the other way round. A new host sends rule commands only to an app whose `hello` said
 `"rules":true` (older apps omit it: "this app's Hopi does not support rules", exit 4); an older
 app answers a rule command `BAD_REQUEST` ("unknown cmd", or "malformed JSON object" for a nested
-one) without changing its state. `{"type":"rules"}` notices go only to a `tail` that asked for
-them, so an older client never sees an unknown line type, and the new record fields are additive
-(older decoders ignore them; a new decoder reads their absence as null). On Android the generated
+one) without changing its state. A new app answers a `replay` line the same way: the command was
+removed (docs/ROADMAP.md, "Replay (no priority)"). `{"type":"rules"}` notices go only to a `tail`
+that asked for them, so an older client never sees an unknown line type, and the new record fields
+are additive (older decoders ignore them; a new decoder reads their absence as null). On Android the generated
 `HopiGeneratedConfig` gained the `rules` argument, so the plugin and `hopi-android` must come from
 the same Hopi version, as they always do (the plugin adds the runtime itself).
 
@@ -1000,6 +993,101 @@ expects exactly the four noops (`:hopi-rules-noop` included) and `verifyDebugCap
 `RuleEngine` in the debug APK, and `:sample:shared:verifyIosReleaseExcludesCapture` fails on any
 `HopiUSRuleProtocol` or `_hopi_us_rule` symbol and the rule queue's label without the flag and
 requires them with it. `:checkNoopParity` covers the `hopi-rules` pair.
+
+## Performance monitors (`hopi-core` model; `hopi-perf`)
+
+Design: docs/design/perf-monitors.md. Built: the core model, its JSON and bridge commands, the log
+lines, `hopi-perf`/`hopi-perf-noop` with the Kotlin API, the Android monitors, the iOS monitors,
+the surfaces (CLI, `hopi-connect`, the desktop Perf panel, the in-app HUD and Perf tab), and the
+sample's perf lab and bench (see "Sample app"), verified on the Android emulator and the iOS
+simulator. Measured costs (emulator, debug build; design, "As built", stage 4): nothing started is
+identical to the noop build (0 CPU, 0 wakes idle); frames add nothing measurable on the main
+thread; hangs' Looper printer adds +6.2 to +6.5 µs per main-thread message and +29 µs per
+`Dispatchers.Main` resume (the framework formats the dispatch line for any printer) and nothing
+while idle; the heartbeat adds nothing per message and 8 wakes per second idle; the sampler wakes
+once per interval at about 1 ms of CPU per tick.
+
+- **Off is free.** Nothing runs until a monitor starts: no thread, no listener, no lifecycle
+  callback, no monitor class loaded. `HopiPerf.install` (or, on Android, `hopi-android`'s provider
+  when the plugin has `perf { enabled = true }`) registers one `PerfController` in core's
+  `PerfHook` and allocates the model (about 120 KB of primitive rings). An app without `hopi-perf`
+  only ever loads `PerfHook` (the bridge's `hello` reads it).
+- **Model** (`dev.koga.hopi.core.perf`, all `@HopiInternalApi`): series rings of primitive arrays
+  (`frames`, `cpu`, `memory`, 1200 points), one event ring per kind (jank 1000, stalls 1000, hangs
+  100, memory events 200, the previous ANR 1), process-wide `seq`, summaries since start
+  (frame-time histogram for p50/p90/p99, hang count/total/worst, CPU average/max, resident
+  min/max). Frames are bucketed per second with no timer: only a second strictly in the past is
+  closed (by a later frame, the sampler's tick or a reader). Listeners get closed seconds, samples
+  and events, never per-frame writes.
+- **Hang detection** is a pure state machine (`HangDetector`) over a packed 64-bit busy state
+  (`BusyState`: 24-bit sequence, 40-bit start), driven by `HangWatchdog` on `hopi-perf-hang`:
+  untimed while the main thread is idle, one doze of one threshold after a unit, timed to the
+  unit's deadline while busy; stacks at 1x/2x/4x, discarded when the sequence moved during the
+  capture; an oversleep beyond one threshold moves the start (no false hang from a frozen
+  process); a detection under a debugger takes no stack and is not counted. The detector and
+  watchdog read the busy state through `MainBusy`, which `BusyState` implements in Kotlin
+  (Android) and `hopi-perf` implements over C-owned state on iOS; a platform whose stacks are raw
+  addresses (`HangPlatform.symbolicate`) has the event recorded and logged raw first, and named
+  only once the hang's unit ended (iOS `dladdr` takes the dyld lock, which a hung main thread may
+  need to finish its unit). Under a remote lease the watchdog still parks before its idle sleep
+  (the lease only bounds it), so a hang that starts while a lease runs is seen.
+- **Frames, Android.** A frame's own time is `TOTAL_DURATION` less its wait before it started
+  (`VSYNC_TIMESTAMP - INTENDED_VSYNC_TIMESTAMP`), and a frame that started late is held to the last
+  on-time frame's `DEADLINE` (API 31+; the refresh rate's interval below): read from the intended
+  vsync, a late frame carries the wait in both, and frames that each block 100 ms read as 1 janky
+  frame in 30 on the emulator. Janky over twice the deadline, slow over it, frozen over 700 ms.
+- **Android** (`hopi-perf` androidMain): the Looper printer set and cleared by posted messages (the
+  stop message clears it only if Hopi's printer dispatched it), the input bracket (a delegating
+  `Window.Callback` per started activity, removed only when still on top), FrameMetrics on
+  `hopi-perf-frame` (nice 5; attach only with a decor view, software windows reported), the
+  sampler `hopi-perf-samp` (nice 5; `Process.getElapsedCpuTime`, Hopi's own share from each perf
+  thread's CPU clock before it parks, heaps, RSS from a kept-open `/proc/self/statm`, ART GC
+  stats; `/proc/self/task` only while watched), `ComponentCallbacks2` while memory runs, PSS on
+  demand at most once per 10 s, the previous run's ANR (API 30+) read once on the watchdog thread.
+- **iOS** (`hopi-perf` iosMain plus the native library `src/nativeInterop/objc/hopi_perf.m`, built
+  per target and embedded in its cinterop klib like core's URLSession library): two
+  `CFRunLoopObserver`s on the main run loop for the common modes, written in C (begin at the lowest
+  order for `AfterWaiting | BeforeTimers | Exit`, end at the highest for `BeforeWaiting`), publish
+  the same packed busy state as Android's and enter Kotlin only for a unit over twice the frame
+  deadline (a `stall`, frames tier 1; the deadline from `UIScreen.maximumFramesPerSecond`, capped
+  at 60 Hz without `CADisableMinimumFrameDurationOnPhone`). Hangs add the watchdog
+  `hopi-perf-hang` (an `NSThread` at the user-initiated QoS running core's `HangWatchdog`, parked
+  in C calls on a semaphore of its own); a capture suspends the main thread, reads its registers,
+  walks frame pointers within the stack's bounds (Swift async flag cleared, return addresses
+  stripped with an explicit pointer-auth mask) and resumes it, with nothing allocated, locked or
+  run in Kotlin in between; `dladdr` names the addresses afterwards. The sampler `hopi-perf-samp`
+  (utility QoS) reads `task_info` (CPU of terminated and live threads, `phys_footprint`),
+  `os_proc_available_memory()` and Hopi's own share; the per-thread list is `task_threads` while
+  watched, every port deallocated. Memory adds the memory-warning notification and a
+  memory-pressure dispatch source. Frames tier 2, a `CADisplayLink` writing the frames series with
+  its callback cadence, runs only while frames runs and a viewer asks for it
+  (`PerfController.watchCadence`, counted; `perf.tail` with `"fps":true`). A launch argument
+  `-hopiPerf frames,hangs` is read once by the first `install`. PSS does not exist there.
+- **Owners and leases.** A monitor runs while code, a lease (`perf.start`, `ttlSec` 600 by
+  default, 0 no expiry) or a `perf.tail` session holds it; a lease's expiry rides an existing perf
+  thread's timed wait (or one delayed message on the frames thread when frames runs alone).
+- **Log lines** (`emitPerfLogLine`): logcat tag `HopiPerf`, os_log category `perf`, JVM stderr;
+  `{"hopi":1,"perf":"hang|jank|memory|anr|sample|notice",…}`, never an `"id"`; at most 5 per
+  second (excess counted in a `notice`), jank once per second with a janky frame, `sample` every
+  10 s.
+- **Bridge.** `hello` gains `"perf"` and `"perfControl"` (absent on older apps, read as false).
+  `perf.start`, `perf.stop`, `perf.status`, `perf.snapshot`, `perf.event`, `perf.tail` are all
+  accepted only after `hello` (they count as write commands); `UNSUPPORTED` without a controller,
+  for a monitor the platform lacks, or a start/stop with `remoteControl = false`; `LIMIT` for a
+  value out of range. Replies: `perf.status`, `perf.series`, `perf.frames`, `perf.summary`,
+  `perf.event`, `perf.sample`, `perf.threads`, `perf.pss`, then `end` for a snapshot.
+- **Release.** `hopi-perf-noop` depends on nothing; the plugin adds `hopi-perf` to debuggable
+  build types and `hopi-perf-noop` to the others when `perf { enabled = true }`, and substitutes the
+  pair like the other twins. `verifyReleaseUsesNoop` expects `:hopi-perf-noop`, forbids
+  `dev.koga.hopi.perf.internal` and any Hopi call of `Window.addOnFrameMetricsAvailableListener`
+  or `Looper.setMessageLogging`; `verifyDebugCapture` requires `PerfEntry` and both calls.
+  `:checkNoopParity` covers the pair.
+- **Surfaces.** `hopi perf start|stop|status|snapshot|tail` and `hopi hangs` (see "CLI");
+  `hopi-connect`'s `PerfClient`, decoders and `RemotePerf` (see "Desktop viewer"); in the app, a
+  Perf tab in `HopiScreen` and a HUD in `HopiLauncher` (see "UI"). Each reads the model only while
+  shown: a listener registered while composed or streaming, removed after, and no timer anywhere
+  (the HUD and the tab update when the model hands out a closed second, a sample or an event).
+  The per-thread scan is counted across viewers (`watchThreads`), like the iOS cadence.
 
 ## cURL export
 
@@ -1237,6 +1325,18 @@ Client to app:
 {"cmd":"clear"}                       // → {"type":"ok","through":N}
 ```
 
+Perf commands (docs/design/perf-monitors.md, "Bridge"; see "Performance monitors" above), after
+`hello`, never pipelined:
+
+```json
+{"cmd":"perf.start","monitors":["frames","hangs"],"hangMs":250,"intervalMs":1000,"ttlSec":600}  // → {"type":"perf.status",...}
+{"cmd":"perf.stop","monitors":["frames"]}            // none named: all → {"type":"perf.status",...}
+{"cmd":"perf.status"}                                 // → {"type":"perf.status","platform","available","remoteControl","running":{…}}
+{"cmd":"perf.snapshot","series":["cpu"],"points":120,"events":true,"since":0,"threads":true,"pss":false,"fullStacks":false}  // → series, open second, summary, events, threads, pss, status, end
+{"cmd":"perf.event","seq":12}                         // → {"type":"perf.event",...all stacks} | NOT_FOUND
+{"cmd":"perf.tail","since":0,"samples":true,"fps":false,"threads":false,"start":["hangs"]}  // → status, backlog events, then live events, frames seconds, samples; "fps": iOS tier 2 while the session lasts
+```
+
 Rule commands (docs/design/rules.md, "Bridge"), accepted only after `hello` on the same connection
 (`BAD_REQUEST`, "hello first") and sent by `hopi-connect` only after it verified `hello` (never
 pipelined with it); `UNSUPPORTED` when `hello` said `"rules":false`:
@@ -1248,7 +1348,6 @@ pipelined with it); `UNSUPPORTED` when `hello` said `"rules":false`:
 {"cmd":"rules.remove","id":3}             // → {"type":"ok"} | NOT_FOUND
 {"cmd":"rules.clear"}                     // → {"type":"ok","removed":N}
 {"cmd":"blob.put","blob":1,"offset":0,"data":"<base64, ≤3072 chars>"}  // → {"type":"ok","blob":1,"size":N}
-{"cmd":"replay","id":42,"edit":{...}}     // → {"type":"replay","of":42,"id":57}
 {"cmd":"tail","since":0,"rules":true}     // as `tail`, plus {"type":"rules","rev":N} whenever the rule set changes
 ```
 
@@ -1303,7 +1402,23 @@ hopi get    <id> --app <id> [...] [--json]    # full detail incl. bodies
 hopi curl   <id> --app <id> [...]             # prints the cURL command
 hopi clear  --app <id> [...] [--json]
 hopi <command> --platform jvm --bridge-file <path> [--app <id>]   # a JVM bridge (tests, desktop)
+hopi perf start  --app <id> [--frames] [--hangs [--hang-ms 250]] [--cpu] [--memory] [--interval 1s] [--for 10m | --no-expiry]
+hopi perf stop   --app <id> [--frames] [--hangs] [--cpu] [--memory]   # none named: all, every owner
+hopi perf status --app <id> [--json]       # one line per monitor: setting, owners and lease, counts
+hopi perf snapshot --app <id> [--json] [--threads] [--pss]
+hopi perf tail   --app <id> [--json] [--since SEQ] [--samples] [--fps] [--threads] [--start hangs,frames]
+hopi hangs       --app <id> [--json] [--since SEQ]   # every hang with its full stacks
 ```
+
+The perf commands (docs/design/perf-monitors.md, "CLI") check their flags before connecting
+(ranges as the app's `LIMIT`: `--hang-ms` 100..10000 with `--hangs`, `--interval` 250ms..10s with
+`--cpu` or `--memory`, `--for` 1s..60m, never with `--no-expiry`) and send nothing before `hello`
+was verified and said `"perf":true` (`PerfClient`; exit 4 otherwise). `--json` prints the bridge's
+lines as received (`perf start|stop|status`: the `perf.status` line; `snapshot`: every line before
+`end`; `hangs`: the hang `perf.event` lines of a snapshot with full stacks). Human `status` adds
+the counts of a one-point snapshot (`perf.status` carries none); an Android frames monitor that no
+window reports yet prints how to attach it. `perf tail --start` holds its monitors exactly as long
+as it runs.
 
 `hopi-cli` is a Kotlin/JVM application. It depends on `hopi-core`'s JVM artifact for the
 cURL export, the JSON writer (requests), `prettyPrintJson` and `formatBytes` (`hopi-connect`
@@ -1423,9 +1538,11 @@ terminal. `--json` needs nothing: JSON escapes them.
 Exit codes: 0 ok, 1 usage (including several targets without `--device` and a bridge
 `BAD_REQUEST`), 2 not reachable (no device, app not installed, app not running, bridge off, a
 `SLOW_CLIENT` disconnect, which says `run hopi tail --since N to resume without losing a transaction`, the app closing the connection, adb dropping the forward, a bridge that fails the Android proof), 3 not found (`get`/`curl` of an id the
-store does not hold, a rule id the app does not have), 4 unsupported (rules off or absent in the
-app's Hopi, a replay the app refused). A rule the app rejects (`BAD_REQUEST`, `LIMIT`) is exit 1.
-The rule commands (`mock|fail|delay|edit add`, `rules ls|rm|clear|enable|disable|reset`, `replay`)
+store does not hold, a rule id the app does not have, a perf event it no longer holds), 4
+unsupported (rules off or absent in the app's Hopi, no perf monitors in it, a monitor the platform
+lacks, or a perf start or stop with `remoteControl = false`). A rule the app rejects (`BAD_REQUEST`,
+`LIMIT`) is exit 1, as is a perf value out of range.
+The rule commands (`mock|fail|delay|edit add`, `rules ls|rm|clear|enable|disable|reset`)
 are listed in `hopi --help` and docs/design/rules.md ("CLI"). Every error is one actionable line on stderr, `hopi: <message>`.
 stdout is a buffered writer over the raw file descriptor (not `System.out`, which hides write
 errors), flushed once at the end, and after every line in `tail`; when stdout is closed (`hopi
@@ -1453,6 +1570,18 @@ bridge protocol unchanged, through `hopi-connect`: the app needs nothing new.
   (connected, connecting, reconnecting, app stopped, device offline, the error; the request and
   pending counts; the app's dropped count from `notice` lines; the last export's outcome).
 - `SessionExport` writes HAR 1.2 and NDJSON. `Main` opens the window with a native menu bar.
+- `PerfPanel` (⌘P, menu Perf; docs/design/perf-monitors.md, "Desktop viewer"), beside the list
+  like the rules panel, over `RemoteSession.perf` (`RemotePerf` in `hopi-connect`). Nothing perf
+  is sent until it opens; then a `perf.tail` (samples, frame seconds, events; the per-thread list
+  only while its switch is on) streams on a connection of its own and one `perf.snapshot` on the
+  request connection backfills the charts (1200 points kept). A switch on adds the monitor to that
+  tail's `start`, so the app holds it while the panel is open and drops it when the panel or the
+  viewer closes (no lease to renew); the new stream opens before the old one closes, so a monitor
+  both name never restarts. A switch off is `perf.stop` (every owner). Three charts drawn with
+  `Canvas` (frames per second with janky bars, CPU %, memory with its events as dashed ticks;
+  last five minutes, monochrome), each monitor's owners (a lease shown with its end), the hangs
+  with their stacks (expand, copy as text). Switches are hidden for an app with
+  `remoteControl = false`.
 
 **Data.** A `RemoteSession` per target: its own `HopiStore` (2000 entries, 256 MB), keyed by
 the app's ids, with `Redactor.Default` on top of the app's redaction. The panes select through
@@ -1461,9 +1590,9 @@ summaries and show "Loading body…" until then. A new app process (another toke
 a fresh store and the selection is cleared, since the ids restart.
 
 **Connections.** Two per app, as `RemoteSession` opens them (a streaming `tail`, and one for `get`
-and `clear`) on one endpoint, so one adb forward on Android. Every attempt is a
-`RemoteSession.connect`, which closes the previous sockets and forward first, so the app never
-serves more than these two of its 8 slots. Disconnect, a new target and closing the window close
+and `clear`) on one endpoint, so one adb forward on Android, plus a third for a `perf.tail` only
+while the Perf panel is open. Every attempt is a `RemoteSession.connect`, which closes the previous
+sockets and forward first, so the app never serves more than these three of its 8 slots. Disconnect, a new target and closing the window close
 both sockets, remove the forward and stop the target's watcher. A JVM shutdown hook does the same
 on SIGTERM or SIGINT, so neither a forward nor an adb tracking subprocess outlives the viewer.
 Closing closes the session, the trackers and the watches on the closing thread, not on the
@@ -1521,13 +1650,12 @@ focus, the arrows, Enter and Esc stay with it.
 `RemoteSession.rules`: one row per rule (switch, match, action, hits and `times`, label, one
 warning line per `unsupported` source), Update (priority, times, reset hits: `rules.update` changes
 nothing else, and bodies and header values come back as sizes and redacted, so changing a match or
-an action is remove and add), Remove, Clear. Forms for mock, fail, delay, edit and edit-and-replay
+an action is remove and add), Remove, Clear. Forms for mock, fail, delay and edit
 (`RuleForm`, which validates what it can before anything is sent) take headers as a table and a
 body from a text area or a file (at most 1 MiB, uploaded as a blob when it does not fit a line);
 the app's refusal is shown exactly as sent. The detail pane adds "Mock this response" (a mock form
 prefilled with the record's exact request and `fromTransaction`, so the body is copied inside the
-app and never crosses the bridge), "Replay" and "Edit and replay…"; the new record is selected
-when the tail brings it. `RemoteSession` (hopi-connect) lists the rules on connect and again on
+app and never crosses the bridge). `RemoteSession` (hopi-connect) lists the rules on connect and again on
 each `{"type":"rules"}` notice of its tail (asked for only when `hello` said `"rules":true`), and
 counts hits locally from the `rule` mark of the summaries the tail brings, so nothing polls.
 
@@ -1612,6 +1740,35 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   cap, before the client exists (force-stop the app first). The log goes to the `HopiSample`
   tag on Android and stdout on iOS (`simctl launch --console-pty`). The back gesture (ui-backhandler `BackHandler`) returns to the item list. iOS
   gets `MainViewController()`, a `ComposeUIViewController`; the static framework is `Shared`.
+- **Perf lab and bench** (`sample/shared`, `PerfLab.kt`, `PerfBench.kt`; docs/design/perf-monitors.md,
+  "Device verification plan" and "Performance plan"). `sample/shared` depends on `hopi-perf` or
+  its noop in commonMain (api: the iOS framework exports it); on Android the plugin's
+  `perf { enabled = true }` resolves it per variant and its provider registers it, on iOS
+  `iOSApp.init` calls `HopiPerf.shared.install { agentBridge = true }` before the UI. Diagnostics
+  opens the **Perf lab** screen: a full-width "Click burn" button (600 ms of spinning inside
+  `onClick`, `PerfLab.clickBurn`), one button per step and "Stop every monitor". A run starts every
+  monitor as code and injects, in order: 30 frames each blocked 20, 50 and 100 ms inside
+  `withFrameNanos` (a state write per frame makes each one draw); main-thread units, each its own
+  posted message or main-queue block, sleeping 200, 300, 1000 and 3000 ms (`PerfLab.hang`) and
+  spinning 600 ms (`PerfLab.burn`); a Compose `Dialog` for 5 s; two threads `perf-burn-1`/`-2`
+  spinning 5 s; a touched 64 MB `ByteArray` held 4 s, then 64 MB touched outside the managed heap
+  (a bitmap's pixels on Android, malloc'd since API 26; `nativeHeap` on iOS) held 4 s; on iOS a posted
+  `UIApplicationDidReceiveMemoryWarningNotification` (Android's trim levels come from the host).
+  Each step logs one `{"perfLab":…}` line under `HopiSample` with its wall-clock window (the clock of
+  Hopi's events), ending with `{"perfLab":"done"}`; the monitors stay on for the host to read.
+  `--es perfVerify all` / `-verifyPerf` (or a comma list of steps) opens the lab and runs it at
+  launch; `benchmark/perf/verify.py` drives it, takes its own references (gfxinfo framestats per
+  jank step, `/proc/<pid>/stat` around the CPU step, `dumpsys meminfo`, `am send-trim-memory`), taps
+  the click-burn button with `adb shell input tap` (input dispatch), reads `hopi perf snapshot` and
+  `hopi hangs`, and checks each expectation. `--es perfBench <spec>` / `-perfBench <spec>`
+  (`monitors=none|all|hangs,frames;n=10000;runs=3;mode=messages|idle`) starts the named monitors,
+  then posts `n` main-thread units one after the other per kind (Android: a reused `Runnable`, a new
+  lambda per message, a `yield()` on `Dispatchers.Main`; iOS: `dispatch_async` to the main queue, a
+  `yield()`) and logs the median, p90, p99 and mean gap between unit starts, the main thread's CPU
+  per unit and the GC count; `mode=idle` starts the monitors and does nothing.
+  `benchmark/perf/bench.py` alternates arms in blocks (a second install with
+  `-Psample.hopiCapture=false -Psample.applicationIdSuffix=.noop` is the noop arm) and
+  `benchmark/perf/idle.py` reads every thread's CPU ticks and context switches over an idle minute.
 - **`sample/androidApp`** (`applicationId` `dev.koga.hopi.sample`) hosts the shared UI in one
   activity, applies `id("dev.koga.hopi")` (with `agentBridge = true`), and depends on
   `sample/shared` and `sample/fakesdk`. The plugin makes its debug build real (the Ktor plugin, the
@@ -1667,10 +1824,11 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   the dev server and reads each record through `SampleCaptureProbe` (a source directory of
   `sample/shared` compiled only with `-Phopi.enabled=true`); `sample/iosApp/scripts/capture-swift-test.sh`
   starts the dev server and runs it (not in the base check: it boots a simulator, and the
-  Xcode build phase runs Gradle). With Xcode 27.1 the Debug app no longer launches on the iOS 18.2
-  runtime: Kotlin/Native's `platform.CoreGraphics` binding references `kCGAdaptiveMaximumBitDepth`,
-  which iOS 18.2 lacks (dyld aborts before `main`), so the Swift tests ran on the iPhone 17
-  simulator, iOS 27.0; the Kotlin/Native tests, which link no CoreGraphics, run on both.
+  Xcode build phase runs Gradle). An earlier Xcode 27.1 build of the Debug app did not launch on the iOS
+  18.2 runtime (Kotlin/Native's `platform.CoreGraphics` binding referenced
+  `kCGAdaptiveMaximumBitDepth`, which iOS 18.2 lacks, and dyld aborted before `main`), so the Swift
+  tests ran on the iPhone 17 simulator, iOS 27.0. The current build launches on the iPhone 16
+  (iOS 18.2) too (the perf lab ran there on 2026-10-26); the Kotlin/Native tests run on both.
   `CaptureVerification.swift` (launch arguments `-verifyCapture`, `-captureBench <spec>`,
   `-idleCPU S`) and `-ktorVerify` (`KtorVerify.kt`, iosMain) drive the end-to-end check in
   `benchmark/urlsession/e2e/`; the build setting `HOPI_ENABLED=false` (`xcodebuild ...
@@ -1687,9 +1845,7 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   `{"rules":…,"ok":…}` line per scenario and a `{"rules":"done","failed":N}` line under
   `HopiSample` (stdout on iOS). The noop build answers `"ok":false` everywhere, the control.
   `runRulesTargets` instead sends a GET of `/json`, a GET of `/missing` and a POST of `/echo`
-  tagged `rv=host-<target>` per target, for rules the host adds with the CLI or the desktop, and
-  whose records `hopi replay` re-sends (the app cannot read record ids, so replay is driven from
-  the host or the in-app detail). Android (`--es rulesVerify all`, `--es rulesTargets all`, and
+  tagged `rv=host-<target>` per target, for rules the host adds with the CLI or the desktop. Android (`--es rulesVerify all`, `--es rulesTargets all`, and
   the Diagnostics buttons "Rules self-test", "Rules targets"): the targets are the Ktor plugin (a
   request with its own `Accept-Encoding`, which the plugin keeps), Ktor's OkHttp engine (ruled by
   the interceptor), and the fake SDK's OkHttp client and `HttpURLConnection` (`FakeSdk.call`, still
@@ -1763,6 +1919,24 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   `UIActivityViewController` on iOS) with the method, URL, status, duration and cURL, cut at
   100 000 chars (the Android binder limit); the JVM has no share sheet, so the action is absent
   there.
+- **Perf (with `hopi-perf`; docs/design/perf-monitors.md, "In-app"):** `HopiScreen` and
+  `HopiLauncher` read core's `PerfHook` once; without a controller neither shows anything new. With
+  one, the list's top bar gains a Perf button opening the Perf tab: a switch per monitor (started
+  as code, `PerfOwner.Code`), the HUD's switch (and on iOS the cadence's), summaries, sparklines
+  of the last 60 points, the per-thread list (`watchThreads` while shown), "Measure PSS" (off the
+  main thread), memory events and the hangs with their stacks. The tab rebuilds its model on
+  `Dispatchers.Default` when the model hands its listener a closed second, a sample, a hang, a
+  stall or a memory event (never a frame or a jank event), and after its own actions; nothing
+  while the app is idle. While `HopiScreen` is composed, `PerfData.inspectorOpen` is set, so
+  frames drawn under it are left out. The HUD is one line over the app ("58 fps · 4 jank · CPU 12%
+  · 142 MB"; iOS: "worst stall 84 ms · 3 stalls/10 s", or "cadence 120/s" with the cadence on),
+  toggled by a long press on the launcher button or the tab; its text is computed on the writer's
+  thread (`HudMeter`) and published only when it changed, so it draws at most once a second and
+  not at all while the app is idle; it takes no touch and never recomposes the button. On
+  Android, a launcher composed with a controller registered stores its activity in core's
+  `PerfLauncher` (a weak reference, cleared on dispose), and a frames or hangs start attaches to
+  that window at once with one main-thread message. `hopi-ui-noop` is unchanged: the noop launcher
+  has no button, so nothing to long-press.
 - **Desktop panes:** `HopiPanes(store, onSelected, onClear, …)` in the jvm-only package
   `dev.koga.hopi.ui.desktop` (`@HopiInternalApi`) reuses the list and detail panes, the
   row cache, the detail formatter and the actions over any store: side by side from 720 dp wide
@@ -1812,13 +1986,11 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
 **Rules.** A "Rules" button in the top bar opens a list read from `RuleEngine` only while it is
 composed (it refreshes when the rule set or the store changes): one row per rule with its match
 (header values redacted), action and hits, an on/off switch, remove, and "Remove all". A list row of
-a ruled record shows one badge, the strongest action first (`MOCK`, `FAIL`, `EDIT`, `DELAY`), plus
-`REPLAY`; the overview shows "Rule: #3: delay, mock" and "Replay of #42", a link. The detail adds
-"Mock this response" (an enabled rule matching the record's exact method, scheme, host, port and
-path, built in the app from the record with `fromTransaction`, `times` unset, Undo offered for 4 s;
-disabled with the reason when the response body is not held in full) and "Replay" (opens the new
-record once it is recorded); both are disabled with the reason when every recorder has
-`rules = false`. There is no rule editor on the phone. `HopiScreen`, `HopiLauncher` and
+a ruled record shows one badge, the strongest action first (`MOCK`, `FAIL`, `EDIT`, `DELAY`); the
+overview shows "Rule: #3: delay, mock". The detail adds "Mock this response" (an enabled rule
+matching the record's exact method, scheme, host, port and path, built in the app from the record
+with `fromTransaction`, `times` unset, Undo offered for 4 s), disabled with the reason when the
+response body is not held in full or when every recorder has `rules = false`. There is no rule editor on the phone. `HopiScreen`, `HopiLauncher` and
 `hopi-ui-noop` are unchanged. `HopiPanes` gained `HopiPanesRules`, callbacks the desktop connects
 to the bridge, so the desktop's panes never use the desktop process's own engine.
 
@@ -1991,6 +2163,14 @@ Concretely, when nothing is looking (screen closed, no agent connected, log sink
 - the UI collects nothing: `transactions` is collected only while `HopiScreen` is composed;
 - no thread wakes up on its own. A CPU profile of an idle app with Hopi installed must be
   indistinguishable from one without it.
+
+The performance monitors (docs/design/perf-monitors.md) are the stated, opt-in exceptions, each
+off by default and running only while a monitor is started: the sampler (one wake per interval,
+1 s by default), the hang watchdog (none while the main thread is idle; at most one per threshold
+while busy, plus one per idle-to-busy transition) and a remote lease's expiry (no thread of its
+own: one deadline in a perf thread's timed wait, or one `dispatch_after` when iOS frames runs
+alone). The Android heartbeat (`hangHeartbeat`) and iOS tier 2's display link (only while a viewer
+asks for it) are the two that wake while the app is idle.
 
 When the screen is open, the list renders only visible rows (lazy, keyed, precomputed row strings
 built once per transaction), detail formatting runs on `Dispatchers.Default`, and nothing animates

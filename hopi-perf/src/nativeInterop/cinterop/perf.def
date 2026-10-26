@@ -1,0 +1,6 @@
+language = C
+package = dev.koga.hopi.perf.internal.native
+headers = hopi_perf.h
+headerFilter = hopi_perf.h
+staticLibraries = libhopi_perf.a
+linkerOpts = -framework Foundation -framework QuartzCore -framework UIKit

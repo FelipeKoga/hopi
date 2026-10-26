@@ -31,6 +31,14 @@ public abstract class GenerateHopiConfig : DefaultTask() {
     @get:Input public abstract val redactedQueryParameters: ListProperty<String>
     @get:Input public abstract val redactionDisabled: Property<Boolean>
 
+    /** `perf { enabled = true }`: the provider hands the app to hopi-perf. */
+    @get:Input public abstract val perfPresent: Property<Boolean>
+
+    /** A bit set, one bit per monitor in `HopiMonitor` order. */
+    @get:Input public abstract val perfAutoStart: Property<Int>
+    @get:Input public abstract val perfHangThresholdMs: Property<Long>
+    @get:Input public abstract val perfHangHeartbeat: Property<Boolean>
+
     @get:OutputDirectory
     public abstract val outputDirectory: DirectoryProperty
 
@@ -60,7 +68,11 @@ public abstract class GenerateHopiConfig : DefaultTask() {
         appendLine("            ${redactionDisabled.get()}, // redactionDisabled")
         appendLine("            new String[] ${javaStrings(redactedHeaders.get())}, // redactHeaders")
         appendLine("            new String[] ${javaStrings(redactedQueryParameters.get())}, // redactQueryParameters")
-        appendLine("            ${rules.get()} // rules")
+        appendLine("            ${rules.get()}, // rules")
+        appendLine("            ${perfPresent.get()}, // perfPresent")
+        appendLine("            ${perfAutoStart.get()}, // perfAutoStart")
+        appendLine("            ${perfHangThresholdMs.get()}L, // perfHangThresholdMs")
+        appendLine("            ${perfHangHeartbeat.get()} // perfHangHeartbeat")
         appendLine("        );")
         appendLine("    }")
         appendLine("}")

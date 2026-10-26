@@ -41,10 +41,4 @@ public object HopiRules {
 
     /** Does nothing. */
     public fun clear() {}
-
-    /** Returns `-1`: nothing is replayed. */
-    public fun replay(transactionId: Long, block: HopiRequestEdit.() -> Unit = {}): Long {
-        HopiRequestEdit().apply(block)
-        return -1
-    }
 }

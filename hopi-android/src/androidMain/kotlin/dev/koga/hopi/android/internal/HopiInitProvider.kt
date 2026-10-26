@@ -1,5 +1,6 @@
 package dev.koga.hopi.android.internal
 
+import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
@@ -7,6 +8,7 @@ import android.net.Uri
 import android.os.SystemClock
 import dev.koga.hopi.core.HopiInternalApi
 import dev.koga.hopi.core.log.emitPlatformLogLine
+import dev.koga.hopi.core.perf.PerfBootstrap
 
 /**
  * Starts automatic capture with no code in the app: the manifest of the real runtime declares it,
@@ -24,10 +26,13 @@ public class HopiInitProvider : ContentProvider() {
         val okHttp = okHttpState(loader)
         val looked = SystemClock.elapsedRealtimeNanos()
         val started = AndroidCapture.start(config.settings, okHttp, okHttpWanted = config.okhttp, urlConnection = config.urlConnection)
+        val captured = SystemClock.elapsedRealtimeNanos()
+        val perf = bootPerf(config.perf, loader, context?.applicationContext as? Application)
         val end = SystemClock.elapsedRealtimeNanos()
         if (started && config.settings.summaryLog) {
             // Its own cost on the main thread, in parts, so a device run can see where it goes.
-            val parts = "config ${(configured - begin) / 1_000} us, okhttp lookup ${(looked - configured) / 1_000} us, start ${(end - looked) / 1_000} us"
+            val parts = "config ${(configured - begin) / 1_000} us, okhttp lookup ${(looked - configured) / 1_000} us, start ${(captured - looked) / 1_000} us" +
+                if (perf) ", perf ${(end - captured) / 1_000} us" else ""
             emitPlatformLogLine(AndroidCapture.notice("android capture started (okhttp ${okHttp.name.lowercase()}, ${(end - begin) / 1_000} us; $parts)"))
         }
         return true
@@ -75,6 +80,29 @@ public class HopiInitProvider : ContentProvider() {
             false
         }
 
+        /**
+         * Hands the app to `hopi-perf` when the plugin put it in this variant ([perf] non-null):
+         * one `Class.forName` hit and one call (docs/design/perf-monitors.md, "How the monitors find
+         * the app"). Without it, no lookup at all: a miss on ART fills a stack trace. Returns whether
+         * it booted.
+         */
+        public fun bootPerf(perf: PerfConfig?, loader: ClassLoader?, application: Application?): Boolean {
+            if (perf == null) return false
+            val entry = try {
+                Class.forName(PerfBootstrap.CLASS_NAME, false, loader).getDeclaredConstructor().newInstance() as? PerfBootstrap
+            } catch (_: ReflectiveOperationException) {
+                null
+            } catch (_: LinkageError) {
+                null
+            }
+            if (entry == null) {
+                emitPlatformLogLine(AndroidCapture.notice("hopi { perf { enabled = true } } but ${PerfBootstrap.CLASS_NAME} is not in the APK"))
+                return false
+            }
+            entry.boot(application, perf.autoStart, perf.hangThresholdMs, perf.hangHeartbeat)
+            return true
+        }
+
         private const val LEGACY_REAL_CALL = "okhttp3.RealCall"
         private val REAL_CALL_NAMES = listOf("okhttp3.internal.connection.RealCall", LEGACY_REAL_CALL)
     }
@@ -100,7 +128,14 @@ public abstract class HopiConfigValues(
     redactHeaders: Array<String>,
     redactQueryParameters: Array<String>,
     rules: Boolean,
+    perfPresent: Boolean,
+    perfAutoStart: Int,
+    perfHangThresholdMs: Long,
+    perfHangHeartbeat: Boolean,
 ) {
+    /** The plugin's `perf { }` block, when it put `hopi-perf` in this variant; null otherwise. */
+    public val perf: PerfConfig? = if (perfPresent) PerfConfig(perfAutoStart, perfHangThresholdMs, perfHangHeartbeat) else null
+
     public val settings: AndroidCapture.Settings = AndroidCapture.Settings(
         maxEntries = maxEntries,
         maxTotalBytes = maxTotalBytes,
@@ -116,6 +151,10 @@ public abstract class HopiConfigValues(
     )
 }
 
+/** `hopi { perf { } }`: [autoStart] is a bit set of `PerfBootstrap.bit`. */
+@HopiInternalApi
+public class PerfConfig(public val autoStart: Int, public val hangThresholdMs: Long, public val hangHeartbeat: Boolean)
+
 /** The generated configuration, or the defaults when it is absent (the runtime added without the plugin). */
 @HopiInternalApi
 public class GeneratedConfig(
@@ -123,6 +162,8 @@ public class GeneratedConfig(
     /** The plugin rewrote the `URL` calls of Ktor's Android engine (false without the plugin: nothing was rewritten). */
     public val urlConnection: Boolean,
     public val settings: AndroidCapture.Settings,
+    /** Null unless the plugin put `hopi-perf` in this variant. */
+    public val perf: PerfConfig? = null,
 ) {
     @HopiInternalApi
     public companion object {
@@ -139,7 +180,7 @@ public class GeneratedConfig(
             return if (values == null) {
                 GeneratedConfig(okhttp = true, urlConnection = false, AndroidCapture.Settings())
             } else {
-                GeneratedConfig(values.okhttp, values.urlConnection, values.settings)
+                GeneratedConfig(values.okhttp, values.urlConnection, values.settings, values.perf)
             }
         }
     }

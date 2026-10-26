@@ -5,14 +5,7 @@ import dev.koga.hopi.core.internal.urlsession.HOPI_US_ACTION_DELAY
 import dev.koga.hopi.core.internal.urlsession.HOPI_US_ACTION_EDIT
 import dev.koga.hopi.core.internal.urlsession.HOPI_US_ACTION_FAIL
 import dev.koga.hopi.core.internal.urlsession.HOPI_US_ACTION_MOCK
-import dev.koga.hopi.core.internal.urlsession.HOPI_US_RULES_REPLAY
 import dev.koga.hopi.core.internal.urlsession.HOPI_US_RULES_SESSIONS
-import dev.koga.hopi.core.internal.urlsession.hopi_us_replay
-import dev.koga.hopi.core.internal.urlsession.hopi_us_replay_box
-import dev.koga.hopi.core.internal.urlsession.hopi_us_replay_box_session
-import dev.koga.hopi.core.internal.urlsession.hopi_us_replay_box_set_target
-import dev.koga.hopi.core.internal.urlsession.hopi_us_replay_box_target
-import dev.koga.hopi.core.internal.urlsession.hopi_us_replay_refusal
 import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_add
 import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_begin
 import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_delay
@@ -23,13 +16,9 @@ import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_match
 import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_mock
 import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_predicate
 import dev.koga.hopi.core.internal.urlsession.hopi_us_rules_publish
-import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.rules.CompiledRule
 import dev.koga.hopi.core.rules.NativeHitCounter
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleState
@@ -38,13 +27,9 @@ import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
 import kotlinx.cinterop.BetaInteropApi
-import kotlinx.cinterop.ByteVar
-import kotlinx.cinterop.COpaquePointer
-import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.staticCFunction
-import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
 import platform.Foundation.NSLock
@@ -53,8 +38,8 @@ import platform.Foundation.create
 /**
  * The Kotlin side of rules on URLSession (docs/design/rules.md, "URLSession"): mirrors the
  * engine's URLSession rules into the native library on every publish, synchronously, so a rule is
- * live in the hooks when `rules.add` returns; republishes after a native claim used up a rule;
- * and replays records through the session that sent them. The hooks themselves never call Kotlin.
+ * live in the hooks when `rules.add` returns, and republishes after a native claim used up a
+ * rule. The hooks themselves never call Kotlin.
  */
 @OptIn(ExperimentalForeignApi::class)
 @HopiInternalApi
@@ -79,16 +64,10 @@ public object UrlSessionRules {
     public var publishes: Int = 0
         private set
 
-    // Replays in flight by their record id: sent from any thread, taken and finished on the capture queue.
-    private val handoffs = AtomicReference<Map<Long, ReplayHandoff>>(emptyMap())
-
     private val CREDENTIALS = listOf("authorization", "proxy-authorization", "cookie")
 
     /** Whether new sessions get the rule protocol (false: only `URLSession.shared` can be mocked). */
     public val sessionsCovered: Boolean get() = features.load() and HOPI_US_RULES_SESSIONS != 0
-
-    /** Whether records can be replayed (the task's session is reachable). */
-    public val replayAvailable: Boolean get() = features.load() and HOPI_US_RULES_REPLAY != 0
 
     /**
      * Turns rules on, once, after capture started; [redactor] gives the store's redaction, whose
@@ -97,15 +76,15 @@ public object UrlSessionRules {
     internal fun enable(redactor: () -> Redactor) {
         if (!enabled.compareAndSet(false, true)) return
         this.redactor.store(redactor)
-        features.store(hopi_us_rules_enable(staticCFunction(::rulesExhausted), staticCFunction(::replayDone)))
+        features.store(hopi_us_rules_enable(staticCFunction(::rulesExhausted)))
         RuleEngine.addListener { mirror() }
         mirror()
     }
 
     /**
      * Publishes the engine's current URLSession rules to the native library. Never throws. A state
-     * whose URLSession rules are the ones mirrored already (a replay that began or ended, a change
-     * on another source's rules) publishes nothing: the compiled rules are shared between states.
+     * whose URLSession rules are the ones mirrored already (a change on another source's rules)
+     * publishes nothing: the compiled rules are shared between states.
      */
     public fun mirror() {
         mirroring.lock()
@@ -187,40 +166,6 @@ public object UrlSessionRules {
         bodyData = data
     }
 
-    /** The replay target of the task behind [handle], one per session; null when it cannot be replayed. Capture queue. */
-    internal fun targetFor(handle: COpaquePointer): ReplayTarget? {
-        if (!enabled.load() || !replayAvailable) return null
-        val box = hopi_us_replay_box(handle) ?: return null
-        (hopi_us_replay_box_target(box) as? UrlSessionReplayTarget)?.let { return it }
-        val session = hopi_us_replay_box_session(box) ?: return null
-        return UrlSessionReplayTarget(session).also { hopi_us_replay_box_set_target(box, it) }
-    }
-
-    /** The replay recorded under [id], taken: null when there is none (or another recorder took it). Capture queue. */
-    internal fun takeHandoff(id: Long): ReplayHandoff? = handoffs.load()[id]?.takeIf { it.take() }
-
-    internal fun register(handoff: ReplayHandoff) = updateHandoffs { it + (handoff.id to handoff) }
-
-    internal fun unregister(id: Long): ReplayHandoff? {
-        var removed: ReplayHandoff? = null
-        updateHandoffs { current ->
-            removed = current[id]
-            current - id
-        }
-        return removed
-    }
-
-    internal fun onReplayDone(id: Long, error: String?) {
-        unregister(id)?.finish(error)
-    }
-
-    private inline fun updateHandoffs(change: (Map<Long, ReplayHandoff>) -> Map<Long, ReplayHandoff>) {
-        while (true) {
-            val current = handoffs.load()
-            if (handoffs.compareAndSet(current, change(current))) return
-        }
-    }
-
     internal fun flat(pairs: List<Pair<String, String>>): List<String> {
         val out = ArrayList<String>(pairs.size * 2)
         for ((name, value) in pairs) {
@@ -231,54 +176,15 @@ public object UrlSessionRules {
     }
 }
 
-/**
- * Replays a URLSession record through the session that sent it (docs/design/rules.md, "Replay"):
- * one per session, kept in the session's replay box, holding the session weakly. The task is
- * created by the session itself, so its configuration, cookies, cache and proxy apply, and its
- * delegate answers challenges and redirects; the record comes from the capture hooks as usual.
- */
-@OptIn(ExperimentalForeignApi::class)
-internal class UrlSessionReplayTarget(private val session: Any) : ReplayTarget {
-    override val source: String get() = TransactionSource.URL_SESSION
-
-    override fun refusal(): String? = hopi_us_replay_refusal(session)
-
-    override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-        val headers = if (request.contentType != null && request.headers.none { it.first.equals("Content-Type", ignoreCase = true) }) {
-            request.headers + ("Content-Type" to request.contentType)
-        } else {
-            request.headers
-        }
-        UrlSessionRules.register(handoff)
-        val error = hopi_us_replay(
-            session, handoff.id, request.method, request.url, UrlSessionRules.flat(headers), request.body?.toNSData(),
-            request.crossOriginStripped?.toList(),
-        )
-        if (error != null) {
-            UrlSessionRules.unregister(handoff.id)
-            throw IllegalStateException(error)
-        }
-    }
-}
-
 @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 private fun ByteArray.toNSData(): NSData =
     if (isEmpty()) NSData() else usePinned { NSData.create(bytes = it.addressOf(0), length = size.toULong()) }
 
-// The native library's callbacks, on the capture queue: top-level, as staticCFunction needs.
+// The native library's callback, on the capture queue: top-level, as staticCFunction needs.
 private fun rulesExhausted() {
     try {
         RuleEngine.republishAfterExhaustion()
     } catch (_: Throwable) {
         // Never let an exception cross into the native caller.
-    }
-}
-
-@OptIn(ExperimentalForeignApi::class)
-private fun replayDone(id: Long, error: CPointer<ByteVar>?) {
-    try {
-        UrlSessionRules.onReplayDone(id, error?.toKString())
-    } catch (_: Throwable) {
-        // As above.
     }
 }

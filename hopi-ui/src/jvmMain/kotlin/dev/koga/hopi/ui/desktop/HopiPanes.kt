@@ -46,7 +46,6 @@ import dev.koga.hopi.ui.rules.RuleAction
 import dev.koga.hopi.ui.rules.RuleActions
 import dev.koga.hopi.ui.rules.exactMatchOf
 import dev.koga.hopi.ui.rules.mockRefusal
-import dev.koga.hopi.ui.rules.replayRefusal
 import dev.koga.hopi.ui.theme.HopiTheme
 import dev.koga.hopi.ui.theme.LocalHopiColors
 import kotlinx.coroutines.Dispatchers
@@ -101,16 +100,14 @@ public class HopiPanesState {
 public fun rememberHopiPanesState(): HopiPanesState = remember { HopiPanesState() }
 
 /**
- * The detail's rule buttons for a host viewer, each called with the transaction shown: "Mock this
- * response", "Replay" and "Edit and replay…". The viewer sends them over its bridge to the app's
- * rules; nothing here touches this process's own rule engine.
+ * The detail's rule button for a host viewer, called with the transaction shown: "Mock this
+ * response". The viewer sends it over its bridge to the app's rules; nothing here touches this
+ * process's own rule engine.
  */
 @HopiInternalApi
 public class HopiPanesRules(
     public val mockThis: (HttpTransaction) -> Unit,
-    public val replay: (HttpTransaction) -> Unit,
-    public val editAndReplay: (HttpTransaction) -> Unit,
-    /** Why none of them can run now (the app has no rules, say), or null. */
+    /** Why it cannot run now (the app has no rules, say), or null. */
     public val unavailable: String? = null,
 )
 
@@ -185,14 +182,14 @@ public fun HopiPanes(
                         if (selected == null) {
                             EmptyState("No request selected", "Select a request to see its headers and bodies.")
                         } else {
-                            DetailPane(detail, selected, tab, { tab = it }, onBack = null, actions) { state.selectedId = it }
+                            DetailPane(detail, selected, tab, { tab = it }, onBack = null, actions)
                         }
                     }
                 }
             } else if (selected == null) {
                 listPane()
             } else {
-                DetailPane(detail, selected, tab, { tab = it }, onBack = { state.selectedId = null }, actions) { state.selectedId = it }
+                DetailPane(detail, selected, tab, { tab = it }, onBack = { state.selectedId = null }, actions)
             }
             ToastHost(toast, onShown = { if (toast === it) toast = null })
         }
@@ -207,7 +204,6 @@ private fun DetailPane(
     onTab: (DetailTab) -> Unit,
     onBack: (() -> Unit)?,
     actions: DetailActions,
-    onOpen: (Long) -> Unit,
 ) {
     TransactionDetailPane(
         model = (detail as? DetailState.Ready)?.model?.takeIf { it.transaction.id == id },
@@ -216,18 +212,14 @@ private fun DetailPane(
         onTab = onTab,
         onBack = onBack,
         actions = actions,
-        onOpen = onOpen,
     )
 }
 
 /** What a viewer can tell from its copy; the app refuses the rest itself, and the viewer shows why. */
 private fun hostRuleActions(rules: HopiPanesRules, transaction: HttpTransaction): RuleActions {
     val off = rules.unavailable
-    val replayRefusal = off ?: replayRefusal(transaction)
     return RuleActions(
         mock = RuleAction({ rules.mockThis(transaction) }, off ?: mockRefusal(transaction) ?: if (exactMatchOf(transaction) == null) "URL cannot be matched" else null),
-        replay = RuleAction({ rules.replay(transaction) }, replayRefusal),
-        editAndReplay = RuleAction({ rules.editAndReplay(transaction) }, replayRefusal),
     )
 }
 

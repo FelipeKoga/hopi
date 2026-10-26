@@ -9,10 +9,10 @@ import dev.koga.hopi.core.rules.RuleLimits
 import dev.koga.hopi.core.rules.RuleSource
 
 /**
- * A rule or replay edit from the command line, checked before anything connects: the match
- * shorthand parsed by core (the app receives it structured), numbers, durations, `K: V` headers and
- * bodies read. [json] writes the wire object once the bridge is up, since a large body goes up as
- * a blob of that connection first.
+ * A rule from the command line, checked before anything connects: the match shorthand parsed by
+ * core (the app receives it structured), numbers, durations, `K: V` headers and bodies read. [json]
+ * writes the wire object once the bridge is up, since a large body goes up as a blob of that
+ * connection first.
  */
 internal class RuleDraft private constructor(
     private val match: MatchSpec?,
@@ -23,7 +23,7 @@ internal class RuleDraft private constructor(
         fun of(bytes: ByteArray): String
     }
 
-    /** The rule object (`mock add` and friends) or the replay's edit object (`replay`). */
+    /** The rule object (`mock add` and friends). */
     fun json(body: BodyJson): String {
         val w = JsonWriter().beginObject()
         match?.let { writeMatch(w, it) }
@@ -65,12 +65,6 @@ internal class RuleDraft private constructor(
                 if (disabled) w.field("enabled", false)
                 action(w, body)
             }
-        }
-
-        /** The `replay` edit; null when the command line edits nothing. */
-        fun replayEdit(args: CliArgs, readBody: (String) -> ByteArray): RuleDraft? {
-            val request = requestEdit(args, readBody, bodyFlag = "--body") ?: return null
-            return RuleDraft(null) { w, body -> request(w, body) }
         }
 
         private fun mock(args: CliArgs, readBody: (String) -> ByteArray): (JsonWriter, BodyJson) -> Unit {

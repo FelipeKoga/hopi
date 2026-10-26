@@ -7,7 +7,6 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.core.rules.FailKind
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleState
@@ -77,12 +76,6 @@ private class Recorder(
     private val engineClassName: String?,
     private val rules: Boolean,
 ) {
-    /**
-     * Set on every record this installation writes: one per installation, never per request; none
-     * with rules off, where [send] never reads a replay's hand-off.
-     */
-    private val replayTarget: ReplayTarget? = if (rules) KtorReplayTarget(client) else null
-
     suspend fun send(context: MonitoringHook.Context, request: HttpRequestBuilder, content: Any) {
         if (content !is OutgoingContent) return
         // One record per request: the platform recorder has this one. Without an exchange in the
@@ -94,8 +87,8 @@ private class Recorder(
         // request returns here before the rule state is read too.
         val covered = PlatformCapture.covers(engineClassName)
         if (covered && (request.headers[HttpHeaders.AcceptEncoding] == null || !PlatformCapture.honorsPassThrough(engineClassName))) return
-        // One volatile read and a reference comparison: with no rule and no replay in flight the
-        // request takes exactly the path it took before rules existed.
+        // One volatile read and a reference comparison: with no rule the request takes exactly the
+        // path it took before rules existed.
         val state = if (rules) RuleEngine.state else RuleState.EMPTY
         if (state !== RuleState.EMPTY) return sendRuled(context, request, content, covered, state)
         val started = TimeSource.Monotonic.markNow()
@@ -108,7 +101,6 @@ private class Recorder(
             requestHeaders = requestHeaders(request, content),
             requestBody = capture.body,
             source = TransactionSource.KTOR,
-            replayTarget = replayTarget,
         )
         // Added after the snapshot: the marker is Hopi's, never part of the record.
         if (covered) {
@@ -128,21 +120,19 @@ private class Recorder(
     }
 
     /**
-     * [send] with rules (docs/design/rules.md, "Ktor plugin"): the replay hand-off is taken, the
-     * first matching rule claimed, its request edit applied before the record's snapshot, then the
+     * [send] with rules (docs/design/rules.md, "Ktor plugin"): the first matching rule is claimed,
+     * its request edit applied before the record's snapshot, then the
      * before-request delay, and the mock, the fail or the real send. The response side of the rule
      * (its delay and edit) runs in [rawResponse].
      */
     @OptIn(InternalAPI::class)
     private suspend fun sendRuled(context: MonitoringHook.Context, request: HttpRequestBuilder, content: OutgoingContent, covered: Boolean, state: RuleState) {
         val started = TimeSource.Monotonic.markNow()
-        val handoff = request.attributes.getOrNull(ReplayHandoffKey)?.takeIf { it.take() }
-        if (handoff != null) request.attributes.getOrNull(ReplayHeadersKey)?.let { dropReappendedHeaders(request, it) }
         val rule = state.firstMatch(RuleSource.KTOR, KtorRuleRequest(request, content))
         val sent = rule?.requestEdit?.let { applyRequestEdit(request, content, it, store.redactor) } ?: content
         val capture = captureRequest(sent, maxBodyBytes)
         val pending = HttpTransaction.pending(
-            id = handoff?.id ?: store.nextId(),
+            id = store.nextId(),
             startedAtEpochMs = getTimeMillis(),
             method = request.method.value,
             url = request.url.buildString(),
@@ -151,8 +141,6 @@ private class Recorder(
             source = TransactionSource.KTOR,
             ruleId = rule?.id,
             ruleApplied = rule?.applied,
-            replayOf = handoff?.replayOf,
-            replayTarget = replayTarget,
         )
         if (covered) {
             PlatformCapture.markPassThrough()

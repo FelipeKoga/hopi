@@ -87,7 +87,7 @@ public object UrlSessionCapture {
         val redactionDisabled: Boolean,
         val summaryLog: Boolean,
         val agentBridge: Boolean,
-        /** Rules (mock, delay, fail, request edit, replay) apply to URLSession tasks. */
+        /** Rules (mock, delay, fail, request edit) apply to URLSession tasks. */
         val rules: Boolean = true,
     )
 
@@ -159,12 +159,9 @@ public object UrlSessionCapture {
         if (handle == null) return
         try {
             val target = target.load() ?: return
-            // A replay's task comes with the id its caller was promised.
-            val preset = hopi_us_store_id(handle)
-            val handoff = if (preset > 0) UrlSessionRules.takeHandoff(preset) else null
-            val id = if (handoff != null) preset else target.store.nextId()
+            val id = target.store.nextId()
             hopi_us_set_store_id(handle, id)
-            val record = pending(handle, id, target.maxBodyBytes, bytesSent = null).copy(replayOf = handoff?.replayOf)
+            val record = pending(handle, id, target.maxBodyBytes, bytesSent = null)
             startRecords[id] = record
             target.store.submit(record)
         } catch (_: Throwable) {
@@ -218,12 +215,11 @@ public object UrlSessionCapture {
             )
         }
         // The rule mark is final now: a mock or fail is claimed when the task starts loading, after
-        // the start record. The replay target is one per session, made here on the capture queue.
+        // the start record.
         val request = base.copy(
             finalUrl = hopi_us_final_url(handle),
             ruleId = hopi_us_rule_id(handle).takeIf { it > 0 },
             ruleApplied = hopi_us_rule_applied(handle),
-            replayTarget = UrlSessionRules.targetFor(handle),
         )
         val durationMs = hopi_us_duration_ns(handle) / 1_000_000
         val error = hopi_us_error(handle)?.let { if (hopi_us_cancelled(handle)) "cancelled" else it }

@@ -1,7 +1,6 @@
 package dev.koga.hopi.android.internal
 
 import dev.koga.hopi.core.HopiInternalApi
-import dev.koga.hopi.core.rules.ReplayHandoff
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -24,11 +23,6 @@ public class HopiHttpsURLConnection(delegate: HttpsURLConnection, proxy: Proxy? 
 
     // The app's connection, or what a rule put in its place at the first connecting call.
     private val delegate: HttpsURLConnection get() = recorder.delegate as HttpsURLConnection
-
-    /** A replay's hand-off: this connection records under its id. */
-    internal fun handOff(handoff: ReplayHandoff) {
-        recorder.replayHandoff = handoff
-    }
 
     // Connecting calls: the request snapshot first, then the app's call, unchanged.
 

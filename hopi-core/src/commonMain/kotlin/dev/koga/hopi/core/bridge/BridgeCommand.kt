@@ -3,14 +3,15 @@ package dev.koga.hopi.core.bridge
 import dev.koga.hopi.core.HopiInternalApi
 import dev.koga.hopi.core.json.parseFlatJsonObject
 import dev.koga.hopi.core.json.parseJsonTree
+import dev.koga.hopi.core.perf.PerfMonitor
 
 /** A client-to-app bridge request. Unknown fields are ignored. */
 @HopiInternalApi
 public sealed interface BridgeCommand {
     /**
-     * True for a command that changes the app's behavior or reads its rules (rules, blobs,
-     * replay): accepted only after `hello` on the same connection, and sent by the host only after
-     * it verified `hello`, so a squatter holding the socket name never receives one.
+     * True for a command that changes the app's behavior or reads its rules (rules, blobs):
+     * accepted only after `hello` on the same connection, and sent by the host only after it
+     * verified `hello`, so a squatter holding the socket name never receives one.
      */
     public val isWrite: Boolean get() = false
 
@@ -52,13 +53,58 @@ public sealed interface BridgeCommand {
         override val isWrite: Boolean get() = true
     }
 
-    /** Replays record [id]; [edit] is the request edit object, or null. */
-    public data class Replay(public val id: Long, public val edit: Map<String, Any?>?) : BridgeCommand {
+    /**
+     * The perf commands (docs/design/perf-monitors.md, "Bridge"): all accepted only after `hello`,
+     * like the rule commands. Values are kept as sent; the session checks their ranges (`LIMIT`).
+     */
+    public sealed interface Perf : BridgeCommand {
         override val isWrite: Boolean get() = true
     }
 
+    /** [ttlSec]: the lease; 0 is no expiry. Null settings keep the values in force. */
+    public data class PerfStart(
+        public val monitors: Set<PerfMonitor>,
+        public val hangMs: Long?,
+        public val intervalMs: Long?,
+        public val ttlSec: Long,
+    ) : Perf
+
+    /** No monitor named: all. */
+    public data class PerfStop(public val monitors: Set<PerfMonitor>) : Perf
+
+    public data object PerfStatus : Perf
+
+    public data class PerfSnapshot(
+        /** Series by name (`frames`, `cpu`, `memory`); empty: all. */
+        public val series: kotlin.collections.List<String>,
+        public val points: Long,
+        public val events: Boolean,
+        /** Events after this sequence number only. */
+        public val since: Long,
+        public val threads: Boolean,
+        public val pss: Boolean,
+        public val fullStacks: Boolean,
+    ) : Perf
+
+    public data class PerfEvent(public val seq: Long) : Perf
+
+    /**
+     * Backlog events after [since], then live events, closed frame seconds and (with [samples])
+     * samples until disconnect. [start]: monitors this session starts and holds until it ends.
+     */
+    public data class PerfTail(
+        public val since: Long,
+        public val samples: Boolean,
+        public val fps: Boolean,
+        public val threads: Boolean,
+        public val start: Set<PerfMonitor>,
+    ) : Perf
+
     public companion object {
         public const val MAX_LINE_LENGTH: Int = 4096
+
+        /** Points a `perf.snapshot` returns per series by default. */
+        public const val DEFAULT_PERF_POINTS: Long = 120
         public const val DEFAULT_LIMIT: Int = 100
         public const val MAX_LIMIT: Int = 10_000
 
@@ -69,7 +115,7 @@ public sealed interface BridgeCommand {
         public const val MAX_DEPTH: Int = 6
 
         /** Commands whose request may hold objects and arrays; every other one stays flat. */
-        private val NESTED = setOf("rules.add", "rules.update", "replay")
+        private val NESTED = setOf("rules.add", "rules.update", "perf.start", "perf.stop", "perf.snapshot", "perf.tail")
 
         /** Parses one NDJSON request line. Malformed input yields [BridgeParseResult.Invalid]. */
         @Suppress("UNCHECKED_CAST")
@@ -104,16 +150,53 @@ public sealed interface BridgeCommand {
                     if (data.length > MAX_BLOB_CHUNK_CHARS) return BridgeParseResult.Invalid("\"data\" longer than $MAX_BLOB_CHUNK_CHARS chars")
                     BlobPut(blob, offset, data)
                 }
-                "replay" -> {
-                    val id = requiredId(fields) ?: return idError(fields)
-                    val edit = fields["edit"]
-                    if (edit != null && edit !is Map<*, *>) return invalid("edit")
-                    Replay(id, edit as Map<String, Any?>?)
-                }
+                "perf.start" -> PerfStart(
+                    monitors(fields, "monitors") ?: return invalid("monitors"),
+                    hangMs = (optionalLong(fields, "hangMs") ?: return invalid("hangMs")).takeIf { it != NOT_GIVEN },
+                    intervalMs = (optionalLong(fields, "intervalMs") ?: return invalid("intervalMs")).takeIf { it != NOT_GIVEN },
+                    ttlSec = nonNegative(fields, "ttlSec", dev.koga.hopi.core.perf.PerfLimits.DEFAULT_LEASE_SEC) ?: return invalid("ttlSec"),
+                )
+                "perf.stop" -> PerfStop(monitors(fields, "monitors") ?: return invalid("monitors"))
+                "perf.status" -> PerfStatus
+                "perf.snapshot" -> PerfSnapshot(
+                    series = strings(fields, "series") ?: return invalid("series"),
+                    points = nonNegative(fields, "points", DEFAULT_PERF_POINTS) ?: return invalid("points"),
+                    events = flag(fields, "events", default = true) ?: return invalid("events"),
+                    since = nonNegative(fields, "since", 0) ?: return invalid("since"),
+                    threads = flag(fields, "threads") ?: return invalid("threads"),
+                    pss = flag(fields, "pss") ?: return invalid("pss"),
+                    fullStacks = flag(fields, "fullStacks") ?: return invalid("fullStacks"),
+                )
+                "perf.event" -> PerfEvent((fields["seq"] as? Long)?.takeIf { it > 0 } ?: return invalid("seq"))
+                "perf.tail" -> PerfTail(
+                    since = nonNegative(fields, "since", 0) ?: return invalid("since"),
+                    samples = flag(fields, "samples") ?: return invalid("samples"),
+                    fps = flag(fields, "fps") ?: return invalid("fps"),
+                    threads = flag(fields, "threads") ?: return invalid("threads"),
+                    start = monitors(fields, "start") ?: return invalid("start"),
+                )
                 else -> return BridgeParseResult.Invalid("unknown cmd")
             }
             return BridgeParseResult.Ok(command)
         }
+
+        /** An absent key is the empty set; an unknown monitor name or a non-array is invalid. */
+        private fun monitors(fields: Map<String, Any?>, key: String): Set<PerfMonitor>? {
+            val names = strings(fields, key) ?: return null
+            val out = LinkedHashSet<PerfMonitor>()
+            for (name in names) out += PerfMonitor.fromWire(name) ?: return null
+            return out
+        }
+
+        private fun strings(fields: Map<String, Any?>, key: String): kotlin.collections.List<String>? {
+            if (!fields.containsKey(key)) return emptyList()
+            val values = fields[key] as? kotlin.collections.List<*> ?: return null
+            return values.map { it as? String ?: return null }
+        }
+
+        /** [NOT_GIVEN] for an absent key, null for a value that is not an integer. */
+        private fun optionalLong(fields: Map<String, Any?>, key: String): Long? =
+            if (!fields.containsKey(key)) NOT_GIVEN else fields[key] as? Long
 
         private fun requiredId(fields: Map<String, Any?>): Long? = (fields["id"] as? Long)?.takeIf { it > 0 }
 
@@ -122,10 +205,12 @@ public sealed interface BridgeCommand {
 
         private fun invalid(field: String): BridgeParseResult = BridgeParseResult.Invalid("invalid \"$field\"")
 
-        private fun flag(fields: Map<String, Any?>, key: String): Boolean? {
-            if (!fields.containsKey(key)) return false
+        private fun flag(fields: Map<String, Any?>, key: String, default: Boolean = false): Boolean? {
+            if (!fields.containsKey(key)) return default
             return fields[key] as? Boolean
         }
+
+        private const val NOT_GIVEN: Long = Long.MIN_VALUE
 
         private fun nonNegative(fields: Map<String, Any?>, key: String, default: Long): Long? {
             if (!fields.containsKey(key)) return default

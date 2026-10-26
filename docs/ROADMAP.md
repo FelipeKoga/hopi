@@ -23,7 +23,39 @@ text contrast, unlabeled inputs, focus order, text that does not scale with font
 only (a button or an agent command), never continuous. Open question: one CMP semantics walker for
 both platforms vs the platform accessibility APIs (`AccessibilityNodeInfo`, UIAccessibility).
 
-### Performance monitors
+### Performance monitors (built)
+Design: `docs/design/perf-monitors.md` (`hopi-perf` / `-noop`, each monitor off by default, its
+cost stated per monitor). Built in four stages: the core model, bridge `perf.*`, log lines,
+`HopiPerf` API and parity, Gradle `perf { }` and the release checks; the Android monitors
+(FrameMetrics, the Looper printer with an input bracket or a heartbeat, one sampler); the iOS
+monitors (run-loop observers and stack capture in C, stalls, display-link cadence on request,
+`task_info` CPU and footprint, memory warnings); the surfaces (CLI `hopi perf …` and `hopi hangs`,
+`hopi-connect`, the desktop Perf panel, the in-app HUD and Perf tab); and the sample's perf lab and
+bench with `benchmark/perf/`. Verified on the Android emulator (28 of 28 checks: jank, hangs
+including one inside a Compose `onClick`, a dialog, CPU, heaps, trim levels) and on the iOS
+simulator (21 of 21 since stage 5, which fixed a leased hang watchdog that missed hangs, CPU's
+first sample after memory, a tail that lost a hang's end, the Perf tab formatting every stack, the
+spin lock, rings allocated while off, and the iOS 300 ms reading; design, "As built", stage 5). Measured: off costs nothing (identical to the noop build, 0 CPU and 0 wakes
+idle); the printer costs +6.2 to +6.5 µs per main-thread message and +29 µs per `Dispatchers.Main`
+resume (its 3 µs gate is not met; it stays the default, the heartbeat's alternative misses hangs
+near the threshold and wakes 8 times a second; design, "As built", stage 4). Open:
+- A physical Android phone and iPhone; every figure so far is from the emulator or the simulator.
+- iOS overhead (observer cost per run-loop iteration, display link, sampler): `bench.py --platform ios`.
+- The sampler's tick costs about 1.0 ms of CPU in a debug build (`schedstat`; budget 5 to 50 µs):
+  a debuggable app runs it in ART's interpreter and cannot be AOT-compiled. All four monitors idle
+  cost +0.10 % of a core (budget 0.1 %), at the line.
+- iOS: the hang watchdog wakes once per main run-loop wake (+4.8/s on the simulator, whose main run
+  loop wakes 6.6/s with nothing to do); fewer would take a timer armed on the main thread per unit.
+- A cheaper busy/idle signal than the Looper printer, if one exists in the public SDK.
+- iOS: the memory-pressure source is not driven; stack capture suspends 47 µs to 1.49 ms on the
+  simulator, median 176 µs (budget 100 µs). Android: one capture of 11 paused 5.4 ms (budget 2 ms).
+- Android: input inside a dialog's, sheet's or popup's own window is not bracketed (no public API
+  reaches the window); only `hangHeartbeat` sees a block there.
+- `dumpsys meminfo` does not show the lab's 64 MB of bitmap pixels as Native Heap, while
+  `mallinfo` and RSS do.
+- The CMP `MTLDrawable` spike; the HUD's redraw cost on a device; a frozen process mid-hang.
+
+The original sketch, kept for the record:
 - **Jank / frame timing.** Event-driven, not polled: Android `FrameMetrics` / `JankStats`, iOS
   `CADisplayLink` only while the monitor is on. Report janky frames with what was on screen.
 - **Hangs / ANR.** Main-thread watchdog that detects stalls over a threshold (e.g. 250 ms) and
@@ -133,16 +165,16 @@ so the app pays no extra cost.
   futex wake is a VM exit, so the ranking may differ on hardware); the provider's startup (5.4 ms median on a debuggable emulator, target 1 ms); OkHttp 3.12/3.13; HTTPS through the
   wrapper on a device; a physical device run; Cronet and WebView.
 
-### Rules: mock, edit, replay (built)
+### Rules: mock, edit (built)
 - **Built** (architecture doc, "Rules"; design in `docs/design/rules.md`): **mock**, **fail**
   (timeout, reset, unknown host, cancel, each source's own error), **delay** (before request and/or
-  response), **edit** (request method, URL parts, headers, body; response status, headers, body)
-  and **replay** through the app's own client, on every source (Ktor plugin, OkHttp,
-  `HttpURLConnection`, URLSession) as far as each can without weakening the app's TLS, pinning or
-  challenge handling; unsupported pieces are reported when a rule is added (URLSession: response
-  edits, a before-response delay on a real request, body edits of file and stream uploads,
-  background sessions, sessions created before `start()` other than `shared`; OkHttp 3.14
-  replay). First match wins, one recorder applies it, every touched record is marked.
+  response) and **edit** (request method, URL parts, headers, body; response status, headers,
+  body), on every source (Ktor plugin, OkHttp, `HttpURLConnection`, URLSession) as far as each can
+  without weakening the app's TLS, pinning or challenge handling; unsupported pieces are reported
+  when a rule is added (URLSession: response edits, a before-response delay on a real request, body
+  edits of file and stream uploads, background sessions, sessions created before `start()` other
+  than `shared`). First match wins, one recorder applies it, every touched record is marked.
+  Replay was built too and then removed (see "Replay (no priority)").
 - Zero cost with no rule: one volatile read and a reference comparison per request (one
   `canInitWithTask:` answer per task on a URLSession session created after `start()`). Rules live
   in memory for the session only, never persisted, and exist only in the real artifacts
@@ -150,9 +182,9 @@ so the app pays no extra cost.
   `rules = false` on every recorder (Ktor, `HopiUrlSession`, `hopi { }`).
 - Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
   bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
-  `rules ls|rm|clear|enable|disable|reset`, `replay [--wait]`, exit code 4); `HopiRules` (Kotlin,
-  Swift `HopiRules.shared`); the desktop Rules panel (⌘L), "Mock this response", "Replay", "Edit and
-  replay…"; the in-app rules list, "Mock this response", "Replay". The sample's rules self-test and
+  `rules ls|rm|clear|enable|disable|reset`, exit code 4); `HopiRules` (Kotlin, Swift
+  `HopiRules.shared`); the desktop Rules panel (⌘L), "Mock this response"; the in-app rules list,
+  "Mock this response". The sample's rules self-test and
   host targets (`--es rulesVerify all`, `-verifyRules`) drive every action on every source.
 - Open:
   - Device verification ran on the API 35 emulator and the iPhone 17 (iOS 27.0) and
@@ -164,8 +196,7 @@ so the app pays no extra cost.
     0 wakes on both platforms; 1 and 64 rules and mock latency are still unmeasured.
   - The review pass over the whole feature and the "As built" notes in the design.
   - Pinning on device uses a public HTTPS host (the dev server has no TLS port); a background
-    URLSession check and Ktor Darwin's delegate handling a challenge for a replayed HTTPS task
-    are untested.
+    URLSession check is untested.
   - From the desktop rules check (2026-10-25, `build/evidence/speed/desktop/`): the shared list
     (`hopi-ui`, so probably the in-app screen too) keeps its first visible row in place, so new
     rows arriving on an untouched list land above the visible area (3 of 13 in one burst) — it
@@ -181,6 +212,21 @@ so the app pays no extra cost.
     ruled by URLSession); sessions created before `start()` cannot be mocked.
   - Later: live breakpoints (pause and edit a request in flight), matching on the request body,
     stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
+
+### Replay (no priority)
+Backlog, no priority. Re-sending a recorded request (optionally edited) through the app's own
+client was built on every source and then removed from the product, because it is the only feature
+in which Hopi itself originates a request; everything else only observes or answers requests the
+app makes. A full implementation (bridge `replay`, `hopi replay [--wait]`, `HopiRules.replay`, the
+desktop and in-app buttons, the per-source hooks for Ktor, OkHttp, `HttpURLConnection` and
+URLSession, and their tests) exists in git commit `c7daca0`; `docs/design/rules.md`, "Replay
+(removed)", says what it took. Constraints if it is ever revived:
+- Explicit command only: a bridge command, a CLI command or a button press, never automatic, never
+  on a schedule, never as a side effect of another action.
+- Through the app's own client or session only, so its interceptors, TLS settings, pinning, proxy,
+  cookies and challenge delegate apply; Hopi never opens a connection of its own.
+- Debug only: absent from release builds and from every noop twin, checked automatically like the
+  rest of Hopi, with zero cost on every request while no replay runs.
 
 ### Later candidates (from DebugSwift's feature set)
 - Console / log capture (app logs alongside HTTP).

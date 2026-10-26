@@ -15,16 +15,12 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchSpec
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSpec
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.detail.DetailTags
 import dev.koga.hopi.ui.list.ListTags
-import dev.koga.hopi.ui.list.ruleTags
 import dev.koga.hopi.ui.rules.RulesTags
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -36,7 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-/** The in-app rules list, "Mock this response" and "Replay", over the process-wide rule engine. */
+/** The in-app rules list and "Mock this response", over the process-wide rule engine. */
 @OptIn(ExperimentalTestApi::class)
 class RulesUiTest {
     private val store = HopiStore(scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
@@ -117,39 +113,5 @@ class RulesUiTest {
         onNodeWithText("/big").performClick()
         waitForText("Mock: response body not held in full")
         onNodeWithText(DetailTags.MOCK).assertIsNotEnabled()
-        // No replay target: the recorder offers none (a record a test submitted).
-        waitForText("Replay: its recorder offers no replay")
-    }
-
-    @Test
-    fun replayOpensTheNewRecordWhichLinksBack() = runComposeUiTest {
-        val target = object : ReplayTarget {
-            override val source = "okhttp"
-
-            override fun refusal(): String? = null
-
-            override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-                check(handoff.take())
-                store.submit(
-                    HttpTransaction.pending(handoff.id, 1_700_000_000_000, request.method, request.url, request.headers, null)
-                        .copy(replayOf = handoff.replayOf, source = source)
-                        .completed(201, emptyList(), null, 7, "h2"),
-                )
-                handoff.finish(null)
-            }
-        }
-        val original = submit { complete(it, url = "https://api.example.com/orders").copy(replayTarget = target) }
-        setContent { HopiScreen(store, onClose = {}) }
-        waitForText("/orders")
-        onNodeWithText("/orders").performClick()
-        waitForText("GET 200")
-
-        onNodeWithText(DetailTags.REPLAY).performClick()
-        waitForText("GET 201")
-        onNodeWithText("#${original.id}").assertExists()
-        assertEquals(listOf("REPLAY"), ruleTags(store.transactions.value.last()))
-
-        onNodeWithText("#${original.id}").performClick()
-        waitForText("GET 200")
     }
 }

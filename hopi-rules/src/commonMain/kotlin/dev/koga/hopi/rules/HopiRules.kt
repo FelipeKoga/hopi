@@ -2,8 +2,6 @@ package dev.koga.hopi.rules
 
 import dev.koga.hopi.core.rules.MatchShorthand
 import dev.koga.hopi.core.rules.MockSpec
-import dev.koga.hopi.core.rules.Replays
-import dev.koga.hopi.core.rules.ReplayResult
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleError
 import dev.koga.hopi.core.rules.RuleErrorCode
@@ -80,23 +78,6 @@ public object HopiRules {
     /** Removes every rule. */
     public fun clear() {
         RuleEngine.clear()
-    }
-
-    /**
-     * Re-sends recorded transaction [transactionId] through the client or session that sent it,
-     * with [block]'s edits; returns the new record's id at once, before the request runs, or `-1`
-     * when the record is gone or cannot be replayed (an older record, a closed client, a request
-     * body not held in full). The replay is recorded like any request, and rules apply to it.
-     */
-    public fun replay(transactionId: Long, block: HopiRequestEdit.() -> Unit = {}): Long {
-        val edit = HopiRequestEdit().apply(block).toEdit()
-        return when (val result = Replays.start(HopiStore.default, transactionId, edit.takeIf { !it.isEmpty })) {
-            is ReplayResult.Started -> result.id
-            is ReplayResult.Refused -> when (result.error.code) {
-                RuleErrorCode.BAD_REQUEST, RuleErrorCode.LIMIT -> throw exception(result.error)
-                RuleErrorCode.NOT_FOUND, RuleErrorCode.UNSUPPORTED -> -1
-            }
-        }
     }
 
     private fun add(spec: RuleSpec): Long = when (val result = RuleEngine.add(spec)) {

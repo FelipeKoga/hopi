@@ -1,7 +1,6 @@
 package dev.koga.hopi.core.model
 
 import dev.koga.hopi.core.HopiInternalApi
-import dev.koga.hopi.core.rules.ReplayTarget
 
 @HopiInternalApi
 public enum class TransactionState(public val wireName: String) {
@@ -138,13 +137,6 @@ public class HttpTransaction(
     public val ruleId: Long? = null,
     /** What the rule did, comma-separated in [dev.koga.hopi.core.rules.RuleMark.ORDER]; null when no rule applied. */
     public val ruleApplied: String? = null,
-    /** The record this request replays, or null. */
-    public val replayOf: Long? = null,
-    /**
-     * How to replay this request through the client that sent it; set by the recorder on records it
-     * can replay. In memory only: never serialized, never compared, dropped with the record.
-     */
-    public val replayTarget: ReplayTarget? = null,
 ) {
     /** Bytes this snapshot holds in memory; what the store's byte cap counts. */
     public val capturedBytes: Long
@@ -167,12 +159,10 @@ public class HttpTransaction(
         finalUrl: String? = this.finalUrl,
         ruleId: Long? = this.ruleId,
         ruleApplied: String? = this.ruleApplied,
-        replayOf: Long? = this.replayOf,
-        replayTarget: ReplayTarget? = this.replayTarget,
     ): HttpTransaction = HttpTransaction(
         id, startedAtEpochMs, method, url, requestHeaders, requestBody, state, responseCode,
         responseHeaders, responseBody, durationMs, error, protocol, source, finalUrl,
-        ruleId, ruleApplied, replayOf, replayTarget,
+        ruleId, ruleApplied,
     )
 
     public fun completed(
@@ -239,8 +229,7 @@ public class HttpTransaction(
             source == other.source &&
             finalUrl == other.finalUrl &&
             ruleId == other.ruleId &&
-            ruleApplied == other.ruleApplied &&
-            replayOf == other.replayOf
+            ruleApplied == other.ruleApplied
     }
 
     override fun hashCode(): Int = id.hashCode()
@@ -259,13 +248,11 @@ public class HttpTransaction(
             source: String? = null,
             ruleId: Long? = null,
             ruleApplied: String? = null,
-            replayOf: Long? = null,
-            replayTarget: ReplayTarget? = null,
         ): HttpTransaction = HttpTransaction(
             id, startedAtEpochMs, method, url, requestHeaders, requestBody, TransactionState.Pending,
             responseCode = null, responseHeaders = emptyList(), responseBody = null,
             durationMs = null, error = null, protocol = null, source = source,
-            ruleId = ruleId, ruleApplied = ruleApplied, replayOf = replayOf, replayTarget = replayTarget,
+            ruleId = ruleId, ruleApplied = ruleApplied,
         )
     }
 }

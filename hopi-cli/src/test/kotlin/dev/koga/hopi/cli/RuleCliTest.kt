@@ -6,9 +6,6 @@ import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.json.parseFlatJsonObject
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
-import dev.koga.hopi.core.rules.ReplayHandoff
-import dev.koga.hopi.core.rules.ReplayRequest
-import dev.koga.hopi.core.rules.ReplayTarget
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.UrlRuleRequest
@@ -17,8 +14,6 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -82,7 +77,6 @@ class RuleCliTest {
         assertTrue("--disabled" in args.switches)
         assertTrue(args.json)
         assertEquals(listOf(3L, 4L, 9L), parse("rules", "rm", "3", "4", "9", "--app", "a.b").ids)
-        assertEquals(42, parse("replay", "42", "--app", "a.b", "--wait").id)
     }
 
     @Test
@@ -94,8 +88,8 @@ class RuleCliTest {
         assertTrue("rule id" in usage("rules", "rm", "x", "--app", "a.b"))
         assertTrue("does not take --status" in usage("fail", "add", "--app", "a.b", "--match", "/a", "--status", "500"))
         assertTrue("given twice" in usage("mock", "add", "--app", "a.b", "--match", "/a", "--match", "/b"))
-        assertTrue("--wait takes no value" in usage("replay", "1", "--app", "a.b", "--wait=1"))
-        assertTrue("unexpected argument" in usage("replay", "1", "2", "--app", "a.b"))
+        // Removed from the product (docs/ROADMAP.md, "Replay (no priority)").
+        assertTrue("unknown command" in usage("replay", "1", "--app", "a.b"))
     }
 
     @Test
@@ -210,68 +204,20 @@ class RuleCliTest {
         assertTrue("does not support rules" in off.stderr, off.stderr)
     }
 
-    private class FakeTarget(private val store: HopiStore) : ReplayTarget {
-        val sent = LinkedBlockingQueue<Pair<ReplayRequest, ReplayHandoff>>()
-        override val source: String = "okhttp"
-
-        override fun refusal(): String? = null
-
-        /** Records the replay as a recorder would, then finishes the hand-off. */
-        override fun send(request: ReplayRequest, handoff: ReplayHandoff) {
-            sent += request to handoff
-            check(handoff.take())
-            store.submit(
-                HttpTransaction.pending(handoff.id, 0, request.method, request.url, request.headers, null)
-                    .copy(replayOf = handoff.replayOf, source = source)
-                    .completed(201, emptyList(), null, 3, "h2"),
-            )
-            handoff.finish(null)
-        }
-    }
-
-    private fun recorded(target: ReplayTarget?, ruleId: Long? = null, applied: String? = null): Long {
+    private fun recorded(ruleId: Long? = null, applied: String? = null): Long {
         val id = store.nextId()
         store.submit(
             HttpTransaction.pending(id, 0, "GET", "https://api.example.com/users/1", listOf("Authorization" to "Bearer real"), null)
                 .copy(ruleId = ruleId, ruleApplied = applied, source = "okhttp")
-                .completed(500, emptyList(), CapturedBody("x".encodeToByteArray(), 1, false, null, null), 2, null)
-                .copy(replayTarget = target),
+                .completed(500, emptyList(), CapturedBody("x".encodeToByteArray(), 1, false, null, null), 2, null),
         )
         runBlocking { withTimeout(10_000) { store.transactions.first { list -> list.any { it.id == id } } } }
         return id
     }
 
     @Test
-    fun replayPrintsTheNewIdAndWaitPrintsTheRecord() {
-        val target = FakeTarget(store)
-        val of = recorded(target)
-        val run = cli("replay", of.toString(), "--set-header", "X-Replay: 1")
-        assertEquals(ExitCode.OK, run.exitCode, run.toString())
-        val newId = run.lines.single().toLong()
-        val (request, handoff) = assertNotNull(target.sent.poll(10, TimeUnit.SECONDS))
-        assertEquals(newId, handoff.id)
-        assertEquals(listOf("Authorization" to "Bearer real", "X-Replay" to "1"), request.headers)
-
-        val waited = cli("replay", of.toString(), "--wait")
-        assertEquals(ExitCode.OK, waited.exitCode, waited.toString())
-        assertTrue(waited.lines[1].contains("201") && waited.lines[1].contains("[replay of $of]"), waited.stdout)
-        val waitedJson = cli("replay", of.toString(), "--wait", "--json")
-        val line = json(waitedJson.lines.single())
-        assertEquals(of, line["replayOf"]?.jsonPrimitive?.content?.toLong())
-    }
-
-    @Test
-    fun replayRefusalsAreExitFourAndAMissingRecordExitThree() {
-        val refused = cli("replay", recorded(null).toString())
-        assertEquals(ExitCode.UNSUPPORTED, refused.exitCode, refused.toString())
-        assertTrue("cannot be replayed" in refused.stderr, refused.stderr)
-        val missing = cli("replay", "999999")
-        assertEquals(ExitCode.NOT_FOUND, missing.exitCode, missing.toString())
-    }
-
-    @Test
     fun listTailAndGetShowTheMarks() {
-        val ruled = recorded(null, ruleId = 3, applied = "delay,mock")
+        val ruled = recorded(ruleId = 3, applied = "delay,mock")
         val listed = cli("list", "--since", (ruled - 1).toString())
         assertTrue(listed.lines[1].endsWith("[okhttp]  [delay,mock #3]"), listed.stdout)
         val listedJson = parseFlatJsonObject(cli("list", "--since", (ruled - 1).toString(), "--json").lines.single())

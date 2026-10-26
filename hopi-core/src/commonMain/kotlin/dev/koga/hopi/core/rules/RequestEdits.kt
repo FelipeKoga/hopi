@@ -16,12 +16,11 @@ public class EditedRequest(
 )
 
 /**
- * Applies a [RequestEdit] the same way on every source and for replay (docs/design/rules.md,
- * "Edit"): the scheme never changes; an edit that changes the origin removes every original value
- * of `Authorization`, `Proxy-Authorization`, `Cookie` and every header [redactor] redacts, as
- * OkHttp and browsers do on a cross-host redirect, so only the values the edit supplies itself (set
- * or added) reach the other host; header edits run remove, then set (replacing every value of the
- * name), then add.
+ * Applies a [RequestEdit] the same way on every source (docs/design/rules.md, "Edit"): the scheme
+ * never changes; an edit that changes the origin removes every original value of `Authorization`,
+ * `Proxy-Authorization`, `Cookie` and every header [redactor] redacts, as OkHttp and browsers do on
+ * a cross-host redirect, so only the values the edit supplies itself (set or added) reach the other
+ * host; header edits run remove, then set (replacing every value of the name), then add.
  */
 @HopiInternalApi
 public object RequestEdits {
@@ -71,16 +70,6 @@ public object RequestEdits {
         result += edit.setHeaders
         result += edit.addHeaders
         return result
-    }
-
-    /**
-     * The lowercased names whose original values an origin-changing [edit] removes and that it does
-     * not supply itself (set or add): what a stack that adds headers below Hopi (a URLSession
-     * configuration's `HTTPAdditionalHeaders`) must not add either.
-     */
-    public fun crossOriginStripped(edit: RequestEdit, redactor: Redactor): Set<String> {
-        val supplied = (edit.setHeaders + edit.addHeaders).mapTo(HashSet()) { it.first.lowercase() }
-        return (CREDENTIALS + redactor.redactedHeaderNames).filterTo(LinkedHashSet()) { it !in supplied }
     }
 
     /** The raw query after `removeQuery` and `setQuery` (each set name replaces every value of it). */

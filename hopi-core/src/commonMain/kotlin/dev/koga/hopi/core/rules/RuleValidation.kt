@@ -1,7 +1,6 @@
 package dev.koga.hopi.core.rules
 
 import dev.koga.hopi.core.HopiInternalApi
-import dev.koga.hopi.core.redact.Redactor
 
 /** The limits of docs/design/rules.md, "Limits". */
 @HopiInternalApi
@@ -17,11 +16,10 @@ public object RuleLimits {
     public const val MAX_TIMES: Int = 1_000_000
     public const val MAX_LABEL_CHARS: Int = 80
     public const val MAX_BLOBS_PER_SESSION: Int = 2
-    public const val MAX_REPLAYS_IN_FLIGHT: Int = 8
 }
 
 /**
- * Checks a [RuleSpec] or a replay's [RequestEdit] against the design's rules; every message names
+ * Checks a [RuleSpec] against the design's rules; every message names
  * the field (`"match.path: pattern longer than 256 chars"`), as the bridge sends it. Limits on the
  * rule set as a whole (count, total body bytes) are the engine's.
  */
@@ -59,7 +57,7 @@ public object RuleValidation {
             val request = edit.request?.takeIf { !it.isEmpty }
             val response = edit.response?.takeIf { !it.isEmpty }
             if (request == null && response == null) return bad("edit: changes nothing")
-            request?.let { validateRequestEdit(it, "edit.request", forReplay = false)?.let { e -> return e } }
+            request?.let { validateRequestEdit(it, "edit.request")?.let { e -> return e } }
             response?.let { r ->
                 r.status?.let { validateStatus(it, "edit.response.status")?.let { e -> return e } }
                 validateResponseHeaders(r.setHeaders, "edit.response.setHeaders")?.let { return it }
@@ -74,8 +72,6 @@ public object RuleValidation {
         return null
     }
 
-    /** A replay's edit: a request edit whose header values may not be the redaction placeholder. */
-    public fun validateReplayEdit(edit: RequestEdit): RuleError? = validateRequestEdit(edit, "edit", forReplay = true)
 
     private fun validateMatch(match: MatchSpec): RuleError? {
         match.methods?.forEach { if (!isToken(it)) return bad("match.methods: '$it' is not a method token") }
@@ -111,7 +107,7 @@ public object RuleValidation {
         return null
     }
 
-    private fun validateRequestEdit(edit: RequestEdit, field: String, forReplay: Boolean): RuleError? {
+    private fun validateRequestEdit(edit: RequestEdit, field: String): RuleError? {
         edit.method?.let { if (!isToken(it)) return bad("$field.method: '$it' is not a method token") }
         edit.host?.let {
             if (it.isEmpty() || it.length > 253 + 2) return bad("$field.host: invalid host")
@@ -131,8 +127,8 @@ public object RuleValidation {
             if ((name + value).any { c -> c < ' ' || c == '\u007f' }) return bad("$field.setQuery: control characters")
         }
         if (edit.removeQuery.any { it.isEmpty() }) return bad("$field.removeQuery: empty name")
-        validateRequestHeaders(edit.setHeaders, "$field.setHeaders", forReplay)?.let { return it }
-        validateRequestHeaders(edit.addHeaders, "$field.addHeaders", forReplay)?.let { return it }
+        validateRequestHeaders(edit.setHeaders, "$field.setHeaders")?.let { return it }
+        validateRequestHeaders(edit.addHeaders, "$field.addHeaders")?.let { return it }
         validateNames(edit.removeHeaders, "$field.removeHeaders")?.let { return it }
         for (name in edit.removeHeaders) {
             if (rejectedRequestHeader(name)) return bad("$field.removeHeaders: '$name' may not be edited")
@@ -141,11 +137,10 @@ public object RuleValidation {
         return null
     }
 
-    private fun validateRequestHeaders(headers: List<Pair<String, String>>, field: String, forReplay: Boolean): RuleError? {
+    private fun validateRequestHeaders(headers: List<Pair<String, String>>, field: String): RuleError? {
         validateHeaderList(headers, field)?.let { return it }
-        for ((name, value) in headers) {
+        for ((name, _) in headers) {
             if (rejectedRequestHeader(name)) return bad("$field: '$name' may not be edited")
-            if (forReplay && value == Redactor.REDACTED) return bad("$field: '$name' is the redaction placeholder, which would be sent as is")
         }
         return null
     }

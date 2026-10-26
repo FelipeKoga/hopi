@@ -112,21 +112,17 @@ int32_t hopi_us_hits_claim(hopi_us_hits hits, int64_t times);
 
 /** Called on the capture queue after a URLSession hook's claim returned HOPI_US_CLAIM_LAST. */
 typedef void (*hopi_us_exhausted_callback)(void);
-/** Called on the capture queue when a replay's task ended; error is NULL when it succeeded. */
-typedef void (*hopi_us_replay_callback)(int64_t store_id, const char *error);
 
 /** hopi_us_rules_enable's result bits. */
 // The session factory took the protocol: mock and fail reach sessions created from now on.
 #define HOPI_US_RULES_SESSIONS 1
-// -[NSURLSessionTask session] passed its self-check: records can be replayed.
-#define HOPI_US_RULES_REPLAY 2
 
 /**
  * Turns rules on, once, after hopi_us_start (later calls return the first call's result): puts the
- * rule protocol in front of every session created from now on and keeps each task's session for
- * replay. Nothing is matched until a rule set is published. Returns 0 before hopi_us_start.
+ * rule protocol in front of every session created from now on. Nothing is matched until a rule set
+ * is published. Returns 0 before hopi_us_start.
  */
-int32_t hopi_us_rules_enable(hopi_us_exhausted_callback on_exhausted, hopi_us_replay_callback on_replay_done);
+int32_t hopi_us_rules_enable(hopi_us_exhausted_callback on_exhausted);
 
 /** Rule actions (hopi_us_rules_add). */
 #define HOPI_US_ACTION_DELAY 0
@@ -177,30 +173,6 @@ int64_t hopi_us_rule_id(hopi_us_handle handle);
 NSString *hopi_us_rule_applied(hopi_us_handle handle);
 /** Whether the rule protocol served the response (a mock or fail): no network was used. */
 bool hopi_us_ruled_by_protocol(hopi_us_handle handle);
-
-/**
- * The task's session's replay box (created on first use, kept as an associated object of the
- * session), or nil when the task cannot be replayed (no session, a background one, the self-check
- * failed). Capture queue only.
- */
-id hopi_us_replay_box(hopi_us_handle handle);
-/** The object stored in the box (the Kotlin replay target), or nil. */
-id hopi_us_replay_box_target(id box);
-void hopi_us_replay_box_set_target(id box, id target);
-/** A reference to the box's session that holds it weakly. */
-id hopi_us_replay_box_session(id box);
-/** Why a replay through session_ref cannot run now, or nil. */
-NSString *hopi_us_replay_refusal(id session_ref);
-/**
- * Sends a request on the referenced session, recorded under store_id, with a per-task delegate
- * that implements only the response, data, completion and metrics callbacks, so challenges and
- * redirects reach the session's own delegate. Returns nil once the task is resumed (the replay
- * callback follows), else why nothing was sent. cross_origin_strip, for an edit that changed the
- * origin, holds the lowercased credential and redacted names the edit does not supply itself: a
- * session whose configuration adds one of them (HTTPAdditionalHeaders) refuses before sending.
- */
-NSString *hopi_us_replay(id session_ref, int64_t store_id, NSString *method, NSString *url, NSArray<NSString *> *headers, NSData *body,
-                         NSArray<NSString *> *cross_origin_strip);
 
 // Test support. Counters only; nothing here changes what the hooks do, except the metadata switch.
 
