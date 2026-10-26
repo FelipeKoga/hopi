@@ -658,7 +658,7 @@ feature in which Hopi itself originates a request, and the owner put it in the b
 priority (docs/ROADMAP.md, "Replay (no priority)"). The full implementation, its per-source
 plumbing (a weak per-client target in each record, a hand-off of the pre-allocated id to the
 recorder, a count of replays in flight in the rule state) and its tests are in git commit
-`c7daca0`. Removing it only removed work: recorders no longer read back a connection's timeouts and
+`a5d160b`. Removing it only removed work: recorders no longer read back a connection's timeouts and
 TLS objects, look up an OkHttp call's client, read the task's session on URLSession, or look for a
 hand-off. The bridge answers a `replay` line as an older app answers any command it does not know
 (`BAD_REQUEST`: "unknown cmd", or "malformed JSON object" when it carries an `edit` object).

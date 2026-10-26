@@ -219,7 +219,7 @@ client was built on every source and then removed from the product, because it i
 in which Hopi itself originates a request; everything else only observes or answers requests the
 app makes. A full implementation (bridge `replay`, `hopi replay [--wait]`, `HopiRules.replay`, the
 desktop and in-app buttons, the per-source hooks for Ktor, OkHttp, `HttpURLConnection` and
-URLSession, and their tests) exists in git commit `c7daca0`; `docs/design/rules.md`, "Replay
+URLSession, and their tests) exists in git commit `a5d160b`; `docs/design/rules.md`, "Replay
 (removed)", says what it took. Constraints if it is ever revived:
 - Explicit command only: a bridge command, a CLI command or a button press, never automatic, never
   on a schedule, never as a side effect of another action.
