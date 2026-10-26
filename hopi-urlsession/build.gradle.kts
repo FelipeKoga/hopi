@@ -7,6 +7,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "Automatic capture of every URLSession request on iOS."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 kotlin {
     explicitApi()
 

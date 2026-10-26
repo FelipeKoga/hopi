@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "The Hopi Ktor client plugin."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 kotlin {
     explicitApi()
 

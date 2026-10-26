@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "Same public API as hopi-android, does nothing."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 // What the `dev.koga.hopi` plugin gives every non-debuggable variant: hopi-android's public API,
 // and nothing else. No dependency, no manifest entry, no hook, so a release build holds none of the
 // capture code.

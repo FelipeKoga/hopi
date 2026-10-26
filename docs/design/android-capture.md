@@ -704,7 +704,11 @@ the transform tasks exist for debug and staging only; each APK's dex (the same r
 into the `instrument` module so the sample and the tests share it) has the expected
 references and classes; the merged manifests have the provider in debuggable variants only; the
 classpaths hold real or noop; configuration-cache reuse on a second run; and the error when the
-plugin is applied to a library. The TestKit directory is a dedicated one under the plugin's
+plugin is applied to a library. A second fixture has no `hopi-*` project, so the plugin takes the
+coordinates a consumer of Maven Local gets: stand-in jars, published by a build of their own into a
+fixture repository, for the runtime, `hopi-perf` and two twin pairs, which a library names in both
+directions (`hopi-ktor-noop`, `hopi-rules`); the debug APK must hold every real stand-in and the
+release APK every noop. The TestKit directory is a dedicated one under the plugin's
 `build/`, never the developer's Gradle user home. A `--stop` there would also stop the outer
 build's daemon, which has the same Gradle version and the same home. AGP is not downloaded: the
 nested build runs `--offline`, and its environment sets

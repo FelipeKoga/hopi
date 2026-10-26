@@ -23,7 +23,9 @@ import org.gradle.testkit.runner.TaskOutcome
  * `okhttp-android` artifact) with a custom debuggable, minified build type and a custom
  * non-debuggable one has exactly its debuggable variants instrumented. The fixture's `hopi-android` and
  * `hopi-android-noop` are stand-ins with the runtime's class names (the plugin takes a project of
- * that name over the coordinates); the real runtime is tested by hopi-android's own tests.
+ * that name over the coordinates); the real runtime is tested by hopi-android's own tests. An app
+ * with no such projects gets the runtime and the twins by their published coordinates, as a
+ * consumer of Maven Local does.
  */
 class HopiPluginFunctionalTest {
     private val fixtures = File(System.getProperty("hopi.fixturesDir"))
@@ -126,6 +128,123 @@ class HopiPluginFunctionalTest {
     private fun apk(project: File, module: String, flavor: String, buildType: String): File =
         project.resolve("$module/build/outputs/apk/$flavor/$buildType").walkTopDown().single { it.extension == "apk" }
 
+    /**
+     * The published-coordinates path (a consumer of Maven Local): with no `hopi-android` or twin
+     * project in the build, the plugin adds `dev.koga.hopi:hopi-android(-noop)` and
+     * `hopi-perf(-noop)` at its own version, and swaps the twins a library names by their
+     * coordinates, in both directions: the shared module asks for `hopi-ktor-noop` and `hopi-rules`,
+     * the debug APK gets both real modules and the release APK both noops. The stand-ins are jars
+     * with one marker class each, published by a build of their own into a repository of the fixture.
+     */
+    @Test
+    fun publishedCoordinatesAreSwappedPerVariant() {
+        val root = fixtures.resolve("coordinates")
+        root.deleteRecursively()
+        val version = System.getProperty("hopi.version")
+        val repo = root.resolve("repo").path.replace("\\", "/")
+        val standIns = root.resolve("stand-ins")
+        writeGradleFiles(standIns)
+        val published = listOf("hopi-android", "hopi-android-noop", "hopi-ktor", "hopi-ktor-noop", "hopi-rules", "hopi-rules-noop", "hopi-perf", "hopi-perf-noop")
+        standIns.write("settings.gradle.kts", published.joinToString("\n") { "include(\":$it\")" })
+        standIns.write(
+            "build.gradle.kts",
+            """
+            subprojects {
+                apply(plugin = "java-library")
+                apply(plugin = "maven-publish")
+                group = "dev.koga.hopi"
+                version = "$version"
+                configure<JavaPluginExtension> {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+                configure<PublishingExtension> {
+                    repositories { maven { name = "standIns"; url = uri("$repo") } }
+                    publications { create<MavenPublication>("maven") { from(components["java"]) } }
+                }
+            }
+            """.trimIndent(),
+        )
+        for (module in published) {
+            val name = marker(module)
+            standIns.write("$module/src/main/java/dev/koga/hopi/standin/$name.java", "package dev.koga.hopi.standin;\npublic final class $name {}\n")
+        }
+        // The generated configuration of a debuggable variant extends the runtime's HopiConfigValues.
+        standIns.write("hopi-android/src/main/java/dev/koga/hopi/android/internal/HopiConfigValues.java", CONFIG_VALUES)
+        runner(standIns, "publishAllPublicationsToStandInsRepository").build()
+
+        val project = root.resolve("consumer")
+        writeGradleFiles(project)
+        project.write(
+            "settings.gradle.kts",
+            """
+            pluginManagement {
+                repositories {
+                    maven { url = uri("${System.getProperty("hopi.functionalRepo").replace("\\", "/")}") }
+                    google()
+                    mavenCentral()
+                }
+            }
+            dependencyResolutionManagement {
+                repositories {
+                    maven {
+                        url = uri("$repo")
+                        content { includeGroup("dev.koga.hopi") }
+                    }
+                    google()
+                    mavenCentral()
+                }
+            }
+            include(":app")
+            include(":shared")
+            """.trimIndent(),
+        )
+        project.write(
+            "build.gradle.kts",
+            """
+            plugins {
+                id("com.android.application") version "${System.getProperty("hopi.agpVersion")}" apply false
+                id("dev.koga.hopi") version "$version" apply false
+            }
+            """.trimIndent(),
+        )
+        project.write(
+            "shared/build.gradle.kts",
+            """
+            plugins { `java-library` }
+            java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+            dependencies {
+                api("dev.koga.hopi:hopi-ktor-noop:$version")
+                api("dev.koga.hopi:hopi-rules:$version")
+            }
+            """.trimIndent(),
+        )
+        project.write(
+            "app/build.gradle.kts",
+            androidModule(
+                "com.android.application", "com.example.consumer", hopi = true,
+                dependencies = "implementation(project(\":shared\"))",
+            ) + "\nhopi { perf { enabled = true } }\n",
+        )
+        project.write("app/src/main/AndroidManifest.xml", "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application />\n</manifest>\n")
+
+        val result = runner(project, ":app:assembleDebug", ":app:assembleRelease").build()
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:generateDebugHopiConfig")?.outcome, result.output)
+        val debug = DexReader.ofApk(project.resolve("app/build/outputs/apk/debug/app-debug.apk")).definedClasses
+        val release = DexReader.ofApk(project.resolve("app/build/outputs/apk/release/app-release-unsigned.apk")).definedClasses
+        for ((real, noop) in listOf("hopi-android" to "hopi-android-noop", "hopi-ktor" to "hopi-ktor-noop", "hopi-rules" to "hopi-rules-noop", "hopi-perf" to "hopi-perf-noop")) {
+            assertTrue("dev/koga/hopi/standin/${marker(real)}" in debug, "debug has $real: ${debug.filter { it.startsWith("dev/koga/hopi/") }}")
+            assertFalse("dev/koga/hopi/standin/${marker(noop)}" in debug, "debug has no $noop")
+            assertTrue("dev/koga/hopi/standin/${marker(noop)}" in release, "release has $noop: ${release.filter { it.startsWith("dev/koga/hopi/") }}")
+            assertFalse("dev/koga/hopi/standin/${marker(real)}" in release, "release has no $real")
+        }
+        assertTrue("dev/koga/hopi/android/generated/HopiGeneratedConfig" in debug)
+        assertEquals(emptyList(), release.filter { it.startsWith("dev/koga/hopi/android/") })
+    }
+
+    /** `hopi-ktor-noop` → `HopiKtorNoop`. */
+    private fun marker(module: String): String = module.split('-').joinToString("") { it.replaceFirstChar(Char::uppercaseChar) }
+
     @Test
     fun applyingItToALibraryFailsWithTheReason() {
         val project = fixture("library")
@@ -148,20 +267,11 @@ class HopiPluginFunctionalTest {
     private fun fixture(name: String): File {
         val root = fixtures.resolve(name)
         root.deleteRecursively()
-        root.mkdirs()
         val version = System.getProperty("hopi.version")
         val agp = System.getProperty("hopi.agpVersion")
         val okhttp = System.getProperty("hopi.okhttpVersion")
         val repo = System.getProperty("hopi.functionalRepo")
-        root.write("local.properties", "sdk.dir=${System.getProperty("hopi.sdkDir")}\n")
-        root.write(
-            "gradle.properties",
-            """
-            org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m
-            org.gradle.daemon.idletimeout=60000
-            android.useAndroidX=true
-            """.trimIndent(),
-        )
+        writeGradleFiles(root)
         val modules = if (name == "apps") listOf("app", "plain", "flavored", "sdk", "hopi-android", "hopi-android-noop") else listOf("lib")
         root.write(
             "settings.gradle.kts",
@@ -336,17 +446,7 @@ class HopiPluginFunctionalTest {
             }
             """.trimIndent(),
         )
-        root.write(
-            "$internal/HopiConfigValues.java",
-            """
-            package dev.koga.hopi.android.internal;
-            public abstract class HopiConfigValues {
-                protected HopiConfigValues(boolean okhttp, boolean urlConnection, int maxEntries, long maxTotalBytes, long maxBodyBytes, boolean summaryLog,
-                        boolean agentBridge, boolean redactionDisabled, String[] redactHeaders, String[] redactQueryParameters, boolean rules,
-                        boolean perfPresent, int perfAutoStart, long perfHangThresholdMs, boolean perfHangHeartbeat) {}
-            }
-            """.trimIndent(),
-        )
+        root.write("$internal/HopiConfigValues.java", CONFIG_VALUES)
         root.write("$internal/HopiInstrumented.java", "package dev.koga.hopi.android.internal;\n@java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)\npublic @interface HopiInstrumented {}\n")
         root.write(
             "$internal/HopiInitProvider.java",
@@ -392,6 +492,20 @@ class HopiPluginFunctionalTest {
         dependencies { $dependencies }
         """.trimIndent()
 
+    /** The fixture build's machine-specific files: its SDK and a small daemon that stops soon after. */
+    private fun writeGradleFiles(root: File) {
+        root.mkdirs()
+        root.write("local.properties", "sdk.dir=${System.getProperty("hopi.sdkDir")}\n")
+        root.write(
+            "gradle.properties",
+            """
+            org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m
+            org.gradle.daemon.idletimeout=60000
+            android.useAndroidX=true
+            """.trimIndent(),
+        )
+    }
+
     private fun File.write(path: String, text: String) {
         resolve(path).apply { parentFile.mkdirs() }.writeText(text)
     }
@@ -399,6 +513,16 @@ class HopiPluginFunctionalTest {
     private companion object {
         val DAEMON_LOG = Regex("daemon-(\\d+)\\.out\\.log")
         const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
+
+        /** The runtime's base class of the generated configuration, with its constructor. */
+        val CONFIG_VALUES = """
+            package dev.koga.hopi.android.internal;
+            public abstract class HopiConfigValues {
+                protected HopiConfigValues(boolean okhttp, boolean urlConnection, int maxEntries, long maxTotalBytes, long maxBodyBytes, boolean summaryLog,
+                        boolean agentBridge, boolean redactionDisabled, String[] redactHeaders, String[] redactQueryParameters, boolean rules,
+                        boolean perfPresent, int perfAutoStart, long perfHangThresholdMs, boolean perfHangHeartbeat) {}
+            }
+        """.trimIndent()
         const val REAL_CALL = "okhttp3/internal/connection/RealCall"
         const val OKHTTP_ANDROID_CLASS = "okhttp3/internal/platform/android/AndroidLog"
         val OKHTTP_HOOK = MethodRef(HookDescriptors.OKHTTP_HOOKS, HookDescriptors.INTERCEPTORS, HookDescriptors.OKHTTP_HOOK_DESCRIPTOR)

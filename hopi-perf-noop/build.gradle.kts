@@ -7,6 +7,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "Same public API as hopi-perf, does nothing."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 kotlin {
     explicitApi()
 

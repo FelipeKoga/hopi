@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <hopi:hopi-rules-noop>
+// Library unique name: <dev.koga.hopi:hopi-rules-noop>
 final enum class dev.koga.hopi.rules/HopiFailure : kotlin/Enum<dev.koga.hopi.rules/HopiFailure> { // dev.koga.hopi.rules/HopiFailure|null[0]
     enum entry Cancel // dev.koga.hopi.rules/HopiFailure.Cancel|null[0]
     enum entry Reset // dev.koga.hopi.rules/HopiFailure.Reset|null[0]

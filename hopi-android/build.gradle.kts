@@ -7,6 +7,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "Automatic OkHttp and HttpURLConnection capture on Android, added by the dev.koga.hopi Gradle plugin."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 // Automatic OkHttp and HttpURLConnection capture on Android (docs/design/android-capture.md).
 // Android only: no app depends on it by hand, the `dev.koga.hopi` Gradle plugin adds it to the
 // debuggable variants of an Android application, and its noop twin to the others.

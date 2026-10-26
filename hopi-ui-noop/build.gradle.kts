@@ -9,6 +9,9 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+description = "Same public API as hopi-ui, renders nothing."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 kotlin {
     explicitApi()
 

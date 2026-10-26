@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "The recording store, redaction and agent bridge every Hopi module shares."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 kotlin {
     explicitApi()
 

@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <hopi:hopi-urlsession-noop>
+// Library unique name: <dev.koga.hopi:hopi-urlsession-noop>
 final class dev.koga.hopi.urlsession/HopiUrlSessionConfig { // dev.koga.hopi.urlsession/HopiUrlSessionConfig|null[0]
     constructor <init>() // dev.koga.hopi.urlsession/HopiUrlSessionConfig.<init>|<init>(){}[0]
 

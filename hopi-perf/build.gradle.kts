@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "HopiPerf, the performance monitors (frames, hangs, CPU, memory)."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 // HopiPerf: the performance monitors (docs/design/perf-monitors.md): frames, hangs, CPU, memory,
 // each off by default. The model, its JSON and the bridge commands live in hopi-core; this module
 // holds the consumer API and the monitors. Its noop twin, hopi-perf-noop, has the same API and does

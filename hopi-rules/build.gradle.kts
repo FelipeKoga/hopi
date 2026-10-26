@@ -6,6 +6,9 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
+description = "HopiRules: mock, fail, delay and edit rules from Kotlin or Swift code."
+apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+
 // HopiRules: the in-process API over core's rule engine (docs/design/rules.md, "In-process API"),
 // for tests and debug menus. Its noop twin, hopi-rules-noop, has the same API and does nothing.
 kotlin {

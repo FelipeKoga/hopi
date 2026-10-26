@@ -24,9 +24,51 @@ and a `-noop` twin of every artifact, so release builds ship none of it. The des
 
 ## Install
 
-Hopi is not published to a Maven repository yet: the coordinates below are the ones it will
-use. Until then, include the modules from this repository (as `sample/shared` does with
-`project(":hopi-ktor")`).
+Hopi is published to Maven Local only: no remote repository, nothing downloaded from anywhere but
+the repositories your build already uses. Every artifact has the group `dev.koga.hopi` and the
+version of `hopi.version` in this repository's `gradle.properties` (`0.1.0`, the version the
+Gradle plugin adds the runtime at). From a clone of this repository:
+
+```bash
+./gradlew publishToMavenLocal   # every artifact below, its noop twin, and the dev.koga.hopi plugin
+```
+
+Republishing the same version after a change is enough: Gradle does not cache `mavenLocal()`, so
+the next build of your app picks it up. Then, in your app's `settings.gradle.kts`, add
+`mavenLocal()` to both repository lists, limited to the `dev.koga.hopi` group (the libraries, the
+plugin and its marker), so nothing else is looked up in `~/.m2`, whose entries Maven or another
+build may have left incomplete:
+
+```kotlin
+pluginManagement {
+    repositories {
+        mavenLocal { content { includeGroup("dev.koga.hopi") } }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal { content { includeGroup("dev.koga.hopi") } }
+        google()
+        mavenCentral()
+    }
+}
+```
+
+What the published artifacts need from your build (the versions they are built and tested with;
+older ones are not tested):
+
+- **Gradle 9.7.1 and JDK 17**; the plugin is compiled against **AGP 9.4.0**'s API.
+- **Kotlin 2.4.20**: the klibs and the Kotlin metadata are written by it.
+- **Android**: the app module applies `com.android.application` (the plugin refuses any other
+  module) with `compileSdk = 37` or higher, since the AARs declare `minCompileSdk=37` and AGP
+  refuses a lower one, and `minSdk = 24` or higher. A KMP shared module uses
+  `com.android.kotlin.multiplatform.library`, with the same `compileSdk` in its `android { }` block.
+- **Ktor 3.5.2** for `hopi-ktor`, and **Compose Multiplatform 1.12.0** (with the Compose compiler
+  plugin of your Kotlin) for `hopi-ui`.
 
 | Artifact              | What it is                                              |
 | --------------------- | ------------------------------------------------------- |
@@ -42,12 +84,19 @@ use. Until then, include the modules from this repository (as `sample/shared` do
 | `hopi-perf-noop` | Same public API as `hopi-perf`, does nothing |
 | `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-android` to debug builds and `hopi-android-noop` to release builds |
 
+`hopi-core` (shared by the real modules), `hopi-android` and `hopi-android-noop` (added by the
+plugin) and `hopi-instrument` (the plugin's rewriter) are published too; you never name them. Each
+KMP artifact has its Android, JVM, `iosArm64` and `iosSimulatorArm64` publications with sources
+and Gradle module metadata, so `dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right
+one per target.
+
 Pick the real artifacts or the noop twins with a Gradle property in the shared module, because a
 KMP module has no build types and iOS frameworks link the same klibs for debug and release:
 
 ```kotlin
 // shared/build.gradle.kts
 val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
+val v = "0.1.0"
 
 kotlin {
     sourceSets {
@@ -72,6 +121,9 @@ module must not, since the shared module already brings one of the two.
 Install the plugin on each `HttpClient` you want to see, when the app starts:
 
 ```kotlin
+import dev.koga.hopi.ktor.Hopi
+import dev.koga.hopi.ktor.HopiLogSink
+
 val client = HttpClient(engine) {
     install(Hopi) {
         logSink = HopiLogSink.Summary   // one NDJSON line per request (the default)
@@ -82,6 +134,10 @@ val client = HttpClient(engine) {
 }
 ```
 
+The `hopi` CLI, which reads a running app's records (headers, bodies) and drives its rules, is
+built from this repository, not published: `./gradlew :hopi-cli:installDist` (see
+[For AI agents](#for-ai-agents)).
+
 ### Android: every OkHttp and HttpURLConnection request, automatically
 
 One line in the app module's `build.gradle.kts`:
@@ -89,11 +145,12 @@ One line in the app module's `build.gradle.kts`:
 ```kotlin
 plugins {
     id("com.android.application")
-    id("dev.koga.hopi")
+    id("dev.koga.hopi") version "0.1.0"
 }
 ```
 
-That is the whole setup. In debuggable variants the plugin rewrites, at build time, OkHttp's call
+(or `id("dev.koga.hopi") version "0.1.0" apply false` in the root `build.gradle.kts` and
+`id("dev.koga.hopi")` here.) That is the whole setup. In debuggable variants the plugin rewrites, at build time, OkHttp's call
 class and every `java.net.URL` connection call site of your app **and of every library it
 depends on**, so every OkHttp client (yours, Retrofit's, an analytics or ads SDK's, Ktor's OkHttp
 engine) and every `HttpURLConnection` is recorded, with no client to configure and no code to call:
@@ -475,7 +532,27 @@ the current build no longer does (perf lab run on the iPhone 16, 2026-10-26).
 
 JDK 17, Gradle through `./gradlew` (9.7.1), Kotlin 2.4.20, Compose Multiplatform 1.12.0, Ktor
 3.5.2. `./gradlew check` runs the tests (including the iOS simulator tests), the ABI dump checks and
-the noop parity check (a real module and its twin must have exactly the same public API).
+the noop parity check (a real module and its twin must have exactly the same public API) and the
+publication check. The base check, one Gradle invocation:
+
+```bash
+./gradlew :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
+  :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
+  :hopi-perf:jvmTest :hopi-perf-noop:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
+  :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \
+  :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
+```
+
+`:checkPublication` publishes every artifact into `build/publication-check` (the plugin, its marker
+and `hopi-instrument` into `gradle-plugin/build/functional-repo`), never `~/.m2`, and fails unless
+every expected coordinate is there (each KMP module's root, Android, JVM and iOS publications,
+sources jars, the cinterop klibs of `hopi-core` and `hopi-perf`), every Gradle module file and
+POM of `hopi.version` points only at files and `dev.koga.hopi` artifacts that are published at it,
+and no archive holds this repository's absolute path (the klibs store source paths relative to it).
+`hopi.version` is set in `gradle.properties` only: the plugin's build reads that file, so the root
+build refuses a `-Phopi.version` that differs from it. The
+artifacts and the plugin are published by `gradle/publishing.gradle.kts`, which each published
+module applies; `hopi-connect`, the CLI, the desktop viewer and the sample are not published.
 The giant-body benchmarks are opt-in and slow (minutes): run one module at a time with
 `./gradlew :hopi-ktor:jvmGiantBodyBenchmark` (also `:hopi-core:` and `:hopi-ui:`)
 or `./gradlew :hopi-cli:testGiantBodyBenchmark`; tables land in `<module>/build/giant-body/`.

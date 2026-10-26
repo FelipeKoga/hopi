@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <hopi:hopi-perf-noop>
+// Library unique name: <dev.koga.hopi:hopi-perf-noop>
 final enum class dev.koga.hopi.perf/HopiMonitor : kotlin/Enum<dev.koga.hopi.perf/HopiMonitor> { // dev.koga.hopi.perf/HopiMonitor|null[0]
     enum entry Cpu // dev.koga.hopi.perf/HopiMonitor.Cpu|null[0]
     enum entry Frames // dev.koga.hopi.perf/HopiMonitor.Frames|null[0]
