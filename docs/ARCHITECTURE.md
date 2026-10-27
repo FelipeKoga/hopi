@@ -905,10 +905,11 @@ cache, the method looked up once per request for rules; raw data in the ignored
 `build/evidence/speed/final/`), 4 rounds of noop / before / after / before + 10 rules / after + 10
 rules / noop2: the calling thread's CPU, after − noop, +16 to +26 µs for OkHttp (median +21) and
 +26 to +31 µs for `HttpURLConnection` (median +28.5; before, the same tree without these fixes,
-+24 to +31), noise noop2 − noop −5 to +5 and 0 to +4. Median wall +9 to +19 and +14 to +29 µs,
-against a noop2 − noop band of −51 to +9 and −29 to +18: still about 10 to 30 µs above the noise,
-which is roughly the calling thread's own added CPU, so the wall target cannot be met while that
-CPU stays above the band. 10 enabled, non-matching rules add −6 to +6 µs (median +2) on OkHttp,
++24 to +31), noise noop2 − noop −5 to +5 and 0 to +4 (on 2026-10-27, after the bug fixes, 8
+rounds: medians +24 and +22.5 µs; android-capture.md, "Review fixes"). Median wall +9 to +19
+and +14 to +29 µs, against a noop2 − noop band of −51 to +9 and −29 to +18: still about 10 to
+30 µs above the noise, which is roughly the calling thread's own added CPU, so the wall target
+cannot be met while that CPU stays above the band. 10 enabled, non-matching rules add −6 to +6 µs (median +2) on OkHttp,
 inside the bench's CPU noise, and +6 to +19 µs (median +7.5; before +7 to +8) on
 `HttpURLConnection`. `hopi-store` 0.23 to 0.35 timeslices and 226 to 251 µs on-CPU per counted
 request (both stacks), unchanged. Idle: every `hopi-*` thread 0 µs and 0 context switches over
@@ -1045,8 +1046,9 @@ identical to the noop build (0 CPU, 0 wakes idle); frames add nothing measurable
 thread; hangs' Looper printer adds +6.2 to +6.5 µs per main-thread message and +29 µs per
 `Dispatchers.Main` resume (the framework formats the dispatch line for any printer) and nothing
 while idle; the heartbeat adds nothing per message and, idle, 8 wakes per second on each of its two
-threads at 250 ms (one beat per `threshold / 2`; measured at 4 each before its cadence was fixed,
-re-measure pending); the sampler wakes once per interval at about 1 ms of CPU per tick.
+threads at 250 ms (one beat per `threshold / 2`; 7.8 to 7.9 each on the emulator, 2026-10-27, and
+4 each before its cadence was fixed) with 110 to 160 ms of watchdog CPU per minute; the sampler
+wakes once per interval at about 1 ms of CPU per tick.
 
 - **Off is free.** Nothing runs until a monitor starts: no thread, no listener, no lifecycle
   callback, no monitor class loaded. `HopiPerf.install` (or, on Android, `hopi-android`'s provider
@@ -1763,8 +1765,9 @@ property it does nothing. It drives the sample with adb and `benchmark/device/sc
 copy as cURL (redacted), both exports, 0 CPU ticks for Hopi's threads over 60 s idle, the
 app-side connection count (connected `@hopi.<app>` sockets in `/proc/net/unix`: 2, never
 more), force-stop and relaunch, an adb server reset, and 500 `POST /items` connected against
-disconnected. On iOS: the connection through `bridge.json`, terminate and relaunch, live rows and
-a body fetched on selection.
+disconnected (on Android the two 5 MB body checks and the 500 POSTs' figure no longer test what
+they name: ROADMAP.md, "Desktop viewer"). On iOS: the connection through `bridge.json`,
+terminate and relaunch, live rows and a body fetched on selection.
 
 ## Sample app (`sample/`)
 
@@ -1798,9 +1801,12 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   spec instead (`GiantSpec`: `mb=1,5,20;shape=minified|pretty|string|nested;chunked=0|1;runs=5;
   hold=S;post=0|1;delay=S`): `--es giant <spec>` on Android, the launch argument `-giant <spec>`
   on iOS; `--el maxBodyBytes N` / `-maxBodyBytes N` sets `SampleHttp.maxBodyBytes`, the plugin's
-  cap, before the client exists (force-stop the app first). The log goes to the `HopiSample`
-  tag on Android and stdout on iOS (`simctl launch --console-pty`). The back gesture (ui-backhandler `BackHandler`) returns to the item list. iOS
-  gets `MainViewController()`, a `ComposeUIViewController`; the static framework is `Shared`.
+  cap, before the client exists (force-stop the app first; on Android it reaches only the Ktor
+  plugin, so OkHttp capture, which records the sample's Ktor requests, keeps the `hopi { }` cap:
+  ROADMAP.md, "Desktop viewer"). The log goes to the `HopiSample` tag on Android and stdout on
+  iOS (`simctl launch --console-pty`). The back gesture (ui-backhandler `BackHandler`) returns to
+  the item list. iOS gets `MainViewController()`, a `ComposeUIViewController`; the static
+  framework is `Shared`.
 - **Perf lab and bench** (`sample/shared`, `PerfLab.kt`, `PerfBench.kt`; docs/design/perf-monitors.md,
   "Device verification plan" and "Performance plan"). `sample/shared` depends on `hopi-perf` or
   its noop in commonMain (api: the iOS framework exports it); on Android the plugin's
