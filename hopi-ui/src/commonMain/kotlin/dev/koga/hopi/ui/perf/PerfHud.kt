@@ -26,6 +26,7 @@ import dev.koga.hopi.core.perf.FrameSecond
 import dev.koga.hopi.core.perf.PerfController
 import dev.koga.hopi.core.perf.PerfItem
 import dev.koga.hopi.core.perf.PerfLock
+import dev.koga.hopi.core.perf.PerfMonitor
 import dev.koga.hopi.core.perf.PerfSample
 import dev.koga.hopi.core.perf.StallEvent
 import dev.koga.hopi.ui.theme.DarkColors
@@ -50,9 +51,13 @@ internal object PerfHudState {
  * what the model hands its listeners: closed seconds of frames, samples and iOS stalls (never a
  * frame, never a jank event). [onItem] returns the new text only when it changed, so an idle app
  * or a steady one makes the HUD stop drawing. Items come from several monitor threads (frames,
- * sampler, iOS main), so one uncontended lock orders them.
+ * sampler, iOS main), so one uncontended lock orders them. Once the controller reports which
+ * monitors run ([onRunning]), a stopped monitor's figures go and what it still hands out is
+ * ignored; with none running the text says so. Each new text goes to [publish] under that lock,
+ * so the texts land in the order they changed (a sample's text racing a stop's never lands after
+ * it); [publish] must not call the meter.
  */
-internal class HudMeter(private val ios: Boolean) {
+internal class HudMeter(private val ios: Boolean, private val publish: (String) -> Unit = {}) {
     private var second: FrameSecond? = null
     private var sample: PerfSample? = null
     private val stallTimes = LongArray(STALLS)
@@ -60,22 +65,44 @@ internal class HudMeter(private val ios: Boolean) {
     private var stallNext = 0
     private var latestMs = 0L
     private var shown: String? = null
+
+    /** The monitors running, as the controller last reported them; null until it does. */
+    private var running: Set<PerfMonitor>? = null
     private val lock = PerfLock()
 
     /** The text for [item], or null when it did not change the text. */
     fun onItem(item: PerfItem): String? = lock.locked { update(item) }
 
+    /**
+     * The text once [monitors] are the ones running, or null when it did not change: a stopped
+     * monitor's figures are dropped, never left on screen as if live.
+     */
+    fun onRunning(monitors: Set<PerfMonitor>): String? = lock.locked {
+        running = monitors
+        if (PerfMonitor.FRAMES !in monitors) {
+            second = null
+            stallTimes.fill(0)
+        }
+        if (PerfMonitor.CPU !in monitors && PerfMonitor.MEMORY !in monitors) sample = null
+        changed()
+    }
+
     private fun update(item: PerfItem): String? {
+        // A stopped monitor still hands out what was under way: a frames second a later tick
+        // closes, a sample taken as it stopped.
         when (item) {
             is FrameSecond -> {
+                if (!on(PerfMonitor.FRAMES)) return null
                 second = item
                 latestMs = maxOf(latestMs, item.second * 1000 + 999)
             }
             is PerfSample -> {
+                if (!on(PerfMonitor.CPU) && !on(PerfMonitor.MEMORY)) return null
                 sample = item
                 latestMs = maxOf(latestMs, item.atMs)
             }
             is StallEvent -> {
+                if (!on(PerfMonitor.FRAMES)) return null
                 stallTimes[stallNext] = item.atMs
                 stallMs[stallNext] = item.durationMs
                 stallNext = (stallNext + 1) % STALLS
@@ -83,21 +110,31 @@ internal class HudMeter(private val ios: Boolean) {
             }
             else -> return null
         }
+        return changed()
+    }
+
+    private fun changed(): String? {
         val next = text()
         if (next == shown) return null
         shown = next
+        publish(next)
         return next
     }
 
+    /** Whether [monitor] runs; true until the controller reports the set. */
+    private fun on(monitor: PerfMonitor): Boolean = running?.contains(monitor) ?: true
+
     fun text(): String {
+        if (running?.isEmpty() == true) return "perf: off"
         val parts = ArrayList<String>(3)
         frames()?.let(parts::add)
-        sample?.cpu?.let { parts += "CPU ${it.processPercent.roundToLong()}%" }
-        sample?.memory?.residentBytes?.let { parts += "${(it / (1024 * 1024))} MB" }
+        if (on(PerfMonitor.CPU)) sample?.cpu?.let { parts += "CPU ${it.processPercent.roundToLong()}%" }
+        if (on(PerfMonitor.MEMORY)) sample?.memory?.residentBytes?.let { parts += "${(it / (1024 * 1024))} MB" }
         return parts.joinToString(" · ").ifEmpty { "perf: waiting for data" }
     }
 
     private fun frames(): String? {
+        if (!on(PerfMonitor.FRAMES)) return null
         val sec = second
         val sampling = sample
         if (ios) {
@@ -135,20 +172,26 @@ internal const val HUD_DESCRIPTION: String = "Hopi performance HUD"
 
 /**
  * The HUD over the app: one line of text, top center, touching nothing (the app keeps every
- * touch). It listens to [controller]'s model only while composed, and recomposes only when the
- * text changes; its own redraws are app frames, at most one per second and none while the app is
- * idle. With [PerfHudState.cadence] on iOS it asks for the display-link cadence while composed.
+ * touch). It listens to [controller]'s model and running set only while composed, and recomposes
+ * only when the text changes; its own redraws are app frames, at most one per second (and one when
+ * a monitor starts or stops) and none while the app is idle. With [PerfHudState.cadence] on iOS it
+ * asks for the display-link cadence while composed.
  */
 @Composable
 internal fun PerfHud(controller: PerfController) {
     val ios = controller.platform == "ios"
     val text by produceState<String?>(null, controller) {
-        val meter = HudMeter(ios)
-        val latest = MutableStateFlow(meter.text())
-        val remove = controller.data.addListener { item -> meter.onItem(item)?.let { latest.value = it } }
+        // Stored under the meter's lock, so a sample's text that raced a stop never lands after it.
+        val latest = MutableStateFlow<String?>(null)
+        val meter = HudMeter(ios) { latest.value = it }
+        latest.value = meter.text()
+        val remove = controller.data.addListener { meter.onItem(it) }
+        // At once with the monitors running now, then at every start and stop.
+        val removeRunning = controller.addRunningListener { meter.onRunning(it) }
         try {
             latest.collect { value = it }
         } finally {
+            removeRunning()
             remove()
         }
     }

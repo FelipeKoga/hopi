@@ -219,7 +219,7 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             val rule = RemoteRule.decode(reply.json) ?: throw notReachable("the bridge sent a malformed rule")
             out.line(if (args.json) reply.raw else Render.ruleLine(rule))
             out.flush()
-            for (entry in rule.unsupported) printError(environment.stderr, "hopi: warning: ${visible(entry)}")
+            for (entry in rule.unsupported) printError(environment.stderr, "hopi: warning: ${visible(entry.toString())}")
         }
     }
 

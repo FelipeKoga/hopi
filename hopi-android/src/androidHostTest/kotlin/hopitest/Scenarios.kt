@@ -102,6 +102,8 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
             "urlOpenStream" -> out["text"] = URL("$base/json").openStream().use { String(it.readBytes()) }
             "urlErrorStreamFirst" -> urlErrorStreamFirst(base, out)
             "urlSingleBytes" -> urlSingleBytes(base, out)
+            "urlOutputAfterEnd" -> urlOutputAfterEnd(base, out)
+            "urlReplacementAfterEnd" -> urlReplacementAfterEnd(base, out)
             "okhttpPassThrough" -> okhttpPassThrough(base, out)
             "urlPassThrough" -> urlPassThrough(base, out)
             "okhttpLegacyPost" -> okhttpLegacyPost(base, out)
@@ -353,6 +355,52 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
         out["code"] = connection.responseCode
     }
 
+    /**
+     * A connection whose first `getOutputStream` fails and whose second succeeds (a third-party one:
+     * Android's rethrows its first failure). The record ended with the failure; what the app writes
+     * after it reaches the connection and changes nothing counted for that end.
+     */
+    private fun urlOutputAfterEnd(base: String, out: MutableMap<String, Any?>) {
+        val delegate = InMemoryOutputConnection(URL("$base/echo"))
+        var opened = 0
+        delegate.beforeOutput = { if (opened++ == 0) throw IOException("connect failed") }
+        val connection = HopiHttpURLConnection(delegate)
+        connection.doOutput = true
+        try {
+            connection.outputStream
+        } catch (e: IOException) {
+            out["exception"] = e.message
+        }
+        out["heldAtEnd"] = heldBytes(connection)
+        connection.outputStream.use { it.write("""{"title":"late"}""".toByteArray()) }
+        out["written"] = delegate.written.toString(Charsets.UTF_8)
+        out["heldAfter"] = heldBytes(connection)
+    }
+
+    /**
+     * Under a rule's body edit, a `disconnect()` that lands before the rule's body is recorded (from
+     * another thread it can land between the snapshot and the write; here the connection makes it as
+     * the body goes out): the record ends there, and the body sent after it changes nothing counted
+     * for that end.
+     */
+    private fun urlReplacementAfterEnd(base: String, out: MutableMap<String, Any?>) {
+        val delegate = InMemoryOutputConnection(URL("$base/echo"))
+        val connection = HopiHttpURLConnection(delegate)
+        delegate.beforeOutput = {
+            connection.disconnect()
+            out["heldAtEnd"] = heldBytes(connection)
+        }
+        connection.doOutput = true
+        connection.setRequestProperty("Content-Type", "text/plain")
+        connection.outputStream.use { it.write("the app's own body".toByteArray()) }
+        out["written"] = delegate.written.toString(Charsets.UTF_8)
+        out["heldAfter"] = heldBytes(connection)
+    }
+
+    /** What the store counts for [connection]'s record while its end is queued (`DeferredRecord.heldBytes`). */
+    private fun heldBytes(connection: HopiHttpURLConnection): Long =
+        (HopiHttpURLConnection::class.java.getDeclaredField("recorder").apply { isAccessible = true }.get(connection) as HopiStore.DeferredRecord).heldBytes()
+
     /** One byte at a time each way: `write(int)` and `read()`. */
     private fun urlSingleBytes(base: String, out: MutableMap<String, Any?>) {
         val connection = URL("$base/echo").openConnection() as HttpURLConnection
@@ -438,6 +486,27 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
     }
 
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+}
+
+/**
+ * A third-party connection that never touches the network: its output stream is in memory
+ * ([written]), and [beforeOutput] runs first in every `getOutputStream`, where it may throw (a
+ * failed connect) or disconnect the wrapper.
+ */
+private class InMemoryOutputConnection(url: URL) : HttpURLConnection(url) {
+    val written = java.io.ByteArrayOutputStream()
+    var beforeOutput: () -> Unit = {}
+
+    override fun getOutputStream(): java.io.OutputStream {
+        beforeOutput()
+        return written
+    }
+
+    override fun connect() = Unit
+
+    override fun disconnect() = Unit
+
+    override fun usingProxy(): Boolean = false
 }
 
 /**

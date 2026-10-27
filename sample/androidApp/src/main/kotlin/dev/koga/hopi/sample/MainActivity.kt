@@ -94,6 +94,10 @@ class MainActivity : ComponentActivity() {
         // readable on its light and dark backgrounds.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // The plugin selects the real modules or the noop twins per variant, whatever -Phopi.enabled
+        // says: the Diagnostics caption and the evidence lines say what runs (its provider started
+        // capture before the application was created).
+        SampleBuild.androidCaptureStarted = HopiAndroid.isStarted
         if (intent.hasExtra(MAX_BODY_BYTES_EXTRA)) {
             SampleHttp.maxBodyBytes = intent.getLongExtra(MAX_BODY_BYTES_EXTRA, 0L).takeIf { it > 0 }
         }

@@ -52,6 +52,32 @@ import kotlinx.coroutines.launch
 public class PlatformAction(public val label: String, public val run: suspend () -> String)
 
 /**
+ * Which Hopi this process runs: the Diagnostics caption says it, and the evidence lines carry it
+ * (`"build":"real"`, `"real":true`). On iOS the `hopi.enabled` property selects the framework's
+ * modules, so the generated [HOPI_ENABLED] says which. On Android the dev.koga.hopi plugin selects
+ * them per variant whatever the property says (real in debug, noop in release and with
+ * `-Psample.hopiCapture=false`), so the activity reports what runs instead.
+ */
+public object SampleBuild {
+    /**
+     * `HopiAndroid.isStarted`, set by the Android activity before the UI: in this app capture runs
+     * exactly when the plugin gave the variant the real modules. Null on iOS.
+     */
+    public var androidCaptureStarted: Boolean? = null
+
+    /** True for the real modules, false for the noop twins. */
+    internal val realHopi: Boolean get() = androidCaptureStarted ?: HOPI_ENABLED
+
+    /** The Diagnostics caption: which Hopi runs and what selected it. */
+    internal val caption: String
+        get() = when (androidCaptureStarted) {
+            true -> "Hopi: real modules (debug build: the dev.koga.hopi plugin selects them)"
+            false -> "Hopi: noop twins (release build, or -Psample.hopiCapture=false)"
+            null -> if (HOPI_ENABLED) "Hopi: real modules (built with -Phopi.enabled=true)" else "Hopi: noop twins (built without -Phopi.enabled=true)"
+        }
+}
+
+/**
  * The sample app both platforms host, wrapped in [HopiLauncher]: a small shop (item list,
  * item detail, a form that POSTs a new item) against the dev server, and a diagnostics tab that
  * fires one request of each kind the inspector must handle and opens the perf lab. [platformActions]
@@ -325,13 +351,7 @@ private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: Mu
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Caption(
-                if (HOPI_ENABLED) {
-                    "Hopi: real modules (built with -Phopi.enabled=true)"
-                } else {
-                    "Hopi: noop twins (built without -Phopi.enabled=true)"
-                },
-            )
+            Caption(SampleBuild.caption)
             SampleButton("Fire requests", modifier = Modifier.fillMaxWidth(), onClick = {
                 results.clear()
                 scope.launch { fireRequests(SampleHttp.client) { results.add(it) } }

@@ -1,5 +1,6 @@
 package dev.koga.hopi.ktor
 
+import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
@@ -12,6 +13,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 internal val ExchangeKey = AttributeKey<Exchange>("HopiExchange")
+
+/** The error of a record [Exchange.withdrawnForPlatform] withdrew: what a viewer that showed its start reads at its end. */
+internal const val WITHDRAWN = "withdrawn: platform capture started during this request"
 
 internal enum class ResponsePlan {
     /** No response seen yet. */
@@ -28,11 +32,15 @@ internal enum class ResponsePlan {
 
     /** The body is teed; the capture side completes the transaction. */
     Teed,
+
+    /** The record was withdrawn for a platform recorder ([Exchange.withdrawnForPlatform]): nothing more is recorded. */
+    Withdrawn,
 }
 
 /**
  * One send of one request. Pipeline hooks run sequentially on the call's coroutine; the capture
- * side starts after the response fields are set. Exactly one terminal snapshot is submitted.
+ * side starts after the response fields are set. Exactly one terminal snapshot is submitted, or
+ * the record is withdrawn instead ([withdrawnForPlatform]).
  */
 internal class Exchange(
     private val store: HopiStore,
@@ -41,6 +49,11 @@ internal class Exchange(
     private val streamedRequest: StreamedRequestBody?,
     /** The rule applied to this request, or null: then nothing below differs from a request without rules. */
     val application: RuleApplication? = null,
+    /**
+     * The client's engine class when no platform recorder covered it at `Monitoring` and the
+     * request goes to the engine, read again by [withdrawnForPlatform]; null: nothing to check.
+     */
+    private var uncoveredEngine: String? = null,
 ) {
     private val finished = AtomicBoolean(false)
 
@@ -77,11 +90,30 @@ internal class Exchange(
         plan = ResponsePlan.Teed
     }
 
+    /**
+     * True when a platform recorder started covering the engine while the request was in it (URLSession
+     * capture's `start()`): its hook may have seen the request, and nothing here can tell, so this
+     * record is withdrawn. The request is then recorded once or missed, as for a task resumed during
+     * `start()`, which "may be missed, never recorded twice" (docs/design/urlsession-capture.md,
+     * "Swizzling rules"). A recorder covers its engines before its hooks go live, so an engine still
+     * not covered when it answers means no hook saw the request. Asked once, at the first response
+     * hook or at a failure before any response, before anything decides the end (a teed or decoded
+     * body can end it before the send pipeline returns): one atomic read.
+     */
+    fun withdrawnForPlatform(): Boolean {
+        val engine = uncoveredEngine ?: return false
+        uncoveredEngine = null
+        if (!PlatformCapture.covers(engine) || !finished.compareAndSet(false, true)) return false
+        plan = ResponsePlan.Withdrawn
+        store.withdraw(pending.failed(WITHDRAWN, elapsedMs()))
+        return true
+    }
+
     /** The send pipeline returned: complete unless the capture side owns completion. */
     fun callReturned() {
         when (plan) {
-            ResponsePlan.Teed -> Unit
-            ResponsePlan.None -> fail(IllegalStateException("no response"))
+            ResponsePlan.Teed, ResponsePlan.Withdrawn -> Unit
+            ResponsePlan.None -> if (!withdrawnForPlatform()) fail(IllegalStateException("no response"))
             ResponsePlan.Ready, ResponsePlan.AfterSave, ResponsePlan.Decoded -> complete(responseBody)
         }
     }

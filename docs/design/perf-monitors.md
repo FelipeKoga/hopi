@@ -331,8 +331,9 @@ independent of the hang monitor and carries a `perturbed` flag while the printer
 measures the median and p99 over a realistic mix (empty messages, `View.post` lambdas, coroutine
 resumes on `Dispatchers.Main`, a Compose animation); if the mix costs more than 3 µs per message
 on the emulator, hangs switch to a heartbeat (the watchdog posts an empty message every
-`threshold / 2` while on, 8 wakes per second at 250 ms on both threads, including idle), and the
-budget table changes accordingly. `Looper.setObserver` (API 29) is hidden API and not used.
+`threshold / 2` while on, 8 wakes per second at 250 ms on each of the two threads, 16 in all,
+including idle), and the budget table changes accordingly. `Looper.setObserver` (API 29) is
+hidden API and not used.
 
 **Input dispatch, the gap that matters for Compose.** Input events reach the main thread through a
 native looper fd callback inside `MessageQueue.next()`, not a `Message`, so the printer brackets
@@ -636,10 +637,15 @@ lines), the hang list with stacks (copy as text), memory events as markers on th
   drawing second's value; with CPU or memory on, the sampler's tick closes the empty second and
   the HUD reads "idle". On iOS it shows tier 1 ("worst stall 84 ms · 3 stalls/10 s") by default;
   tier 2 runs only after the HUD's own "cadence" toggle, labelled "cadence" (display-link
-  callbacks per second, 60 or 120 even while the app is idle), never "fps".
+  callbacks per second, 60 or 120 even while the app is idle), never "fps". A stop hands out no
+  item, so the controller tells the HUD which monitors run (`PerfController.addRunningListener`:
+  at once, then at every start, stop, lease expiry and tail end): a stopped monitor's figures go
+  at once, what it still hands out (a frames second a later tick closes, a sample under way) is
+  ignored, and with none running the HUD reads "perf: off".
 - **Perf tab**: a "Perf" button in the top bar, shown only when a controller is registered:
   monitor switches, summaries, sparklines, the thread list (gates the per-thread scan), "Measure
-  PSS", hangs with stack detail. A rebuild (per closed second, sample or event) formats no stack:
+  PSS", hangs with stack detail. A rebuild (per closed second, sample or event, and when the
+  running set changes) formats no stack:
   a hang's stacks (up to 16 KB of text) are formatted when its row is opened, and a hang whose
   event did not change keeps its row instance, so the open tab costs what changed, not the 100
   retained hangs.
@@ -649,8 +655,8 @@ lines), the hang list with stacks (copy as text), memory events as markers on th
 - Hopi's threads are named `hopi-perf-*` (and `hopi-store`, `hopi-bridge*`); the per-thread list
   labels them, and the CPU series carries Hopi's own share separately.
 - Frames while `HopiScreen` is open are flagged and left out; the HUD's own redraws are bounded
-  (at most one per second, zero when the app is idle) and stated in the HUD's tooltip; the
-  desktop and CLI are the surfaces for clean measurements.
+  (at most one per second and one when a monitor starts or stops, zero when the app is idle) and
+  stated in the HUD's tooltip; the desktop and CLI are the surfaces for clean measurements.
 - No monitor posts work of its own to the main thread while it runs: the main-thread costs are
   the ones the platform calls Hopi for (Android lifecycle callbacks and the input bracket, the iOS
   run-loop observers, iOS tier 2's display link) plus one message at the hang monitor's start and
@@ -673,7 +679,7 @@ lines), the hang list with stacks (copy as text), memory events as markers on th
 | frames, iOS tier 1 | 0 | none | 0 extra (main run-loop iterations only) | 3 C callbacks per iteration, ≤ 0.5 µs together; a Kotlin call per stall only |
 | frames, iOS tier 2 (explicit toggle only) | 0 | none | 60 or 120 main-thread callbacks per second, idle included; keeps a ProMotion panel off its idle rate | ≤ 3 µs per callback; power cost device-only, open |
 | hangs, Android | 0 | `hopi-perf-hang` (default priority) | 0 while the main thread sleeps; ≤ 1 per threshold while busy, plus 1 per idle-to-busy (a lone short unit: 2, its begin's and its deadline's); a remote lease bounds the idle sleep, never blinds it | framework printer strings per message, mix-dependent (gate: 3 µs median over the realistic mix; coroutine resumes may cost more), ~300 B garbage per message; Hopi ≤ 0.2 µs per message; input bracket 2 atomic writes per input event; stack ≤ 2 ms pause per capture |
-| hangs, Android heartbeat (gate or `hangHeartbeat`) | 0 | `hopi-perf-hang` | 2 per `threshold / 2` (watchdog and main), idle included: 8 per second at 250 ms | one empty main-thread message per tick |
+| hangs, Android heartbeat (gate or `hangHeartbeat`) | 0 | `hopi-perf-hang` | 2 per `threshold / 2` (watchdog and main), idle included: 8 per second on each at 250 ms, 16 in all | one empty main-thread message per tick |
 | hangs, iOS | 0 | `hopi-perf-hang` | same as Android's printer path: every main run-loop wake is an idle-to-busy transition, so ≤ 1 per main-thread wake (the simulator's main run loop wakes about 6 times a second with nothing to do, in the noop build too) | ≤ 0.5 µs per run-loop iteration (shared with tier 1); stack ≤ 100 µs suspension |
 | CPU | 0 | `hopi-perf-samp` (shared) | 1 per interval (1 s) | process total ≤ 5 µs per sample; Hopi's share: one thread-CPU call per Hopi thread park; thread scan only while watched, ≤ 5 ms Android (100 threads), ≤ 0.5 ms iOS |
 | memory | 0 | same sampler | same wake | ≤ 50 µs per sample Android (`mallinfo` included), ≤ 5 µs iOS, two small strings; PSS on demand only, stalls faulting app threads while it reads |
@@ -1049,8 +1055,11 @@ Deviations from the design, and why:
   open. The app's eight slots allow it.
 - **`perf status` makes a second request** (a one-point snapshot) for the counts the design's
   status line shows, since `perf.status` carries none; `--json` prints the `perf.status` line only.
-- **The HUD's figures can go stale** after a monitor stops: it updates only when an item arrives,
-  and a stop publishes none. It shows the last values until the next item, never a timer.
+- **The HUD's figures went stale** after a monitor stopped: it updated only when an item arrived,
+  and a stop publishes none, so it kept the last values (forever once nothing ran; frozen CPU and
+  MB beside live fps; "idle" when frames stopped). Fixed after stage 5, still with no timer: the
+  controller announces its running set to listeners and the HUD drops a stopped monitor's figures
+  ("In-app" above; `HudMeterTest`, `PerfHudTest`, `HopiPerfTest`).
 - **No HUD tooltip**: mobile has none. The HUD's own cost is stated in the Perf tab's note and in
   ARCHITECTURE.md.
 - **The cadence switch lives in the Perf tab**, since the HUD takes no touch; the display link runs
@@ -1119,13 +1128,20 @@ printer, so no printer of Hopi's can make it cheaper. Hopi's own share is not se
 here. The target was 3 µs median over the realistic mix: 2x over on plain messages, 10x on
 coroutine resumes.
 
-**The heartbeat, measured as the alternative** (`android-verify-heartbeat.json`, 22 of 26):
-nothing per message (above), but 8.1 wakes per second while the app is idle (the watchdog 239 and
-the main thread 245 in 60 s; the budget's "8 per second at 250 ms") and 90 ms of watchdog CPU per
-minute. It missed the 300 ms hang and read 1001 ms as 853 ms and 601 ms as 578 ms: a unit is seen
-only from the next beat, up to `threshold / 2` (125 ms) late, so a hang just over the threshold
-reads under it. That is its granularity, not a defect. The click burn stayed exact (the input
-bracket does not depend on the printer).
+**The heartbeat, measured as the alternative** (`android-verify-heartbeat.json`, 22 of 26), before
+its cadence was fixed: nothing per message (above), 8.1 wakes per second in all while the app is
+idle (the watchdog 239 and the main thread 245 in 60 s: 4 each, one beat per threshold where the
+design says one per `threshold / 2`) and 90 ms of watchdog CPU per minute. It missed the 300 ms
+hang and read 1001 ms as 853 ms and 601 ms as 578 ms. A unit is seen only from the next beat, so a
+hang reads short by up to one beat period; the 148 ms under-read of the 1001 ms hang is more than
+the 125 ms (`threshold / 2`) the design allows, so it was the defect, not the granularity: after
+each beat the watchdog slept to that beat's deadline, one threshold, before posting the next (a
+beat's end wakes nothing). Fixed after stage 5 (`HangDetectorTest`): until a unit is a hang the
+watchdog looks again within `threshold / 2` (the end of a beat, or of a tap's dispatch, wakes
+nothing), so it beats every `threshold / 2` (8 wakes per second on each thread at 250 ms, 16 in
+all), a hang reads at most 125 ms short, and only one shorter than 1.5 thresholds can be missed
+(2 before). Re-measure pending on the emulator. The click burn stayed exact (the input bracket
+does not depend on the printer).
 
 **Verdict: the printer stays the default** and the heartbeat stays the opt-in
 (`hangHeartbeat`) for an app that needs another tool's printer. The printer is exact (0 to 5 ms),
@@ -1144,7 +1160,7 @@ offers none; `Looper.setObserver` is hidden API).
 | real, nothing started | 0 CPU, 0 wakes | 0 wakes |
 | hangs (printer) | 0 CPU, 0 wakes (the watchdog sleeps untimed) | 0 wakes |
 | frames | 0 CPU, 0 wakes (nothing draws) | 0 wakes |
-| hangs (heartbeat) | `hopi-perf-hang` 239 wakes, 90 ms | 245 wakes, 10 ms |
+| hangs (heartbeat, before its cadence fix) | `hopi-perf-hang` 239 wakes, 90 ms | 245 wakes, 10 ms |
 | CPU and memory | `hopi-perf-samp` 60 wakes, 70 ms | 0 wakes |
 | all four | `hopi-perf-samp` 60 wakes, 70 ms | 0 wakes |
 | CPU alone, memory alone (120 s each) | `hopi-perf-samp` 119 wakes, 100 ms each | 0 wakes |

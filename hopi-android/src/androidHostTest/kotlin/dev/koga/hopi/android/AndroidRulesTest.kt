@@ -14,6 +14,8 @@ import dev.koga.hopi.core.rules.RequestEdit
 import dev.koga.hopi.core.rules.ResponseEdit
 import dev.koga.hopi.core.rules.RuleBody
 import dev.koga.hopi.core.rules.RuleEngine
+import dev.koga.hopi.core.rules.RuleJson
+import dev.koga.hopi.core.rules.RuleParse
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleSpec
@@ -29,6 +31,7 @@ import javax.net.ssl.SSLSocketFactory
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
@@ -81,6 +84,22 @@ class AndroidRulesTest {
     private fun url(vararg args: Pair<String, Any?>): Map<String, Any?> = runScenario("rule.url", store, server.base, extra = mapOf(*args))
 
     private fun one(): HttpTransaction = store.awaitTerminal(1).single()
+
+    /**
+     * Adds a mock of the `/gzip` GET on [source] built from the one record, as both viewers build it
+     * in the app (RuleJson's `fromTransaction`): the record holds the server's gzip bytes under their
+     * `Content-Encoding`, and the mock copies them decoded, without it. `/gzip` decodes to exactly
+     * the 1 MiB body limit, which a mock may hold (only more is refused).
+     */
+    private fun mockGzipFromItsRecord(source: RuleSource) {
+        val record = one()
+        assertEquals(listOf("gzip"), record.responseHeaders.filter { it.first.equals("Content-Encoding", ignoreCase = true) }.map { it.second })
+        assertEquals(listOf(0x1f.toByte(), 0x8b.toByte()), record.responseBody!!.bytes.take(2), "the record holds the gzip bytes")
+        val mock = assertIs<RuleParse.Ok<MockSpec>>(RuleJson.mockFromTransaction(record, status = null, headers = null, body = null)).value
+        assertContentEquals(TestServer.large(), mock.body!!.bytes)
+        assertTrue(mock.headers.none { it.first.equals("Content-Encoding", ignoreCase = true) }, mock.headers.toString())
+        add(rule("GET */gzip", source, mock = mock))
+    }
 
     // OkHttp
 
@@ -277,6 +296,21 @@ class AndroidRulesTest {
     }
 
     @Test
+    fun okHttpMockFromARecordHeldGzippedReachesTheAppDecoded() {
+        // The app names its own Accept-Encoding: OkHttp leaves it the gzip bytes and their Content-Encoding.
+        val gzip = arrayOf("path" to "/gzip", "headers" to mapOf("Accept-Encoding" to "gzip"))
+        @Suppress("UNCHECKED_CAST")
+        assertEquals(listOf("gzip"), (okhttp(*gzip)["headers"] as Map<String, List<String>>)["content-encoding"])
+        mockGzipFromItsRecord(RuleSource.OKHTTP)
+        val mocked = okhttp(*gzip)
+        assertEquals(TestServer.large().decodeToString(), mocked["body"])
+        @Suppress("UNCHECKED_CAST")
+        assertNull((mocked["headers"] as Map<String, List<String>>)["content-encoding"])
+        assertEquals(1, server.received.size)
+        assertEquals("mock", store.awaitTerminal(2).last().ruleApplied)
+    }
+
+    @Test
     fun okHttpRulesOffAppliesNothing() {
         add(rule("GET */json", RuleSource.OKHTTP, mock = MockSpec(500)))
         val observed = runScenario("rule.okhttp", store, server.base, extra = mapOf("path" to "/json", "rules" to false))
@@ -470,6 +504,19 @@ class AndroidRulesTest {
     }
 
     @Test
+    fun urlConnectionBodyEditSentAfterTheEndChangesNothingCountedForIt() {
+        add(rule("POST */echo", RuleSource.URL_CONNECTION, edit = EditSpec(request = RequestEdit(body = RuleBody.text("replacement body")))))
+        val observed = runScenario("urlReplacementAfterEnd", store, server.base)
+        assertEquals("replacement body", observed["written"], "the rule's body still reaches the connection")
+        assertEquals(0L, observed["heldAtEnd"])
+        assertEquals(observed["heldAtEnd"], observed["heldAfter"], "what the store counted for the end does not change after it")
+        val record = one()
+        assertEquals(TransactionState.Failed, record.state)
+        assertEquals("cancelled", record.error)
+        assertNull(record.requestBody, "the record ended before the rule's body went out")
+    }
+
+    @Test
     fun urlConnectionDelayEndsOnDisconnect() {
         add(rule("GET */json", RuleSource.URL_CONNECTION, delay = DelaySpec(beforeRequestMs = 60_000)))
         val observed = url("path" to "/json", "disconnectAfterMs" to 200L)
@@ -533,6 +580,19 @@ class AndroidRulesTest {
         assertEquals(500, record.responseCode)
         assertEquals("edited", record.responseBody!!.bytes.decodeToString())
         assertEquals("edit-response", record.ruleApplied)
+    }
+
+    @Test
+    fun urlConnectionMockFromARecordHeldGzippedReachesTheAppDecoded() {
+        // HttpURLConnection never decodes a gzip the app asked for itself.
+        val gzip = arrayOf("path" to "/gzip", "headers" to mapOf("Accept-Encoding" to "gzip"))
+        assertEquals("gzip", url(*gzip)["contentEncoding"])
+        mockGzipFromItsRecord(RuleSource.URL_CONNECTION)
+        val mocked = url(*gzip)
+        assertEquals(TestServer.large().decodeToString(), mocked["body"])
+        assertNull(mocked["contentEncoding"])
+        assertEquals(1, server.received.size)
+        assertEquals("mock", store.awaitTerminal(2).last().ruleApplied)
     }
 
     @Test

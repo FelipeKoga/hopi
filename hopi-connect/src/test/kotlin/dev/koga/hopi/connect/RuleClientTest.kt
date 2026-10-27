@@ -21,6 +21,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -112,6 +113,36 @@ class RuleClientTest {
             // The budget is per line: the next line's first body is inline again.
             assertTrue(rules.body(request).startsWith("{\"text\":"))
         }
+    }
+
+    @Test
+    fun eachUnsupportedEntrySaysWhetherItsSourceStillAppliesTheRule() {
+        connect().use { client ->
+            val rules = RuleClient(client)
+            fun added(rule: String) = assertNotNull(RemoteRule.decode(rules.add(rule).json))
+            val excluded = added("""{"match":{"path":"/a","sources":["urlsession"]},"edit":{"response":{"status":503}}}""")
+            assertEquals(setOf("urlsession"), excluded.sources)
+            assertEquals(false, excluded.unsupported.single().applies)
+            assertTrue(excluded.inactive)
+            val withKtor = added("""{"match":{"path":"/b","sources":["ktor","urlsession"]},"edit":{"response":{"status":503}}}""")
+            assertEquals("urlsession", withKtor.unsupported.single().source)
+            assertFalse(withKtor.inactive, "Ktor applies it")
+            val redirect = added("""{"match":{"path":"/c","sources":["okhttp"]},"mock":{"status":302}}""")
+            assertEquals(true, redirect.unsupported.single().applies)
+            assertTrue(redirect.unsupported.single().toString().startsWith("okhttp: a mocked 3xx"), "as the CLI warns it")
+            assertFalse(redirect.inactive)
+            // Naming none: checked against this JVM app's sources, Ktor only, which applies it in full.
+            val unnamed = added("""{"match":{"path":"/d"},"edit":{"response":{"status":503}}}""")
+            assertNull(unnamed.sources)
+            assertEquals(emptyList(), unnamed.unsupported)
+            assertFalse(unnamed.inactive)
+        }
+        // An entry without `applies` reads as a stated difference: never an exclusion the app did not report.
+        val bare = assertNotNull(
+            RemoteRule.decode(parse("""{"type":"rule","id":1,"enabled":true,"match":{"sources":["urlsession"],"shorthand":"* */**"},"unsupported":[{"source":"urlsession","reason":"r"}]}""")),
+        )
+        assertEquals(true, bare.unsupported.single().applies)
+        assertFalse(bare.inactive)
     }
 
     @Test

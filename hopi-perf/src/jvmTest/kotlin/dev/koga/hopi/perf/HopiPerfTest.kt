@@ -7,6 +7,7 @@ import dev.koga.hopi.core.perf.PerfResult
 import dev.koga.hopi.core.perf.PerfStartRequest
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -120,6 +121,46 @@ class HopiPerfTest {
         assertEquals(setOf(HopiMonitor.Cpu), HopiPerf.running)
         controller.releaseTail(42)
         assertEquals(emptySet(), HopiPerf.running)
+    }
+
+    /** What the HUD learns a stop from: no item says it, so the controller does. */
+    @Test
+    fun everyChangeOfTheRunningSetIsAnnouncedOnceInOrder() {
+        HopiPerf.install { summaryLog = false }
+        val controller = assertNotNull(PerfHook.controller)
+        val announced = CopyOnWriteArrayList<Set<PerfMonitor>>()
+        val remove = controller.addRunningListener { announced += it }
+        controller.start(PerfStartRequest(setOf(PerfMonitor.CPU)), PerfOwner.Tail(41))
+        // Another owner of a running monitor, or one leaving while another holds it: no change.
+        controller.start(PerfStartRequest(setOf(PerfMonitor.CPU)), PerfOwner.Tail(42))
+        controller.releaseTail(41)
+        controller.start(PerfStartRequest(setOf(PerfMonitor.MEMORY)), PerfOwner.Lease(1))
+        controller.releaseTail(42)
+        // The lease's expiry, on the sampler's thread.
+        val deadline = System.nanoTime() + 4_000_000_000
+        while (announced.last().isNotEmpty() && System.nanoTime() < deadline) Thread.sleep(20)
+        HopiPerf.start {
+            cpu = true
+            summaryLog = false
+        }
+        HopiPerf.stop()
+        remove()
+        HopiPerf.start {
+            cpu = true
+            summaryLog = false
+        }
+        assertEquals(
+            listOf(
+                emptySet<PerfMonitor>(),
+                setOf(PerfMonitor.CPU),
+                setOf(PerfMonitor.CPU, PerfMonitor.MEMORY),
+                setOf(PerfMonitor.MEMORY),
+                emptySet(),
+                setOf(PerfMonitor.CPU),
+                emptySet(),
+            ),
+            announced.toList(),
+        )
     }
 
     @Test

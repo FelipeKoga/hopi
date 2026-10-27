@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,19 +121,49 @@ internal fun TransactionListPane(
         when {
             // Rows are still being built off the main thread: show nothing for that one frame.
             model == null -> Unit
-            model.rows.isEmpty() -> EmptyState(
-                title = if (model.total == 0) "No requests yet" else "No matching requests",
-                hint = if (model.total == 0) {
-                    "Requests made by a client with the Hopi plugin appear here."
-                } else {
-                    "Change the search or the status filter."
-                },
-            )
-            else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                items(model.rows, key = { it.id }, contentType = { "row" }) { row ->
-                    TransactionRowItem(row, colors, onOpen, selected = row.id == selectedId)
+            model.rows.isEmpty() -> {
+                // Emptied (a Clear): the rows that come next start at the top. The state keeps the
+                // cleared rows' position while no list is shown, and the next ones would open there.
+                if (model.total == 0) SideEffect { listState.requestScrollToItem(0) }
+                EmptyState(
+                    title = if (model.total == 0) "No requests yet" else "No matching requests",
+                    hint = if (model.total == 0) {
+                        "Requests made by a client with the Hopi plugin appear here."
+                    } else {
+                        "Change the search or the status filter."
+                    },
+                )
+            }
+            else -> {
+                StayOnNewest(listState, newest = model.rows[0].id)
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    items(model.rows, key = { it.id }, contentType = { "row" }) { row ->
+                        TransactionRowItem(row, colors, onOpen, selected = row.id == selectedId)
+                    }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Keeps a list that is at its top there when newer rows arrive. Rows are keyed by id, and a lazy
+ * list keeps its first visible row in place when rows are added above it, so new requests would
+ * land above the visible area of a list nobody scrolled. A list scrolled away from its top, by hand
+ * or by a desktop selection moved from the keyboard, is left where it is.
+ */
+@Composable
+private fun StayOnNewest(listState: LazyListState, newest: Long) {
+    // After composition, before the new rows are measured: the position read is the one shown with
+    // the previous rows, and the request applies to the measure that brings the new ones. The newest
+    // row is compared with the row last shown, not with the last composition's, so a list that comes
+    // back (from a detail, say) with rows that arrived while it was gone stays on newest too.
+    SideEffect {
+        val shownFirst = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key
+        if (shownFirst != null && shownFirst != newest &&
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        ) {
+            listState.requestScrollToItem(0)
         }
     }
 }

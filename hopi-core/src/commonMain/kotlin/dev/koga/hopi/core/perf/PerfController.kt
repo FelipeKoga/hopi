@@ -167,6 +167,16 @@ public interface PerfController {
     /** A bridge session that started monitors ended: removes only its own owner. */
     public fun releaseTail(session: Long)
 
+    /**
+     * Calls [listener] with the monitors running, at once and then each time that set changes (a
+     * start, a stop, a lease's expiry, a tail session's end), so a viewer of their figures (the
+     * HUD) drops a stopped monitor's. It runs on the changing thread under the controller's lock,
+     * before a started monitor writes and after a stopped one was told to stop, so it must only
+     * hand the set off and never call the controller. Returns the function that removes it. A
+     * controller that does not report the set never calls it.
+     */
+    public fun addRunningListener(listener: (Set<PerfMonitor>) -> Unit): () -> Unit = {}
+
     public fun status(): PerfStatus
 
     /** The top [limit] threads by CPU; null where the platform has no per-thread list. */

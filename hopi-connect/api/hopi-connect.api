@@ -320,15 +320,17 @@ public final class dev/koga/hopi/connect/RemotePerfView$Companion {
 
 public final class dev/koga/hopi/connect/RemoteRule {
 	public static final field Companion Ldev/koga/hopi/connect/RemoteRule$Companion;
-	public fun <init> (JLjava/lang/String;ZILjava/lang/Long;JZLjava/lang/String;Ljava/lang/String;Ljava/util/List;)V
+	public fun <init> (JLjava/lang/String;ZILjava/lang/Long;JZLjava/lang/String;Ljava/util/Set;Ljava/lang/String;Ljava/util/List;)V
 	public final fun getAction ()Ljava/lang/String;
 	public final fun getEnabled ()Z
 	public final fun getExhausted ()Z
 	public final fun getHits ()J
 	public final fun getId ()J
+	public final fun getInactive ()Z
 	public final fun getLabel ()Ljava/lang/String;
 	public final fun getMatch ()Ljava/lang/String;
 	public final fun getPriority ()I
+	public final fun getSources ()Ljava/util/Set;
 	public final fun getTimes ()Ljava/lang/Long;
 	public final fun getUnsupported ()Ljava/util/List;
 }
@@ -413,6 +415,14 @@ public final class dev/koga/hopi/connect/RemoteState$Idle : dev/koga/hopi/connec
 	public static final field INSTANCE Ldev/koga/hopi/connect/RemoteState$Idle;
 	public fun equals (Ljava/lang/Object;)Z
 	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/koga/hopi/connect/RemoteUnsupported {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Z)V
+	public final fun getApplies ()Z
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getSource ()Ljava/lang/String;
 	public fun toString ()Ljava/lang/String;
 }
 

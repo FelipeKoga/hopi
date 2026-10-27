@@ -64,6 +64,8 @@ class HopiRulesTest {
                 setHeader("X-Env", "staging")
             }
             response { status = 503 }
+            // Named: a rule that names no sources is checked against this JVM's only one, Ktor.
+            sources(HopiSource.Ktor, HopiSource.OkHttp, HopiSource.UrlConnection, HopiSource.UrlSession)
         }
         assertEquals(FailKind.TIMEOUT, first(RuleSource.KTOR, "POST", "https://h/upload")?.fail)
         assertEquals(null, first(RuleSource.OKHTTP, "POST", "https://h/upload"), "ktor only")

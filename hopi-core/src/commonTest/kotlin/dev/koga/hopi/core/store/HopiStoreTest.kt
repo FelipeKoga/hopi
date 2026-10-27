@@ -2,6 +2,8 @@ package dev.koga.hopi.core.store
 
 import dev.koga.hopi.core.bytesBody
 import dev.koga.hopi.core.complete
+import dev.koga.hopi.core.model.CapturedBody
+import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.pending
@@ -124,8 +126,11 @@ class HopiStoreTest {
     @Test
     fun anEntryOverTheByteCapKeepsTheBodyThatFitsAlone() = runTest {
         val store = store(maxTotalBytes = 250)
+        // Applied one at a time: queued together they would be a backlog over the byte cap.
         store.submit(complete(1, responseBody = bytesBody(50)))
+        runCurrent()
         store.submit(complete(2, responseBody = bytesBody(200), requestBody = bytesBody(150)))
+        runCurrent()
         store.submit(complete(3, responseBody = bytesBody(260), requestBody = bytesBody(300)))
         runCurrent()
         val two = assertNotNull(store.get(2))
@@ -145,6 +150,8 @@ class HopiStoreTest {
         // small other body is kept whole.
         val store = store(maxTotalBytes = 1600)
         for (id in 1L..5L) store.submit(complete(id, responseBody = bytesBody(100)))
+        // Applied first: queued with the five, the POST would be a backlog over the byte cap.
+        runCurrent()
         store.submit(complete(6, responseBody = bytesBody(800), requestBody = bytesBody(800)))
         runCurrent()
         assertEquals((1L..6L).toList(), store.ids())
@@ -182,6 +189,197 @@ class HopiStoreTest {
         store.submit(complete(11, responseBody = bytesBody(200)))
         runCurrent()
         assertEquals((3L..11L).toList(), store.ids())
+    }
+
+    @Test
+    fun endsQueuedBehindAStoreOfBodiesKeepTheirSizesButNotTheirBytes() = runTest {
+        val store = store(maxTotalBytes = 1000)
+        store.submit(complete(1, responseBody = bytesBody(400)))
+        store.submit(complete(2, responseBody = bytesBody(400)))
+        // The consumer has not run: 800 bytes wait, and this end would make them 1300.
+        assertTrue(store.submit(complete(3, responseBody = bytesBody(400), requestBody = bytesBody(100))), "the end is kept, not rejected")
+        runCurrent()
+        assertEquals(400, store.get(1)?.responseBody?.capturedBytes)
+        assertEquals(400, store.get(2)?.responseBody?.capturedBytes)
+        val behind = assertNotNull(store.get(3))
+        assertEquals(TransactionState.Complete, behind.state)
+        for ((body, size) in listOf(behind.responseBody to 400L, behind.requestBody to 100L)) {
+            assertEquals(HopiStore.SKIPPED_STORE_BACKLOG, body?.skippedReason)
+            assertEquals(0, body?.capturedBytes)
+            assertEquals(size, body?.totalBytes)
+            assertEquals("text/plain", body?.contentType)
+        }
+        assertEquals(0L, store.droppedTerminalWrites.value)
+        // The pass released what waited: the next ends keep their bytes.
+        store.submit(complete(4, responseBody = bytesBody(400)))
+        store.submit(complete(5, responseBody = bytesBody(400)))
+        runCurrent()
+        assertEquals(listOf(400, 400), listOf(4L, 5L).map { store.get(it)?.responseBody?.capturedBytes })
+    }
+
+    @Test
+    fun anEndTheLaneRejectsTakesBackWhatItCounted() = runTest {
+        val store = store(maxTotalBytes = 1000, terminalCapacity = 2)
+        store.submit(complete(1, responseBody = bytesBody(300)))
+        store.submit(complete(2, responseBody = bytesBody(300)))
+        assertEquals(false, store.submit(complete(3, responseBody = bytesBody(300))), "the lane is full")
+        runCurrent()
+        // Had the rejected end left its 300 bytes counted, the second of these would go in without its body.
+        store.submit(complete(4, responseBody = bytesBody(400)))
+        store.submit(complete(5, responseBody = bytesBody(400)))
+        runCurrent()
+        assertEquals(400, store.get(5)?.responseBody?.capturedBytes)
+        assertEquals(1L, store.droppedTerminalWrites.value)
+    }
+
+    /** This start's end as the Ktor plugin and URLSession capture build it: on the start, its request body the same object. */
+    private fun HttpTransaction.endedWith(responseBody: CapturedBody) = completed(200, emptyList(), responseBody, 5, "HTTP/1.1")
+
+    @Test
+    fun anEndBuiltOnAStartTheStoreHoldsCountsOnlyItsResponse() = runTest {
+        // Once the start is in the store, its request body's array is counted there, and not again
+        // behind a consumer that fell behind.
+        val store = store(maxTotalBytes = 1000)
+        val ends = mutableMapOf<Long, HttpTransaction>()
+        store.addEventListener { if (it is TransactionEvent.Completed) ends[it.transaction.id] = it.transaction }
+        val posts = List(2) { pending(it + 1L, method = "POST", body = bytesBody(300)) }
+        // A streamed upload's start has no body: the plugin copies it as it goes out, for the end alone.
+        val uploads = List(2) { pending(it + 3L, method = "POST") }
+        (posts + uploads).forEach(store::submit)
+        runCurrent()
+        // As the Ktor plugin builds an end, then as URLSession capture does: 600 bytes queued, not 1200.
+        store.submit(posts[0].endedWith(bytesBody(300)))
+        store.submit(posts[1].copy(finalUrl = "https://api.example.com/moved", ruleId = 7, ruleApplied = "delay").endedWith(bytesBody(300)))
+        // Each upload's bodies are its own: 1000, then 1400.
+        for (upload in uploads) store.submit(upload.copy(requestBody = bytesBody(300)).endedWith(bytesBody(100)))
+        runCurrent()
+        for (post in posts) {
+            val end = assertNotNull(ends[post.id])
+            assertSame(post.requestBody, end.requestBody, "end ${post.id} keeps its start's request body")
+            assertEquals(300, end.responseBody?.capturedBytes, "end ${post.id} keeps its response")
+        }
+        assertEquals(400L, ends[3L]?.capturedBytes)
+        val behind = assertNotNull(ends[4L])
+        assertEquals(listOf(HopiStore.SKIPPED_STORE_BACKLOG, HopiStore.SKIPPED_STORE_BACKLOG), listOf(behind.requestBody?.skippedReason, behind.responseBody?.skippedReason))
+        // The pass released exactly what was counted: with nothing queued, 600 bytes fit and 600 more do not.
+        store.submit(complete(5, responseBody = bytesBody(600)))
+        store.submit(complete(6, responseBody = bytesBody(600)))
+        runCurrent()
+        assertEquals(600, store.get(5)?.responseBody?.capturedBytes)
+        assertEquals(HopiStore.SKIPPED_STORE_BACKLOG, store.get(6)?.responseBody?.skippedReason)
+    }
+
+    @Test
+    fun anEndShedWhileItsStartWaitedKeepsTheRequestBodyTheStartHolds() = runTest {
+        // Nobody watching: the starts wait in their lane, so each end behind the consumer counts its
+        // request body too, and the third and fourth go in without their bodies. Applied after their
+        // starts, they keep the request body each start holds: the same array, which letting go freed nothing.
+        val store = store(maxTotalBytes = 1000, viewer = false)
+        val posts = List(4) { pending(it + 1L, method = "POST", body = bytesBody(100)) }
+        for ((index, post) in posts.withIndex()) {
+            store.submit(post)
+            // As the Ktor plugin builds an end, then as URLSession capture does.
+            store.submit((if (index % 2 == 0) post else post.copy(finalUrl = "https://api.example.com/moved")).endedWith(bytesBody(300)))
+        }
+        // An upload's body, copied for its end alone, has no start to keep it: it goes for good.
+        store.submit(pending(5, method = "POST"))
+        store.submit(complete(5, responseBody = bytesBody(300), requestBody = bytesBody(100)))
+        runCurrent()
+        for (post in posts) assertSame(post.requestBody, store.get(post.id)?.requestBody, "end ${post.id} keeps its start's request body")
+        for (id in 3L..4L) {
+            val response = assertNotNull(store.get(id)?.responseBody)
+            assertEquals(HopiStore.SKIPPED_STORE_BACKLOG, response.skippedReason)
+            assertEquals(300L, response.totalBytes)
+        }
+        assertEquals(HopiStore.SKIPPED_STORE_BACKLOG, store.get(5)?.requestBody?.skippedReason)
+    }
+
+    /** A recorder's record holding [bytes] of captures for its end until the store sheds them. */
+    private class HeldRecord(private val id: Long, private val bytes: Int) : HopiStore.DeferredRecord {
+        var shed = false
+            private set
+
+        override fun pendingSnapshot() = pending(id)
+
+        override fun terminalSnapshot() = complete(id, responseBody = if (shed) null else bytesBody(bytes))
+
+        override fun heldBytes(): Long = if (shed) 0L else bytes.toLong()
+
+        override fun shedBodies() {
+            shed = true
+        }
+    }
+
+    @Test
+    fun aQueuedRecordLetsGoOfItsCapturesOnlyBehindAStoreOfBodies() = runTest {
+        val store = store(maxTotalBytes = 1000)
+        val records = List(3) { HeldRecord(it + 1L, 400) }
+        for (record in records) {
+            store.submitStart(record)
+            store.submitEnd(record)
+        }
+        assertEquals(listOf(false, false, true), records.map { it.shed })
+        runCurrent()
+        assertEquals(400, store.get(2)?.responseBody?.capturedBytes)
+        // Released by the pass that applied them, the store builds and asks it again.
+        val next = HeldRecord(4, 400)
+        store.submitEnd(next)
+        assertEquals(false, next.shed)
+        runCurrent()
+        assertEquals(400, store.get(4)?.responseBody?.capturedBytes)
+    }
+
+    @Test
+    fun aWithdrawnRecordWhoseStartNobodySawLeavesNoTrace() = runTest {
+        val store = store(viewer = false)
+        val events = mutableListOf<TransactionEvent>()
+        store.addEventListener { events += it }
+        store.submit(pending(1))
+        assertTrue(store.withdraw(pending(1).failed("withdrawn", 5)))
+        runCurrent()
+        assertEquals(emptyList(), store.ids())
+        assertEquals(emptyList(), events, "its start and its withdrawal were applied in one pass, before anything was published")
+        // Its start arriving late (the lanes can reorder them) brings nothing back.
+        store.submit(pending(1))
+        store.submit(complete(2))
+        runCurrent()
+        assertEquals(listOf(2L), store.ids())
+        assertEquals(listOf(2L), events.map { it.transaction.id })
+    }
+
+    @Test
+    fun aWithdrawnRecordWhoseStartAViewerSawEndsThereAndIsNotKept() = runTest {
+        val store = store()
+        val events = mutableListOf<TransactionEvent>()
+        store.addEventListener { events += it }
+        store.submit(pending(1))
+        runCurrent()
+        assertEquals(listOf(1L), store.ids(), "the viewer shows the start")
+        store.withdraw(pending(1).failed("withdrawn", 5))
+        runCurrent()
+        assertEquals(emptyList(), store.ids())
+        assertNull(store.get(1))
+        assertEquals(2, events.size)
+        assertIs<TransactionEvent.Started>(events[0])
+        val end = assertIs<TransactionEvent.Completed>(events[1])
+        assertEquals(TransactionState.Failed, end.transaction.state)
+        assertEquals("withdrawn", end.transaction.error)
+    }
+
+    @Test
+    fun withNoViewerAWithdrawalPublishesNothingForAStartAnEarlierPassApplied() = runTest {
+        val store = store(viewer = false)
+        val events = mutableListOf<TransactionEvent>()
+        store.addEventListener { events += it }
+        store.submit(pending(1))
+        // Another request's end applies the start that waited: it is in the store, and nobody watches.
+        store.submit(complete(2))
+        runCurrent()
+        assertEquals(listOf(1L, 2L), store.ids())
+        store.withdraw(pending(1).failed("withdrawn", 5))
+        runCurrent()
+        assertEquals(listOf(2L), store.ids())
+        assertEquals(listOf(1L, 2L), events.map { it.transaction.id }, "no end for the withdrawn record")
     }
 
     @Test
@@ -351,6 +549,20 @@ class HopiStoreTest {
         store.includeRedaction(Redactor.Disabled)
         assertTrue(store.redactor.isRedactedHeader("x-api-key"))
         assertTrue(store.redactor.isRedactedHeader("Authorization"))
+    }
+
+    @Test
+    fun theRedactorFlowFollowsEveryGrowth() = runTest {
+        val store = store()
+        assertSame(Redactor.Default, store.redactors.value)
+        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Api-Key")))
+        assertSame(store.redactor, store.redactors.value)
+        assertTrue(store.redactors.value.isRedactedHeader("x-api-key"))
+        // A registration that adds nothing leaves both as they were.
+        val grown = store.redactor
+        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Api-Key")))
+        assertSame(grown, store.redactor)
+        assertSame(grown, store.redactors.value)
     }
 
     @Test

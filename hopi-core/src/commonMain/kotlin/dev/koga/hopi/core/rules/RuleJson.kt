@@ -99,10 +99,28 @@ public object RuleJson {
      * A mock built in the app from record [from]'s response (status, headers minus the ones a mock
      * may not give, body), each field overridden by the given one when not null. The record's
      * values never cross the bridge for it, so redaction never ends up inside a mock. A response
-     * body that is truncated or skipped cannot be the source of a mock body.
+     * body that is truncated or skipped cannot be the source of a mock body, and one the record
+     * holds encoded is copied decoded, as a mock is delivered (see [encodedBodyRefusal]).
      */
     public fun mockFromTransaction(from: HttpTransaction, status: Int?, headers: List<Pair<String, String>>?, body: RuleBody?): RuleParse<MockSpec> =
         parsing { fromTransaction(from, status, headers, body) }
+
+    /**
+     * Why record [from]'s response body cannot be copied into a mock because of the encoding it is
+     * held in, or null. An OkHttp or `HttpURLConnection` record of a request that named its own
+     * `Accept-Encoding` holds the server's bytes: a single gzip or deflate is decoded for the copy,
+     * any other encoding is refused. A host viewer's summary carries no headers, so for it the app
+     * refuses on the tap.
+     */
+    public fun encodedBodyRefusal(from: HttpTransaction): String? {
+        if ((from.responseBody?.reportedBytes ?: 0L) == 0L) return null
+        return encodingRefusal(heldCodings(from))
+    }
+
+    private fun encodingRefusal(codings: List<String>): String? = when {
+        codings.isEmpty() || codings.size == 1 && codings[0] in DECODABLE_CODINGS -> null
+        else -> "response body is encoded (Content-Encoding: ${codings.joinToString(", ")})"
+    }
 
     private fun fromTransaction(from: HttpTransaction, status: Int?, headers: List<Pair<String, String>>?, body: RuleBody?): MockSpec {
         val code = from.responseCode ?: fail("mock.fromTransaction: transaction ${from.id} has no response")
@@ -111,13 +129,25 @@ public object RuleJson {
             body != null -> body
             recorded == null || recorded.bytes.isEmpty() && (recorded.totalBytes ?: 0L) == 0L && recorded.skippedReason == null -> null
             recorded.truncated || recorded.skippedReason != null -> fail("mock.fromTransaction: response body not held in full")
-            else -> RuleBody(recorded.bytes)
+            else -> RuleBody(copiedBody(from, recorded.bytes))
         }
         return MockSpec(
             status = status ?: code,
             headers = headers ?: from.responseHeaders.filter { it.first.lowercase() !in NOT_COPIED },
             body = fromBody,
         )
+    }
+
+    /** The body a mock copies from record [from]: its held [bytes], decoded when the record holds them encoded. */
+    private fun copiedBody(from: HttpTransaction, bytes: ByteArray): ByteArray {
+        val codings = heldCodings(from)
+        encodingRefusal(codings)?.let { fail("mock.fromTransaction: $it; give a body") }
+        val coding = codings.singleOrNull() ?: return bytes
+        val decoded = decodeBody(coding, bytes, RuleLimits.MAX_BODY_BYTES) ?: fail("mock.fromTransaction: response body does not decode as $coding; give a body")
+        if (decoded.size > RuleLimits.MAX_BODY_BYTES) {
+            throw RuleFailure(RuleError(RuleErrorCode.LIMIT, "mock.fromTransaction: decoded response body larger than ${RuleLimits.MAX_BODY_BYTES} bytes"))
+        }
+        return decoded
     }
 
     private fun Parsing.requestEdit(edit: Map<String, Any?>, field: String, context: RuleJsonContext): RequestEdit {

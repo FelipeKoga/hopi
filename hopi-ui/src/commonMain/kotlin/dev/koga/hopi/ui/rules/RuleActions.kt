@@ -10,6 +10,10 @@ import dev.koga.hopi.core.rules.RuleParse
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSpec
 import dev.koga.hopi.core.rules.UrlParts
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** One rule button of the detail: [run] when [refusal] is null, else disabled with [refusal] shown. */
 internal class RuleAction(val run: () -> Unit, val refusal: String?)
@@ -37,7 +41,7 @@ internal fun exactMatchOf(transaction: HttpTransaction): MatchSpec? {
 internal fun mockRefusal(transaction: HttpTransaction): String? = when {
     transaction.state != TransactionState.Complete || transaction.responseCode == null -> "no response to mock"
     !heldInFull(transaction.responseBody) -> "response body not held in full"
-    else -> null
+    else -> RuleJson.encodedBodyRefusal(transaction)
 }
 
 /** In the app, [heldInFull] also needs the bytes here; a host viewer's summary says what the app holds. */
@@ -57,12 +61,22 @@ internal sealed interface InAppOutcome {
 
 /**
  * The in-app screen's rule buttons for [transaction], over the app's own [RuleEngine] (the
- * screen's process is the app's). Rules switched off in every recorder disable it.
+ * screen's process is the app's). Rules switched off in every recorder disable it. The mock is
+ * built on [dispatcher], off the main thread (a body the record holds encoded is decoded for it),
+ * and [onOutcome] is called back in [scope].
  */
-internal fun inAppRuleActions(transaction: HttpTransaction, onOutcome: (InAppOutcome) -> Unit): RuleActions {
+internal fun inAppRuleActions(
+    transaction: HttpTransaction,
+    scope: CoroutineScope,
+    dispatcher: CoroutineDispatcher,
+    onOutcome: (InAppOutcome) -> Unit,
+): RuleActions {
     val off = if (RuleEngine.rulesAvailable) null else "rules are off in this app (rules = false)"
     return RuleActions(
-        mock = RuleAction({ onOutcome(mockInApp(transaction)) }, off ?: mockRefusal(transaction) ?: if (exactMatchOf(transaction) == null) "URL cannot be matched" else null),
+        mock = RuleAction(
+            { scope.launch { onOutcome(withContext(dispatcher) { mockInApp(transaction) }) } },
+            off ?: mockRefusal(transaction) ?: if (exactMatchOf(transaction) == null) "URL cannot be matched" else null,
+        ),
     )
 }
 
@@ -71,7 +85,8 @@ internal fun mockInApp(transaction: HttpTransaction): InAppOutcome {
     val match = exactMatchOf(transaction) ?: return InAppOutcome.Refused("URL cannot be matched")
     val mock = when (val parsed = RuleJson.mockFromTransaction(transaction, status = null, headers = null, body = null)) {
         is RuleParse.Ok -> parsed.value
-        is RuleParse.Failed -> return InAppOutcome.Refused(parsed.error.message)
+        // Without the bridge's wording: the field the desktop and the CLI send, and a body to give, which the phone has no editor for.
+        is RuleParse.Failed -> return InAppOutcome.Refused(parsed.error.message.removePrefix("mock.fromTransaction: ").removeSuffix("; give a body"))
     }
     return when (val result = RuleEngine.add(RuleSpec(match, label = "from #${transaction.id}", mock = mock))) {
         is RuleResult.Ok -> InAppOutcome.Mocked(result.rule.id)

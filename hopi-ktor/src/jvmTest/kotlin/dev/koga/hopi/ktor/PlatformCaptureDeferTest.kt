@@ -1,7 +1,10 @@
 package dev.koga.hopi.ktor
 
 import dev.koga.hopi.core.capture.PlatformCapture
+import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.model.TransactionSource
+import dev.koga.hopi.core.model.TransactionState
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -13,13 +16,20 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
+import io.ktor.utils.io.ByteReadChannel
+import java.io.IOException
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 
 /**
  * One record per request: when a platform recorder covers the client's engine (URLSession capture
@@ -106,6 +116,63 @@ class PlatformCaptureDeferTest {
             delay(200)
             assertEquals(emptyList(), t.store.transactions.value)
             assertEquals(listOf<String?>(null), markers)
+        }
+    }
+
+    @Test
+    fun aRequestTheEngineHasWhenItsEngineBecomesCoveredIsWithdrawnNotRecordedTwice() = runBlocking<Unit> {
+        TestStore().use { t ->
+            val events = ConcurrentLinkedQueue<TransactionEvent>()
+            t.store.addEventListener { events += it }
+            val payload = asciiBytes(100_000)
+            val client = mockClient(t.store) { request ->
+                // URLSession capture's start() while the engine has the request: its hook may see it.
+                if (request.url.encodedPath == "/in-flight") PlatformCapture.cover(mockEngine)
+                // No Content-Length: the body is teed, and its end would come before the call returns.
+                respond(ByteReadChannel(payload), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/plain"))
+            }
+            assertContentEquals(payload, client.get("https://api.example.com/in-flight").bodyAsBytes())
+            delay(200)
+            assertEquals(emptyList(), t.store.transactions.value, "the plugin kept a record the platform recorder may also have")
+            assertEquals(emptyList(), events.toList(), "nobody watched: nothing of the withdrawn record went out")
+
+            // A failure before any response is withdrawn the same way.
+            PlatformCapture.resetForTests()
+            val failing = mockClient(t.store) {
+                PlatformCapture.cover(mockEngine)
+                throw IOException("connection reset")
+            }
+            assertFailsWith<Throwable> { failing.get("https://api.example.com/reset") }
+            delay(200)
+            assertEquals(emptyList(), t.store.transactions.value)
+
+            // The next request of an engine still not covered is the plugin's, as before.
+            PlatformCapture.resetForTests()
+            client.get("https://api.example.com/after").bodyAsBytes()
+            assertEquals("https://api.example.com/after", t.awaitTerminal().single().url)
+        }
+    }
+
+    @Test
+    fun aWithdrawnRequestAViewerShowedPendingEndsThereWithTheReason() = runBlocking<Unit> {
+        TestStore().use { t ->
+            t.store.attachViewer()
+            val ends = Channel<HttpTransaction>(Channel.UNLIMITED)
+            t.store.addEventListener { if (it is TransactionEvent.Completed) ends.trySend(it.transaction) }
+            val client = mockClient(t.store) {
+                // The viewer has shown the request pending before the platform recorder starts.
+                withTimeout(10_000) { t.store.transactions.first { it.isNotEmpty() } }
+                PlatformCapture.cover(mockEngine)
+                respond("ok", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/plain"))
+            }
+            assertEquals("ok", client.get("https://api.example.com/watched").bodyAsText())
+            val end = withTimeout(10_000) { ends.receive() }
+            assertEquals(TransactionState.Failed, end.state)
+            assertEquals(WITHDRAWN, end.error)
+            assertEquals(TransactionSource.KTOR, end.source)
+            delay(200)
+            assertEquals(emptyList(), t.store.transactions.value, "the withdrawn record is not kept")
+            assertTrue(ends.tryReceive().isFailure, "one end only")
         }
     }
 

@@ -160,7 +160,20 @@ an observable difference). A mock never touches the network: no DNS, no connecti
 the rejected ones, body), overridable field by field; the record's values never cross the bridge
 for it, so redaction never ends up inside a mock. A record whose response body is truncated or
 skipped cannot be the source of a mock body (`BAD_REQUEST`, "response body not held in full"). The
-copied body counts toward the rule body limits like any other.
+copied body counts toward the rule body limits like any other. It is copied decoded, as every mock
+is delivered, when the record shows it encoded: an OkHttp or `HttpURLConnection` record of a
+request that named its own `Accept-Encoding` holds the server's bytes under their
+`Content-Encoding`. A single `gzip`, `x-gzip` or `deflate` (zlib or bare) is decoded in the app;
+decoding stops one byte past the 1 MiB body limit (`LIMIT`), into an array that doubles up to that
+size and never past it, so a small body that decodes to far more costs no more than one at the
+limit: about 2 MiB held at once, at most. Any other encoding, or several stacked, is refused
+(`BAD_REQUEST`, "response body is encoded (Content-Encoding: br); give a body"), and so are bytes
+that do not decode; a `body` given with `fromTransaction` is used instead of the copy. "Mock this
+response" in both viewers is disabled with that reason when the record's headers show such an
+encoding. The app's own screen builds the copy off the main thread, and shows a refusal only
+decoding finds without the bridge's wording ("Response body does not decode as gzip"). A Ktor or
+URLSession record keeps the raw headers over what the app received after any decoder, so they do
+not tell, and it is copied as held.
 
 **Follow-ups of a mocked status.** A mock is delivered at the recorder's position, so only the
 follow-up logic above that position sees it: on Ktor, `HttpRedirect`, `HttpRequestRetry` and `Auth`
@@ -717,9 +730,17 @@ A rule object on the wire:
 ```
 
 At most one of `mock`, `fail`, `edit`; a rule with none needs a non-zero delay. A reply's rule
-object adds `id`, `hits`, `exhausted`, and `unsupported` (a list of `{"source","reason"}` for every
-source in the rule's `sources` that cannot apply its action, from the capability table, so the CLI
-warns at once instead of the rule silently never matching there). Bodies are echoed only as
+object adds `id`, `hits`, `exhausted`, and `unsupported` (a list of `{"source","reason","applies"}`
+for every source in the rule's `sources` that cannot apply all or part of its action, from the
+capability table, so the CLI warns at once instead of the rule silently never matching there).
+`applies` is false for an exclusion (the source never gets the rule: a response edit on URLSession)
+and true for a stated difference (a mocked 3xx not followed). A rule that names no sources is
+checked against the sources that can record on the app's platform (`platformSources`, an
+expect/actual set beside `Capabilities`: Ktor, OkHttp and `HttpURLConnection` on Android; Ktor and
+URLSession on iOS; Ktor on a plain JVM),
+so an Android app is never told what URLSession cannot do; the per-source arrays still cover every
+source. Ktor is on every platform and excludes nothing, so only a rule whose named sources all
+exclude it applies nowhere (`Capabilities.appliesNowhere`). Bodies are echoed only as
 `{"bytes":N}`, and header values (match predicates, mock and edit headers) through
 the store's redactor, like every other outward value.
 
@@ -802,17 +823,41 @@ A Rules panel (⌘L) beside the list: rows with id, an enable toggle, match, act
 a file chooser, uploaded as a blob); remove, clear. The detail pane gains "Mock this response"
 (a `rules.add` with `fromTransaction`, method plus scheme, host and path of the record, editable
 before sending). The panel
-lists on connect, re-lists on each `{"type":"rules"}` notice of its tail, and counts hits locally
-from the `rule` field of the summaries its tail brings, so nothing polls. `unsupported` entries show
-as a warning line under the row. All of it goes through `hopi-connect`, which gains the commands,
-the blob upload and `BridgeDecoder` support for the rule line and the new fields.
+lists on connect and re-lists on each `{"type":"rules"}` notice of its tail. Its hits are only
+ever the app's: a summary with a `rule` field the last list may not include lists again, instead
+of being counted on top of it (the list replies on the request connection and the summaries come
+on the tail, in no order between the two, so a local count could add a hit the list already had);
+so does a `get` reply with one (a selected row, an export), which can bring a URLSession record's
+mark before the tail does. "May not include" is an id above the highest the viewer had seen (from
+the tail or a `get`) when that list was asked for (Ktor, OkHttp and `HttpURLConnection` claim a
+rule before the record's id exists), once per request, or a mark that appears only now on an id the
+viewer held without one, or did not hold at all (URLSession claims a mock or fail when the task
+starts loading, after its record started). It applies from the moment the link is up, so a ruled
+request recorded just after the app wrote the first list of a connect costs one more list, not a
+hit short. Lists coalesce: a burst of
+ruled requests costs at most one `rules.list` in flight and one queued (while ruled requests keep
+coming, one list per round trip), a quiet app none, and nothing polls. Each `unsupported` entry the app reported shows under the row: an exclusion as its
+own line in full contrast, "not applied on urlsession: …", a stated difference as a muted warning
+line. A rule whose named sources all exclude it reads "inactive" after its hits, its match dimmed
+and its switch as set; a rule naming none never does, since the line does not say which sources
+the app's platform has. All of it goes through `hopi-connect`, which gains the commands, the blob
+upload and `BridgeDecoder` support for the rule line and the new fields.
 
 ### In-app screen (`hopi-ui`)
 
 A "Rules" entry in the inspector's top bar opens a list: one row per rule (match, action, hits,
-an enable switch), remove per row, "Remove all". The detail screen gains "Mock this response"
+an enable switch), remove per row, "Remove all". Each `unsupported` entry shows under the row as
+in the desktop panel (an exclusion as "not applied on urlsession: …" in full contrast, a stated
+difference as a muted warning), and a rule that every source it is checked against excludes (the
+named ones, or the platform's when it names none: `Capabilities.appliesNowhere`) reads "inactive".
+That is not every rule that never applies: on iOS with URLSession capture, a response edit or a
+before-response delay that names no sources reads active (Ktor is one of the platform's sources and
+excludes nothing, though its plugin defers to URLSession for the Darwin engine), its "not applied
+on urlsession" line the only sign; a rule naming only sources the platform lacks (okhttp on iOS)
+gets no line at all. The detail screen gains "Mock this response"
 (creates an enabled rule from the record, exact method, scheme, host and path, `times` unset, with
-a confirmation that offers Undo; disabled with the reason when the body is not held in full). There is no rule editor in the app: phones are a
+a confirmation that offers Undo; disabled with the reason when the body is not held in full or is
+held in an encoding a mock does not decode, see Mock). There is no rule editor in the app: phones are a
 poor place to type globs and headers; the CLI and the desktop panel are. The list is read from
 `RuleEngine` only while the screen is composed (a `revision` flow the engine emits on publish), so
 the closed screen costs nothing. No public API change: `HopiScreen` and `HopiLauncher` are
@@ -962,7 +1007,10 @@ Base check (every item runs in it unless marked):
   proof receives `hello` only),
   an older app without `hello.rules`, an older CLI's `list`/`tail` against a new app's lines.
 - **Desktop and UI** (`:hopi-desktop:test`, `:hopi-ui:jvmTest`): the panel's list, toggle, add,
-  remove and local hit counts against a JVM bridge; the in-app rules list and "Mock this response".
+  remove, exclusion lines and hit counts against a JVM bridge (`:hopi-connect:test` holds the
+  counts to the engine's: a hit a list already counted, a marked backlog on connect, a mark that
+  comes only with the end, a burst with a list in the middle); the in-app rules list and "Mock this
+  response".
 
 ## Device verification plan
 

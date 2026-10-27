@@ -232,7 +232,8 @@ private fun ms(value: Double): String = "${value.roundToLong()} ms"
 
 /**
  * The tab's model for [controller], rebuilt on [formatDispatcher] while the tab is composed: at
- * once, after each of its own actions ([revision]), and when the model hands its listeners a closed
+ * once, after each of its own actions ([revision]), when the running set changes (a CLI, a bridge
+ * or app code started or stopped a monitor), and when the model hands its listeners a closed
  * second, a sample, a hang, a stall or a memory event (never a frame or a jank event; a rebuild
  * still running absorbs the ones that arrive meanwhile). No timer: an idle app rebuilds nothing.
  */
@@ -247,6 +248,7 @@ internal fun rememberPerfPaneModel(
     val remove = controller.data.addListener { item ->
         if (item is FrameSecond || item is PerfSample || item is HangEvent || item is StallEvent || item is MemoryEvent) changed.trySend(Unit)
     }
+    val removeRunning = controller.addRunningListener { changed.trySend(Unit) }
     try {
         launch { snapshotFlow { revision() }.collect { changed.trySend(Unit) } }
         changed.receiveAsFlow().collectLatest {
@@ -254,6 +256,7 @@ internal fun rememberPerfPaneModel(
             value = withContext(formatDispatcher) { perfPaneModel(controller, threads, previous = previous) }
         }
     } finally {
+        removeRunning()
         remove()
     }
 }

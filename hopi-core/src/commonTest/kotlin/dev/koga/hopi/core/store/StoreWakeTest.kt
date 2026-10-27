@@ -1,5 +1,6 @@
 package dev.koga.hopi.core.store
 
+import dev.koga.hopi.core.bytesBody
 import dev.koga.hopi.core.complete
 import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.model.TransactionState
@@ -186,6 +187,20 @@ class StoreWakeTest {
         store.submit(complete(5))
         waitFor("the flood") { (1L..5L).all { store.get(it) != null } }
         assertEquals(0, store.droppedTerminalWrites.value)
+    }
+
+    @Test
+    fun halfAStoreOfQueuedBodiesWakesTheConsumerOutOfItsDoze() {
+        // A consumer dozing through a burst of large ends would otherwise leave the later ones
+        // without their bodies (a backlog over the byte cap) while it could have kept up.
+        val store = HopiStore(maxTotalBytes = 1000, batchWindowMillis = 60_000).also { batched = it }
+        store.firstOfBurst(1)
+        store.submit(complete(2, responseBody = bytesBody(300)))
+        runBlocking { delay(100) }
+        assertEquals(null, store.get(2), "less than half the byte cap woke the consumer")
+        store.submit(complete(3, responseBody = bytesBody(300)))
+        waitFor("the bodies") { store.get(2) != null && store.get(3) != null }
+        assertEquals(300, store.get(3)?.responseBody?.capturedBytes)
     }
 
     @Test

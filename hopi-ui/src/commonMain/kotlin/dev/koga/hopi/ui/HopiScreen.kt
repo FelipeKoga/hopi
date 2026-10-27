@@ -141,9 +141,10 @@ internal fun HopiScreen(
         val list by rememberListModel(store, query, { filter }, rowCache, formatDispatcher)
         val detail by rememberDetailState(store, selectedId, formatter, formatDispatcher)
         val model = (detail as? DetailState.Ready)?.model
+        val scope = rememberCoroutineScope()
         val rules = remember(store, model) {
             model?.let { m ->
-                inAppRuleActions(m.transaction) { outcome ->
+                inAppRuleActions(m.transaction, scope, formatDispatcher) { outcome ->
                     toast = when (outcome) {
                         is InAppOutcome.Mocked -> Toast("Mock rule #${outcome.ruleId} added", action = "Undo") { RuleEngine.remove(outcome.ruleId) }
                         is InAppOutcome.Refused -> Toast(outcome.message.replaceFirstChar { it.uppercase() })
@@ -261,7 +262,8 @@ internal fun rememberListModel(
         // The list on screen is a viewer: requests in flight show as pending the moment they start.
         val detachViewer = store.attachViewer()
         try {
-            val rows = store.transactions
+            // A redactor that grew (another client installed the plugin) rebuilds the rows at once.
+            val rows = combine(store.transactions, store.redactors) { transactions, _ -> transactions }
                 .map { rowCache.rowsFor(it, store.redactor) }
                 .conflate()
                 .flowOn(formatDispatcher)
@@ -287,9 +289,8 @@ internal fun rememberDetailState(
     value = null
     val id = selectedId ?: return@produceState
     // The store's redactor grows when another client installs the plugin: a new redactor is a
-    // change too, so headers it now redacts do not stay readable on an open detail.
-    store.transactions
-        .map { store.get(id) to store.redactor }
+    // change too, at once, so headers it now redacts do not stay readable on an open detail.
+    combine(store.transactions, store.redactors) { _, _ -> store.get(id) to store.redactor }
         .distinctUntilChanged { old, new -> old.first === new.first && old.second === new.second }
         .collectLatest { (transaction, redactor) ->
             value = if (transaction == null) {
@@ -340,7 +341,9 @@ internal fun rememberDetailActions(
         }
         DetailActions(
             copyCurl = { model?.let { m -> copy("cURL", ::curlBodyWasCut) { curlOf(m.transaction, store.redactor) } } },
-            copyUrl = { model?.let { m -> copy("URL") { m.url } } },
+            // The redactor in force now, not the one the model was built with: it grows when another
+            // client installs the plugin, and the clip never waits for the open detail to follow it.
+            copyUrl = { model?.let { m -> copy("URL") { store.redactor.url(m.transaction.url) } } },
             copyBody = {
                 (model?.response?.body as? BodyView.Text)?.let { body ->
                     // One character more than the cap, so the copy knows it was cut.

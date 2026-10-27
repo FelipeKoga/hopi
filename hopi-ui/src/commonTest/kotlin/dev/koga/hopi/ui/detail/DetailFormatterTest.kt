@@ -258,6 +258,16 @@ class DetailFormatterTest {
     }
 
     @Test
+    fun theShareTextAppliesTheRedactorInForceAtShareTime() = runTest {
+        val transaction = complete(1, url = "https://api.example.com/items?token=t-123")
+        // Built before another installation added `token` to the store's redaction.
+        val model = DetailFormatter().model(transaction, Redactor.Default)
+        val share = shareTextOf(model, Redactor.create(queryParameters = listOf("token")))
+        assertTrue(share.startsWith("GET https://api.example.com/items?token=${Redactor.REDACTED}\n"), share)
+        assertTrue("t-123" !in share, share)
+    }
+
+    @Test
     fun theOverviewNamesTheRule() = runTest {
         val model = DetailFormatter().model(complete(2).copy(ruleId = 3, ruleApplied = "delay,mock"), Redactor.Default)
         assertEquals("#3: delay, mock", model.overview.single { it.label == "Rule" }.value)

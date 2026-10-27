@@ -126,10 +126,16 @@ class RuleCliTest {
 
     @Test
     fun unsupportedSourcesAreWarnedOnStderr() {
-        val run = cli("edit", "add", "--match", "*/v1/**", "--status", "503", "--json")
+        val run = cli("edit", "add", "--match", "*/v1/**", "--status", "503", "--source", "ktor,urlsession", "--json")
         assertEquals(ExitCode.OK, run.exitCode, run.toString())
-        assertEquals("rule", json(run.lines.single())["type"]?.jsonPrimitive?.content)
+        val rule = json(run.lines.single())
+        assertEquals("rule", rule["type"]?.jsonPrimitive?.content)
+        assertEquals("false", rule["unsupported"]?.jsonArray?.single()?.jsonObject?.get("applies")?.jsonPrimitive?.content)
         assertTrue(run.stderr.startsWith("hopi: warning: urlsession: response edits are unsupported"), run.stderr)
+        // Naming no sources: checked against the app's platform, here a JVM, whose only source (Ktor) applies it.
+        val unnamed = cli("edit", "add", "--match", "*/v2/**", "--status", "503")
+        assertEquals(ExitCode.OK, unnamed.exitCode, unnamed.toString())
+        assertEquals("", unnamed.stderr)
     }
 
     @Test

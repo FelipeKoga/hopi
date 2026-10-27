@@ -136,6 +136,11 @@ public object UrlSessionCapture {
             injectedStore = injectedStore,
         )
         target.store(Target(installed.store, installed.maxBodyBytes))
+        // From now on the Ktor plugin leaves Darwin clients' requests to this capture. Covered before
+        // the hooks go live: a request the plugin finds still uncovered once the engine answered was
+        // resumed before them, so a Ktor request in flight across this call is recorded once or
+        // missed, never twice (the plugin withdraws its record when it finds the engine covered).
+        PlatformCapture.cover(KTOR_DARWIN_ENGINE_PACKAGE)
         val result = hopi_us_start(installed.maxBodyBytes.toLong(), staticCFunction(::captureStarted), staticCFunction(::captureFinished))
         val started = when (result) {
             HOPI_US_BYTE_PATH -> Mode.Bytes
@@ -150,8 +155,6 @@ public object UrlSessionCapture {
             UrlSessionRules.enable { store.redactor }
             if (!UrlSessionRules.sessionsCovered && settings.summaryLog) emitPlatformLogLine(notice(SESSIONS_NOTICE))
         }
-        // From now on the Ktor plugin leaves Darwin clients' requests to this capture.
-        PlatformCapture.cover(KTOR_DARWIN_ENGINE_PACKAGE)
         return started
     }
 

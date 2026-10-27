@@ -11,10 +11,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
+import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.model.TransactionSource
+import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchSpec
 import dev.koga.hopi.core.rules.MockSpec
+import dev.koga.hopi.core.rules.Predicate
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleResult
 import dev.koga.hopi.core.rules.RuleSpec
@@ -22,6 +26,11 @@ import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.detail.DetailTags
 import dev.koga.hopi.ui.list.ListTags
 import dev.koga.hopi.ui.rules.RulesTags
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.GZIPOutputStream
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -31,6 +40,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 
 /** The in-app rules list and "Mock this response", over the process-wide rule engine. */
 @OptIn(ExperimentalTestApi::class)
@@ -86,6 +96,20 @@ class RulesUiTest {
     }
 
     @Test
+    fun theRulesListFollowsARedactorThatGrewBeforeAnyOtherChange() = runComposeUiTest {
+        val keyed = add(RuleSpec(MatchSpec(headers = listOf(Predicate("X-Api-Key", "k-123"))), fail = FailKind.RESET))
+        setContent { HopiScreen(store, onClose = {}) }
+        onNodeWithContentDescription(ListTags.RULES).performClick()
+        waitForText("#$keyed")
+        assertTrue(exists("X-Api-Key=k-123"))
+
+        // A second client installs the plugin with X-Api-Key redacted, and no request or rule change follows.
+        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Api-Key")))
+        waitUntil(timeoutMillis = 5_000) { !exists("k-123") }
+        assertTrue(exists("X-Api-Key=${Redactor.REDACTED}"))
+    }
+
+    @Test
     fun mockThisResponseAddsAnExactRuleAndUndoRemovesIt() = runComposeUiTest {
         submit { complete(it, url = "https://api.example.com/users/42?page=2", responseBody = textBody("""{"id":42}""")) }
         setContent { HopiScreen(store, onClose = {}) }
@@ -94,6 +118,8 @@ class RulesUiTest {
         waitForText("GET 200")
 
         onNodeWithText(DetailTags.MOCK).performClick()
+        // Built off the main thread: the rule may not exist yet when the tap returns.
+        waitUntil(timeoutMillis = 5_000) { RuleEngine.list().isNotEmpty() }
         val rule = RuleEngine.list().single()
         waitForText("Mock rule #${rule.id} added")
         assertEquals("GET https://api.example.com/users/42", rule.spec.match.describe())
@@ -103,6 +129,43 @@ class RulesUiTest {
 
         onNodeWithText("Undo").performClick()
         assertTrue(RuleEngine.list().isEmpty())
+    }
+
+    @Test
+    fun aBodyHeldGzippedIsMockedDecodedOnTheFormatDispatcher() {
+        // An OkHttp record of a request that named its own Accept-Encoding: the server's gzip bytes.
+        val json = """{"id":42}"""
+        val gzipped = ByteArrayOutputStream().also { out -> GZIPOutputStream(out).use { it.write(json.encodeToByteArray()) } }.toByteArray()
+        submit {
+            complete(
+                it,
+                url = "https://api.example.com/users/42",
+                responseBody = CapturedBody(gzipped, gzipped.size.toLong(), truncated = false, "application/json", null),
+                responseHeaders = listOf("Content-Type" to "application/json", "Content-Encoding" to "gzip"),
+            ).copy(source = TransactionSource.OKHTTP)
+        }
+        val formatThread = AtomicReference<Thread>()
+        val format = Executors.newSingleThreadExecutor { Thread(it, "hopi-format").also(formatThread::set) }.asCoroutineDispatcher()
+        // The engine calls its listeners on the thread that added the rule, right after the mock was built.
+        val addedOn = ConcurrentLinkedQueue<Thread>()
+        val removeListener = RuleEngine.addListener { addedOn += Thread.currentThread() }
+        try {
+            runComposeUiTest {
+                setContent { HopiScreen(store, onClose = {}, formatDispatcher = format) }
+                waitForText("/users/42")
+                onNodeWithText("/users/42").performClick()
+                waitForText("GET 200")
+                onNodeWithText(DetailTags.MOCK).performClick()
+                waitUntil(timeoutMillis = 5_000) { RuleEngine.list().isNotEmpty() }
+                val rule = RuleEngine.list().single()
+                waitForText("Mock rule #${rule.id} added")
+                assertEquals(json, rule.spec.mock!!.body!!.bytes.decodeToString())
+                assertEquals(listOf(formatThread.get()), addedOn.toList())
+            }
+        } finally {
+            removeListener()
+            format.close()
+        }
     }
 
     @Test

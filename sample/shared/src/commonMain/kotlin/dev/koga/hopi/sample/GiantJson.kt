@@ -146,7 +146,7 @@ internal fun FrameTicker(modifier: Modifier = Modifier) {
  * parse, GC and heap counters, and the main thread's frame gaps meanwhile. Runs on the main thread.
  */
 internal suspend fun runGiant(client: HttpClient, spec: GiantSpec): String {
-    val build = if (HOPI_ENABLED) "real" else "noop"
+    val build = if (SampleBuild.realHopi) "real" else "noop"
     val header = "\"giant\":1,\"build\":\"$build\",\"capBytes\":${SampleHttp.maxBodyBytes ?: -1},\"storeBytes\":${SampleHttp.maxTotalBytes ?: -1}," +
         "\"shape\":\"${spec.shape}\",\"chunked\":${spec.chunked},\"post\":${spec.post}"
     val totals = ArrayList<String>()

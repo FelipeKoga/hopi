@@ -5,11 +5,17 @@ import dev.koga.hopi.android.internal.HopiHttpURLConnection
 import dev.koga.hopi.android.internal.HopiHttpsURLConnection
 import dev.koga.hopi.core.body.ResponseSkip
 import dev.koga.hopi.core.capture.PlatformCapture
+import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.instrument.HookDescriptors
 import dev.koga.hopi.instrument.HopiRewriter
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -19,6 +25,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -356,6 +366,78 @@ class AndroidCaptureTest {
         store = HopiStore()
         runScenario("urlOpenStream", store, server.base)
         assertEquals("""{"hello":"world"}""", store.awaitTerminal(1).single().responseBody!!.bytes.decodeToString())
+    }
+
+    @Test
+    fun endsQueuedBehindAStoreOfBodiesLetGoOfTheirCaptures() {
+        // A 100-byte store (a 50-byte cap) whose consumer is held: the first POST keeps its captures,
+        // and the first end that would take the captures waiting for the consumer past 100 bytes goes
+        // in with sizes only, as does every end after it. Each okhttpPost record holds 32 + 32 bytes
+        // (both captures sized by a Content-Length), so its second end is the first shed; each urlPost
+        // record holds 17 + 17, so its third is.
+        val posts = listOf(
+            Triple("okhttpPost", """{"title":"keyboard","price":129}""", 1),
+            Triple("urlPost", """{"title":"stand"}""", 2),
+        )
+        for ((scenario, sent, firstShed) in posts) {
+            val (observed, records) = whileTheStoreIsBehind(maxTotalBytes = 100) { runScenario(scenario, store, server.base) }
+            assertEquals(sent, observed.last()["body"], "the app reads what it always reads: $scenario")
+            for ((index, record) in records.withIndex()) {
+                val end = "$scenario, end ${index + 1}"
+                assertEquals(TransactionState.Complete, record.state, end)
+                for (body in listOf(record.requestBody!!, record.responseBody!!)) {
+                    if (index < firstShed) {
+                        assertEquals(sent, body.bytes.decodeToString(), end)
+                        continue
+                    }
+                    assertEquals(HopiStore.SKIPPED_STORE_BACKLOG, body.skippedReason, end)
+                    assertEquals(0, body.capturedBytes, end)
+                    assertEquals(sent.length.toLong(), body.totalBytes, end)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun anOutputStreamOpenedAfterTheEndIsNeitherCopiedNorCounted() {
+        // Held: the record is built after the app wrote, as it is whenever the consumer is behind.
+        val (observed, records) = whileTheStoreIsBehind(maxTotalBytes = HopiStore.DEFAULT_MAX_TOTAL_BYTES, times = 1) {
+            runScenario("urlOutputAfterEnd", store, server.base)
+        }
+        val app = observed.single()
+        assertEquals("connect failed", app["exception"])
+        assertEquals("""{"title":"late"}""", app["written"], "what the app writes still reaches its connection")
+        assertEquals(0L, app["heldAtEnd"])
+        assertEquals(app["heldAtEnd"], app["heldAfter"], "what the store counted for the end does not change after it")
+        val record = records.single()
+        assertEquals(TransactionState.Failed, record.state)
+        assertNull(record.requestBody, "the record ended before the app wrote")
+    }
+
+    /**
+     * Runs [requests] [times] times into a new store of [maxTotalBytes] whose consumer is held (its
+     * one thread blocked) until every request ended, as a starved `hopi-store` thread would be;
+     * returns what the app observed and the records as their ends were published, also those the
+     * store's byte cap then evicts.
+     */
+    private fun whileTheStoreIsBehind(maxTotalBytes: Long, times: Int = 3, requests: () -> Map<String, Any?>): Pair<List<Map<String, Any?>>, List<HttpTransaction>> {
+        val executor = Executors.newSingleThreadExecutor()
+        val scope = CoroutineScope(SupervisorJob() + executor.asCoroutineDispatcher())
+        val gate = CountDownLatch(1)
+        val ends = LinkedBlockingQueue<HttpTransaction>()
+        try {
+            store.close()
+            store = HopiStore(maxTotalBytes = maxTotalBytes, scope = scope)
+            store.addEventListener { if (it is TransactionEvent.Completed) ends += it.transaction }
+            executor.execute { gate.await() }
+            val observed = List(times) { requests() }
+            gate.countDown()
+            return observed to List(times) { assertNotNull(ends.poll(10, TimeUnit.SECONDS), "end ${it + 1} published") }
+        } finally {
+            gate.countDown()
+            scope.cancel()
+            executor.shutdown()
+        }
     }
 
     @Test

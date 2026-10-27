@@ -273,8 +273,35 @@ defers.**
   install-time work still happens (store caps, redaction union, log sink, bridge), so a client's
   `redactHeaders`, `logSink` and `agentBridge` keep their meaning.
 - The decision is per request, so `start()` after the client was built takes effect at the next
-  request. A request already past `Monitoring` when `start()` runs and resumed after it is recorded
-  twice; the window is the few microseconds between the two and is documented, not hidden.
+  request. A request already past `Monitoring` when `start()` runs is not recorded twice
+  (2026-10-27; before, one resumed after the hooks was recorded twice, once per recorder).
+  `start()` covers the engine before `hopi_us_start` installs the hooks, and the plugin reads the
+  coverage once more when the engine answers: at the first response hook, before anything decides
+  the record's end (a teed or decoded body can end it before the send pipeline returns), or at a
+  failure before any response. One more atomic read per request. Still not covered then, the task
+  was resumed before the hooks, so the plugin's record is the only one. Covered by then, the resume
+  hook may have seen the task and the plugin cannot tell, so it withdraws its record
+  (`HopiStore.withdraw`): the request is recorded once, by URLSession capture, or missed when it was
+  resumed before the hooks, the rule for any task resumed during `start()` ("may be missed, never
+  recorded twice", Swizzling rules). A mock or a fail rule never reaches the engine, so its record
+  is kept. A request that reaches `Monitoring` after the cover and is resumed before the hooks is
+  missed the same way; the window is `hopi_us_start`'s own time.
+- What of the withdrawn record has already gone out decides what the store publishes. The summary
+  log line is written only at a record's end (`Completed`), so the log never had it. A bridge
+  `tail` (and the in-app list) shows a start as soon as a pass applies it while a viewer is
+  attached, and `RemoteSession` then holds it pending (`pending`, `highestSeen`). So the store drops
+  the entry and every later snapshot of its id, and publishes the plugin's last snapshot (failed,
+  `"withdrawn: platform capture started during this request"`) as its end only when an earlier
+  pass published the start and a viewer is attached: a tail, `hopi tail` and the desktop then close
+  the row instead of showing it pending forever, and the summary log gets that one failed line.
+  Otherwise (no viewer, or the start and the withdrawal applied in one pass) nothing of the record
+  goes out. A viewer that showed the start can still miss that end: it was disconnected when the
+  withdrawal applied, its `SLOW_CLIENT` queue lost it, or the record was evicted or cleared before
+  its withdrawal. The desktop's `RemoteSession` therefore asks the app about each row it still
+  holds pending when it resumes (a reconnect to the same process or a `SLOW_CLIENT` re-tail, a
+  one-line `list` from just below each id, no bodies, the oldest 64 first) and ends one the app no
+  longer has as gone (failed, "gone from the app"), so it neither stays pending nor holds the
+  resume point below it.
 - An engine Hopi does not cover (Ktor CIO, MockEngine in tests, OkHttp on Android until the Android
   part calls `cover` for it) keeps the plugin as today, `source = "ktor"`.
 
@@ -589,10 +616,12 @@ not exact. Here all arms are built the same way:
    suspended or relaunched are never recorded), and every task on an OS where the self-check
    fails. Downloads keep no body by design. KVO on those tasks isa-swizzles the instance, visible
    to code that compares `object_getClass`.
-5. **Missed or doubled at `start()`.** Tasks resumed before `start()` are not recorded, even when
+5. **Missed at `start()`.** Tasks resumed before `start()` are not recorded, even when
    suspended and resumed after it; an upload
-   body of a task created before `start()` is `"not observed"`; a Ktor request already past
-   `Monitoring` when `start()` runs and resumed after it is recorded twice.
+   body of a task created before `start()` is `"not observed"`; a Ktor request the engine has when
+   `start()` runs is recorded once or missed, never twice: the plugin withdraws its record when it
+   finds the engine covered by the time the engine answers (see Dedupe; until 2026-10-27 one
+   resumed after the hooks was recorded twice).
 6. **Ktor under deferral.** Channel request bodies (`HTTPBodyStream`) are no longer captured on iOS
    once `start()` runs; the duration ends at the network's end, not at the reader's; Ktor-only
    details (which client, Ktor's view of headers) are gone from those records.

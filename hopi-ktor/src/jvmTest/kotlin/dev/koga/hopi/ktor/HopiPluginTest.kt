@@ -588,6 +588,56 @@ class HopiPluginTest {
         }
     }
 
+    private val savedResponse = asciiBytes(300)
+
+    // A Content-Length within the cap: the body is read after SaveBody, and the end is queued before the call returns.
+    private fun savingClient(store: HopiStore, handler: suspend () -> Unit = {}) = mockClient(store) {
+        handler()
+        respond(savedResponse, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType to listOf("text/plain"), HttpHeaders.ContentLength to listOf("300")))
+    }
+
+    private val posted = List(3) { asciiBytes(100, seed = it) }
+
+    @Test
+    fun aPostWhoseEndWentInWithoutItsBodiesKeepsTheRequestBodyItsStartHolds() = runBlocking<Unit> {
+        HeldStore(maxTotalBytes = 1000).use { held ->
+            val client = savingClient(held.store)
+            // Held before the first start: the starts wait in their lane, so each end counts its request
+            // body too (400 bytes), and the third goes in without its bodies.
+            held.hold()
+            for ((i, body) in posted.withIndex()) client.post("https://api.example.com/items?i=$i") { setBody(ByteArrayContent(body, ContentType.Text.Plain)) }
+            held.release()
+            val records = held.ends(3)
+            // The plugin copied each body once, at the start: the record keeps the one its start holds.
+            for ((record, body) in records.zip(posted)) assertContentEquals(body, record.requestBody?.bytes, record.url)
+            assertContentEquals(savedResponse, records[1].responseBody?.bytes)
+            assertEquals(HopiStore.SKIPPED_STORE_BACKLOG, records[2].responseBody?.skippedReason)
+        }
+    }
+
+    @Test
+    fun postsWhoseStartsAreInTheStoreCountOnlyTheirResponsesBehindIt() = runBlocking<Unit> {
+        HeldStore(maxTotalBytes = 1000).use { held ->
+            held.store.attachViewer()
+            val answer = CompletableDeferred<Unit>()
+            val client = savingClient(held.store) { answer.await() }
+            val calls = posted.mapIndexed { i, body ->
+                async(Dispatchers.Default) { client.post("https://api.example.com/items?i=$i") { setBody(ByteArrayContent(body, ContentType.Text.Plain)) } }
+            }
+            // A viewer shows the three starts: they are in the store when the consumer falls behind.
+            withTimeout(10_000) { held.store.transactions.first { it.size == 3 } }
+            held.hold()
+            answer.complete(Unit)
+            calls.awaitAll()
+            held.release()
+            // 900 bytes queued, not 1200: every end kept both bodies.
+            for (record in held.ends(3)) {
+                assertContentEquals(posted[record.url.substringAfter("i=").toInt()], record.requestBody?.bytes, record.url)
+                assertContentEquals(savedResponse, record.responseBody?.bytes, record.url)
+            }
+        }
+    }
+
     @Test
     fun redactionNoticeIsWrittenOnlyWithTheSummarySinkAndOncePerProcess() = runBlocking<Unit> {
         val captured = ByteArrayOutputStream()

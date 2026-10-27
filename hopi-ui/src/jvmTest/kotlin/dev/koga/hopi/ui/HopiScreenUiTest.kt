@@ -2,6 +2,7 @@ package dev.koga.hopi.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.CompositionLocalProvider
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -29,6 +31,7 @@ import dev.koga.hopi.core.redact.Redactor
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.koga.hopi.core.model.CapturedBody
@@ -69,6 +72,15 @@ class HopiScreenUiTest {
 
     private fun SemanticsNodeInteractionsProvider.exists(text: String, substring: Boolean = false): Boolean =
         onAllNodes(hasText(text, substring = substring)).fetchSemanticsNodes().isNotEmpty()
+
+    /** `GET /r<id>` for each of [ids]. */
+    private fun requests(ids: LongRange): Array<HttpTransaction> =
+        ids.map { complete(it, url = "https://api.example.com/r$it") }.toTypedArray()
+
+    /** A phone-sized screen, so 20 rows overflow it: a list that fits scrolls back to fill itself and hides nothing. */
+    private fun ComposeUiTest.phoneScreen() {
+        setContent { Box(Modifier.requiredSize(360.dp, 600.dp)) { HopiScreen(store, onClose = {}) } }
+    }
 
     @Test
     fun listOpensTheDetailAndBackReturnsToTheList() = runComposeUiTest {
@@ -115,6 +127,65 @@ class HopiScreenUiTest {
             .mapNotNull { node -> node.config.getOrNull(SemanticsProperties.Text)?.joinToString() }
             .filter { it == "/fast" || it == "/slow" }
         assertEquals(listOf("/fast", "/slow"), tops)
+    }
+
+    @Test
+    fun aListAtItsTopShowsNewRequestsThere() = runComposeUiTest {
+        submitAll(*requests(1L..20L))
+        phoneScreen()
+        waitForText("/r20")
+        val top = onNodeWithText("/r20").getBoundsInRoot().top
+
+        // A burst on a list nobody scrolled: the newest takes the top instead of landing above it.
+        submitAll(*requests(21L..23L))
+        waitForText("23")
+        assertEquals(top, onNodeWithText("/r23").getBoundsInRoot().top)
+    }
+
+    @Test
+    fun aListLeftAtItsTopShowsTheNewestOnTheWayBackFromADetail() = runComposeUiTest {
+        submitAll(*requests(1L..20L))
+        phoneScreen()
+        waitForText("/r20")
+        val top = onNodeWithText("/r20").getBoundsInRoot().top
+        onNodeWithText("/r20").performClick()
+        waitForText(DetailTags.COPY_URL)
+        waitForIdle()
+
+        // Requests arrive while the detail covers the list.
+        submitAll(*requests(21L..23L))
+        onNodeWithContentDescription(DetailTags.BACK).performClick()
+        waitForText("23")
+        assertEquals(top, onNodeWithText("/r23").getBoundsInRoot().top)
+    }
+
+    @Test
+    fun aListScrolledAwayFromItsTopKeepsItsRowsInPlace() = runComposeUiTest {
+        submitAll(*requests(1L..20L))
+        phoneScreen()
+        waitForText("/r20")
+        onNode(hasScrollToIndexAction()).performScrollToIndex(5)
+        val top = onNodeWithText("/r15").getBoundsInRoot().top
+
+        submitAll(*requests(21L..23L))
+        waitForText("23")
+        assertEquals(top, onNodeWithText("/r15").getBoundsInRoot().top, "the rows moved under the reader")
+    }
+
+    @Test
+    fun aScrolledListThatWasClearedShowsTheNextRequestsFromTheTop() = runComposeUiTest {
+        submitAll(*requests(1L..20L))
+        phoneScreen()
+        waitForText("/r20")
+        val top = onNodeWithText("/r20").getBoundsInRoot().top
+        onNode(hasScrollToIndexAction()).performScrollToIndex(5)
+        onNodeWithContentDescription(ListTags.CLEAR).performClick()
+        waitForText("No requests yet")
+
+        // More rows than fit: they open at the newest, not where the cleared ones were scrolled to.
+        submitAll(*requests(21L..45L))
+        waitForText("25")
+        assertEquals(top, onNodeWithText("/r45").getBoundsInRoot().top, "the newest opened above the list")
     }
 
     @Test
@@ -337,6 +408,48 @@ class HopiScreenUiTest {
         submitAll(complete(2, url = "https://api.example.com/other"))
         waitForText(Redactor.REDACTED)
         assertFalse(exists("k-123"), "the open detail still shows a header the store now redacts")
+    }
+
+    @Test
+    fun anOpenDetailAndTheListFollowARedactorThatGrewBeforeAnyOtherRequest() = runComposeUiTest {
+        submitAll(
+            pending(1, url = "https://api.example.com/keyed?token=t-123", headers = listOf("X-Api-Key" to "k-123"))
+                .completed(200, emptyList(), null, 5, null),
+        )
+        setContent { HopiScreen(store, onClose = {}) }
+        waitForText("/keyed?token=t-123")
+        onNodeWithText("/keyed?token=t-123").performClick()
+        waitForText("Request")
+        onNodeWithText("Request").performClick()
+        waitForText("k-123")
+
+        // A second client installs the plugin with more redacted, and no request follows.
+        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Api-Key"), queryParameters = listOf("token")))
+        waitUntil(timeoutMillis = 5_000) { !exists("k-123") }
+        assertTrue(exists(Redactor.REDACTED, substring = true))
+
+        onNodeWithContentDescription(DetailTags.BACK).performClick()
+        waitForText("/keyed?token=${Redactor.REDACTED}")
+        assertFalse(exists("t-123", substring = true), "the list still shows a query value the store now redacts")
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun copyUrlUsesTheRedactorInForceWhenItRuns() = runComposeUiTest {
+        submitAll(complete(1, url = "https://api.example.com/items?token=t-123"))
+        val clipboard = FakeClipboard()
+        setContent {
+            CompositionLocalProvider(LocalClipboardManager provides clipboard) { HopiScreen(store, onClose = {}) }
+        }
+        waitForText("/items?token=t-123")
+        onNodeWithText("/items?token=t-123").performClick()
+        waitForText(DetailTags.COPY_URL)
+
+        // A second client installs the plugin with `token` redacted, and no request follows yet.
+        store.includeRedaction(Redactor.create(queryParameters = listOf("token")))
+        onNodeWithText(DetailTags.COPY_URL).performClick()
+        waitForText("URL copied")
+        assertEquals("https://api.example.com/items?token=${Redactor.REDACTED}", assertNotNull(clipboard.clip).text)
     }
 
     @Test

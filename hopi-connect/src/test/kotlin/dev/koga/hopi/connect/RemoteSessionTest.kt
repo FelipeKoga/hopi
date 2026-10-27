@@ -3,7 +3,9 @@ package dev.koga.hopi.connect
 import dev.koga.hopi.core.bridge.BridgeSession
 import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.json.TransactionJson
+import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
+import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.store.HopiStore
 import java.io.BufferedReader
@@ -16,6 +18,7 @@ import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -167,7 +170,8 @@ class RemoteSessionTest {
         app.add { completeTx(it, url = "https://api.example.com/a") }
         val session = session().connected()
         session.select(1)
-        session.awaitLocal { list -> list.single().responseBody?.isNotFetched == false }
+        // The tail may not have brought the summary yet: the first list can be empty.
+        session.awaitLocal { list -> list.singleOrNull()?.responseBody?.isNotFetched == false }
         val before = session.store.value
 
         // adb reset, say: the caller connects again to the same process.
@@ -278,6 +282,106 @@ class RemoteSessionTest {
         script.close()
     }
 
+    private fun notFound(id: Long) = """{"type":"error","code":"NOT_FOUND","message":"no transaction $id"}"""
+
+    /**
+     * A row held pending here that the app no longer has (its recorder withdrew it while this viewer
+     * was away; evicted or cleared alike): the reconnect asks the app about it with a one-line
+     * `list`, no `get`, and ends it as gone, and the resume point moves past it. Its request body was
+     * fetched while it was pending, so only its state still says it is open. Selecting it again
+     * asks once more and changes nothing, and an end the app records after all still replaces it.
+     */
+    @Test
+    fun aReconnectEndsAPendingRowTheAppNoLongerHas() {
+        val script = ScriptedBridge()
+        val started = pendingTx(5, method = "POST", body = textBody("{}"))
+        script.onGet = { TransactionJson.bridgeDetail(started, Redactor.Disabled) }
+        val session = session { script.endpoint() }.connected()
+        val tail1 = script.tails.take()
+        tail1.send(TransactionJson.bridgeSummary(completeTx(4), Redactor.Disabled))
+        tail1.send(TransactionJson.bridgeSummary(started, Redactor.Disabled))
+        session.awaitLocal { it.size == 2 }
+        session.select(5)
+        session.awaitLocal { list -> list.any { it.id == 5L && it.requestBody?.isNotFetched == false } }
+        session.select(null)
+
+        // From here the app has nothing above 4: `list` answers no line, `get` NOT_FOUND.
+        script.onGet = ::notFound
+        session.connected()
+        assertEquals(4, script.tails.take().since)
+        val gone = session.awaitLocal { list -> list.single { it.id == 5L }.state.isTerminal }.single { it.id == 5L }
+        assertEquals(TransactionState.Failed, gone.state)
+        assertEquals(CapturedBody.GONE, gone.error)
+        assertEquals("{}", gone.requestBody!!.bytes.decodeToString(), "what was fetched stays")
+        assertEquals(listOf(4L), script.listed, "the reconnect's one-line list from just below 5")
+        assertEquals(listOf(5L), script.gets, "only the selection's get: the reconnect moves no bodies")
+
+        // A new selection asks once more; its NOT_FOUND must not turn the row into the app's end.
+        session.select(5)
+        assertEquals(null, session.fetch(6), "a barrier on the request thread")
+        assertEquals(listOf(5L, 5L, 6L), script.gets)
+        session.select(null)
+
+        session.connected()
+        val tail3 = script.tails.take()
+        assertEquals(5, tail3.since, "nothing holds the resume point below 5 any more")
+        // An end the app records after all (a request it evicted or cleared in flight) replaces the row.
+        tail3.send(TransactionJson.bridgeSummary(completeTx(5), Redactor.Disabled))
+        session.awaitLocal { list -> list.single { it.id == 5L }.state == TransactionState.Complete }
+        script.close()
+    }
+
+    /** The same after a `SLOW_CLIENT` resume: a withdrawn row's end can be among the events the bridge's queue lost. */
+    @Test
+    fun aSlowClientResumeEndsAPendingRowTheAppNoLongerHas() {
+        val script = ScriptedBridge()
+        script.onGet = ::notFound
+        val session = session { script.endpoint() }.connected()
+        val tail1 = script.tails.take()
+        tail1.send(TransactionJson.bridgeSummary(pendingTx(1), Redactor.Disabled))
+        session.awaitLocal { it.size == 1 }
+        tail1.send(BridgeSession.slowClientError(since = 0))
+        assertEquals(0, assertNotNull(script.tails.poll(15, TimeUnit.SECONDS), "the session tailed again").since)
+        val gone = session.awaitLocal { list -> list.single().state.isTerminal }.single()
+        assertEquals(CapturedBody.GONE, gone.error)
+        assertEquals(listOf(0L), script.listed)
+        assertEquals(emptyList<Long>(), script.gets)
+        script.close()
+    }
+
+    /**
+     * A resume asks about at most 64 pending rows, the oldest first, and keeps a row the app still
+     * has; the next resume asks about the rest.
+     */
+    @Test
+    fun aReconnectAsksAboutTheOldestPendingRowsFirstAndAtMost64() {
+        val script = ScriptedBridge()
+        script.onGet = ::notFound
+        // The app still has 3, still in flight: its list from 2 answers with it.
+        script.onList = { since -> if (since == 2L) listOf(TransactionJson.bridgeSummary(pendingTx(3), Redactor.Disabled)) else emptyList() }
+        val session = session { script.endpoint() }.connected()
+        val tail = script.tails.take()
+        for (id in 1L..70L) tail.send(TransactionJson.bridgeSummary(pendingTx(id), Redactor.Disabled))
+        session.awaitLocal { it.size == 70 }
+
+        session.connected()
+        assertEquals(0, script.tails.take().since)
+        // A barrier on the request thread (the app has no 71): the reconnect's lists ran before it.
+        assertEquals(null, session.fetch(71))
+        assertEquals((0L..63L).toList(), script.listed)
+        assertEquals(listOf(71L), script.gets)
+        val rows = session.store.value.transactions.value.associateBy { it.id }
+        assertTrue(!rows.getValue(3).state.isTerminal, "a row the app still has stays pending")
+        assertTrue((1L..64L).filter { it != 3L }.all { rows.getValue(it).error == CapturedBody.GONE })
+        assertTrue((65L..70L).none { rows.getValue(it).state.isTerminal }, "past the bound: asked about next time")
+
+        session.connected()
+        assertEquals(2, script.tails.take().since, "3 still holds the resume point")
+        assertEquals(null, session.fetch(72))
+        assertEquals((0L..63L) + 2L + (64L..69L), script.listed)
+        script.close()
+    }
+
     /** The tail brings the terminal summary while a `get` answered pending is on its way back. */
     @Test
     fun aPendingReplyReadAfterTheTerminalSummaryIsFetchedAgain() {
@@ -314,7 +418,7 @@ class RemoteSessionTest {
         startApp().add { completeTx(it, url = "https://api.example.com/before") }
         val session = session().connected()
         session.select(1)
-        session.awaitLocal { list -> list.single().responseBody?.isNotFetched == false }
+        session.awaitLocal { list -> list.singleOrNull()?.responseBody?.isNotFetched == false }
 
         bridges.removeAt(0).close()
         session.state.await { it is RemoteState.Disconnected }
@@ -367,20 +471,33 @@ class RemoteSessionTest {
 
 /**
  * A bridge speaking the wire protocol from a script: `hello` for every connection, [onGet]'s line
- * for `get` (by default the detail of a complete transaction), [onClear]'s for `clear`, and each
- * `tail` handed to the test to drive.
+ * for `get` (by default the detail of a complete transaction), [onList]'s lines for `list`, [onClear]'s for `clear`, with
+ * [rules] [onRulesList]'s rule lines for `rules.list`, and each `tail` handed to the test to drive.
  */
-private class ScriptedBridge : AutoCloseable {
+internal class ScriptedBridge(private val rules: Boolean = false) : AutoCloseable {
     private val server = ServerSocket(0, 8, BridgeClient.LOOPBACK)
     private val sockets = mutableListOf<Socket>()
     val tails = LinkedBlockingQueue<Tail>()
     val gets: MutableList<Long> = Collections.synchronizedList(mutableListOf())
 
+    /** The `rules.list` requests read so far, the one [onRulesList] answers included. */
+    val lists = AtomicInteger()
+
     @Volatile
     var onGet: (Long) -> String = { id -> TransactionJson.bridgeDetail(completeTx(id, url = "https://api.example.com/one"), Redactor.Disabled) }
 
+    /** The `since` of each `list` read so far. */
+    val listed: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+
+    /** The summary lines a `list` from `since` answers with (by default none: the app has nothing above it). */
+    @Volatile
+    var onList: (Long) -> List<String> = { emptyList() }
+
     @Volatile
     var onClear: () -> String = { """{"type":"ok"}""" }
+
+    @Volatile
+    var onRulesList: () -> List<String> = { emptyList() }
 
     class Tail(val since: Long, private val socket: Socket) {
         fun send(line: String) {
@@ -415,7 +532,7 @@ private class ScriptedBridge : AutoCloseable {
         try {
             if (input.readLine() != TOKEN) return socket.close()
             input.readLine() // hello
-            send("""{"type":"hello","protocol":1,"app":"$APP","platform":"jvm","count":0,"dropped":0}""")
+            send("""{"type":"hello","protocol":1,"app":"$APP","platform":"jvm","count":0,"dropped":0${if (rules) ""","rules":true""" else ""}}""")
             while (true) {
                 val line = input.readLine() ?: return
                 val request = Json.parseToJsonElement(line) as JsonObject
@@ -427,6 +544,17 @@ private class ScriptedBridge : AutoCloseable {
                         send(onGet(id))
                     }
                     "clear" -> send(onClear())
+                    "list" -> {
+                        val since = request.long("since") ?: 0
+                        listed += since
+                        onList(since).forEach(::send)
+                        send("""{"type":"end"}""")
+                    }
+                    "rules.list" -> {
+                        lists.incrementAndGet()
+                        onRulesList().forEach(::send)
+                        send("""{"type":"end"}""")
+                    }
                 }
             }
         } catch (_: Exception) {

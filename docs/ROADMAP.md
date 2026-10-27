@@ -38,7 +38,11 @@ first sample after memory, a tail that lost a hang's end, the Perf tab formattin
 spin lock, rings allocated while off, and the iOS 300 ms reading; design, "As built", stage 5). Measured: off costs nothing (identical to the noop build, 0 CPU and 0 wakes
 idle); the printer costs +6.2 to +6.5 µs per main-thread message and +29 µs per `Dispatchers.Main`
 resume (its 3 µs gate is not met; it stays the default, the heartbeat's alternative misses hangs
-near the threshold and wakes 8 times a second; design, "As built", stage 4). Open:
+near the threshold and wakes each of its two threads 8 times a second, 16 in all, since its
+cadence fix (measured at 4 each before it, re-measure pending); design, "As built", stage 4). Open:
+- Re-measure the Android heartbeat on the emulator after its cadence fix: idle wakes on each of
+  its two threads (`idle.py` with `heartbeat=1`) and hang readings against the 125 ms bound
+  (`verify.py <out> --steps all,heartbeat`, as for `android-verify-heartbeat.json`).
 - A physical Android phone and iPhone; every figure so far is from the emulator or the simulator.
 - iOS overhead (observer cost per run-loop iteration, display link, sampler): `bench.py --platform ios`.
 - The sampler's tick costs about 1.0 ms of CPU in a debug build (`schedstat`; budget 5 to 50 µs):
@@ -144,7 +148,10 @@ so the app pays no extra cost.
 - **iOS, URLSession (built).** `hopi-urlsession` / `-noop`: `HopiUrlSession.start()` records every
   URLSession request of the process, observe only, with no per-client setup (architecture doc,
   "URLSession capture"; design in `docs/design/urlsession-capture.md`). Ktor's Darwin engine
-  defers to it (one record per request). Tested on iOS 18.2 and 27.0 simulators; per-hook cost
+  defers to it (one record per request; a Ktor request in flight when `start()` runs is recorded
+  once or missed, never twice, since 2026-10-27; a viewer attached at that moment sees its start
+  end as failed, "withdrawn: …", and the desktop ends one it missed while away or behind as gone
+  when it resumes). Tested on iOS 18.2 and 27.0 simulators; per-hook cost
   and a per-request A/B measured on the simulator only. Open: a physical device run, background
   sessions beyond metadata, WebSocket tasks.
 - **Android, OkHttp and `HttpURLConnection` (built).** The `dev.koga.hopi` Gradle plugin
@@ -162,7 +169,7 @@ so the app pays no extra cost.
   item 2, and the `HttpURLConnection` response-header read, item 4, are the next levers); 10
   non-matching rules add about 7 µs on `HttpURLConnection` and 7 to 19 µs of process CPU on
   URLSession against a 3 µs target; a phone run of the same `captureBench` (on the emulator a
-  futex wake is a VM exit, so the ranking may differ on hardware); the provider's startup (5.4 ms median on a debuggable emulator, target 1 ms); OkHttp 3.12/3.13; HTTPS through the
+  futex wake is a VM exit, so the ranking may differ on hardware); the request-thread cost of the store's queued-bytes budget (2026-10-27: one atomic add per end that holds bodies, one volatile read of the request capture), not measured on the emulator yet; the provider's startup (5.4 ms median on a debuggable emulator, target 1 ms); OkHttp 3.12/3.13; HTTPS through the
   wrapper on a device; a physical device run; Cronet and WebView.
 
 ### Rules: mock, edit (built)
@@ -173,7 +180,12 @@ so the app pays no extra cost.
   without weakening the app's TLS, pinning or challenge handling; unsupported pieces are reported
   when a rule is added (URLSession: response edits, a before-response delay on a real request, body
   edits of file and stream uploads, background sessions, sessions created before `start()` other
-  than `shared`). First match wins, one recorder applies it, every touched record is marked.
+  than `shared`). A rule that names no sources is checked against the platform's own sources only,
+  so an Android app hears nothing of URLSession; the desktop panel and the in-app list show a source
+  that never applies a rule as "not applied on <source>: …" and a rule as "inactive" when every
+  source it is checked against (the named ones, or the platform's when it names none) excludes it;
+  Ktor, on every platform, excludes nothing, so a rule naming none never reads "inactive". First
+  match wins, one recorder applies it, every touched record is marked.
   Replay was built too and then removed (see "Replay (no priority)").
 - Zero cost with no rule: one volatile read and a reference comparison per request (one
   `canInitWithTask:` answer per task on a URLSession session created after `start()`). Rules live
@@ -197,19 +209,23 @@ so the app pays no extra cost.
   - The review pass over the whole feature and the "As built" notes in the design.
   - Pinning on device uses a public HTTPS host (the dev server has no TLS port); a background
     URLSession check is untested.
-  - From the desktop rules check (2026-10-25, `build/evidence/speed/desktop/`): the shared list
-    (`hopi-ui`, so probably the in-app screen too) keeps its first visible row in place, so new
-    rows arriving on an untouched list land above the visible area (3 of 13 in one burst) — it
-    needs "stay on newest" while the user has not scrolled; Android rule rows show URLSession's
-    "unsupported" warnings for a rule with no sources set (by design, noise on Android); on iOS a
-    response-edit rule never applies yet looks enabled apart from its warning line; `RulesPanel`'s
-    Update sets `busy` before `form.ruleId ?: return` (unreachable today, a stuck panel if it
-    ever were).
   - The desktop's rule "edit" changes only priority, times and hits (`rules.update` supports
-    nothing else); the desktop form has no field for header predicates; a hit counted from a
-    summary that arrives just after a re-list can be counted twice until the next one.
+    nothing else); the desktop form has no field for header predicates.
+  - The desktop's hits are the app's (re-listed on a ruled summary or `get` reply, 2026-10-27).
   - No Ktor-plugin rule source exists on iOS while URLSession capture runs (the Darwin engine is
     ruled by URLSession); sessions created before `start()` cannot be mocked.
+  - On iOS with URLSession capture, a response edit or a before-response delay that names no
+    sources still reads active (switch on, no "inactive"): its "not applied on urlsession" line is
+    the only sign, since the Ktor plugin defers for the Darwin engine.
+  - A rule naming only sources the platform lacks (okhttp on iOS) reads active with no line, and
+    the match shorthand does not show its sources.
+  - On iOS an app without URLSession capture still gets the URLSession exclusion line for a rule
+    that names no sources: the platform's sources are a fixed set, whether `HopiUrlSession.start()`
+    ran or not.
+  - A mock copied from a record (`fromTransaction`, "Mock this response", `--from`) decodes the
+    single gzip or deflate an OkHttp or `HttpURLConnection` record holds raw (up to 1 MiB) and
+    refuses br, zstd and stacked codings; a Ktor client without `ContentEncoding` whose request
+    names its own `Accept-Encoding` records raw bytes under `ktor`, and those are still copied as held.
   - Later: live breakpoints (pause and edit a request in flight), matching on the request body,
     stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
 

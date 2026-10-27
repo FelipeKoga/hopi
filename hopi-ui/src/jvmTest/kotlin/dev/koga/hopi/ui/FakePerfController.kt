@@ -15,7 +15,7 @@ import dev.koga.hopi.core.perf.PerfStartRequest
 import dev.koga.hopi.core.perf.PerfStatus
 import dev.koga.hopi.core.perf.PerfThread
 
-/** An app's perf side without monitors: owners kept as the real runtime keeps them, data written by the test. */
+/** An app's perf side without monitors: owners kept and the running set reported as the real runtime does, data written by the test. */
 internal class FakePerfController(override val remoteControl: Boolean = true) : PerfController {
     override val platform = "jvm"
     override val available = setOf(PerfMonitor.CPU, PerfMonitor.MEMORY, PerfMonitor.HANGS)
@@ -23,20 +23,42 @@ internal class FakePerfController(override val remoteControl: Boolean = true) : 
     private val owners = PerfOwners()
     val starts: MutableList<Pair<PerfStartRequest, PerfOwner>> = java.util.Collections.synchronizedList(ArrayList())
     @Volatile var watchingThreads = false
+    private val runningListeners = java.util.concurrent.CopyOnWriteArrayList<(Set<PerfMonitor>) -> Unit>()
+    val hasRunningListeners: Boolean get() = runningListeners.isNotEmpty()
 
     override fun start(request: PerfStartRequest, owner: PerfOwner): PerfResult = synchronized(this) {
         starts += request to owner
         request.monitors.forEach { owners.add(it, owner, 0) }
+        announceRunning()
         PerfResult.Ok(status())
     }
 
     override fun stop(monitors: Set<PerfMonitor>): PerfStatus = synchronized(this) {
         monitors.ifEmpty { PerfMonitor.entries.toSet() }.forEach { owners.clear(it) }
+        announceRunning()
         status()
     }
 
     override fun releaseTail(session: Long) {
-        synchronized(this) { owners.removeTail(session) }
+        synchronized(this) {
+            owners.removeTail(session)
+            announceRunning()
+        }
+    }
+
+    /** As the runtime does: at once with the set now running, under the lock. */
+    override fun addRunningListener(listener: (Set<PerfMonitor>) -> Unit): () -> Unit {
+        synchronized(this) {
+            runningListeners += listener
+            listener(owners.heldMonitors.toSet())
+        }
+        return { synchronized(this) { runningListeners -= listener } }
+    }
+
+    /** As the runtime does after a start, a stop or a released tail, under the lock: the set now running. */
+    private fun announceRunning() {
+        val running = owners.heldMonitors.toSet()
+        runningListeners.forEach { it(running) }
     }
 
     fun held(monitor: PerfMonitor): Boolean = synchronized(this) { owners.held(monitor) }

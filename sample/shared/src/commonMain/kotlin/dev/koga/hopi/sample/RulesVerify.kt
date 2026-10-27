@@ -130,7 +130,7 @@ public suspend fun runRulesVerify(targets: List<RulesTarget>): String {
             )
         }
     }
-    val done = "{\"rules\":\"done\",\"real\":$HOPI_ENABLED,\"failed\":$failed,\"scenarios\":${targets.size * SCENARIOS.size}}"
+    val done = "{\"rules\":\"done\",\"real\":${SampleBuild.realHopi},\"failed\":$failed,\"scenarios\":${targets.size * SCENARIOS.size}}"
     sampleLog(done)
     return done
 }

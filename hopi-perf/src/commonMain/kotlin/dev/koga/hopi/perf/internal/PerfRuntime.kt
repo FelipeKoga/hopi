@@ -111,6 +111,10 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
     private val settings = AtomicReference(PerfSettings.DEFAULT)
     private val lastNotices = AtomicReference<List<String>>(emptyList())
 
+    /** [addRunningListener]'s listeners, and the set they were last given; under [lock]. */
+    private val runningListeners = ArrayList<(Set<PerfMonitor>) -> Unit>()
+    private var announced: Set<PerfMonitor> = emptySet()
+
     override val remoteControl: Boolean get() = settings.load().remoteControl
 
     internal val currentSettings: PerfSettings get() = settings.load()
@@ -155,6 +159,8 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
             for (monitor in request.monitors) {
                 if (owners.add(monitor, owner, now)) {
                     since[monitor] = perfWallClockMs()
+                    // Before it starts, so its first item never reaches a viewer that thinks it is off.
+                    announceRunning()
                     backend.start(monitor, settings.load())?.let { notices += "${monitor.wireName}: $it" }
                 }
             }
@@ -170,6 +176,7 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
             for (monitor in monitors.ifEmpty { PerfMonitor.entries.toSet() }) {
                 if (owners.clear(monitor)) stopLocked(monitor)
             }
+            announceRunning()
             backend.leaseChanged(owners.heldMonitors)
         }
         return status()
@@ -178,6 +185,7 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
     override fun releaseTail(session: Long) {
         perfLocked(lock) {
             owners.removeTail(session).forEach(::stopLocked)
+            announceRunning()
             backend.leaseChanged(owners.heldMonitors)
         }
     }
@@ -186,6 +194,7 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
     internal fun expireLeases() {
         perfLocked(lock) {
             owners.expire(backend.nowMs()).forEach(::stopLocked)
+            announceRunning()
             backend.leaseChanged(owners.heldMonitors)
         }
     }
@@ -193,6 +202,22 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
     private fun stopLocked(monitor: PerfMonitor) {
         since.remove(monitor)
         backend.stop(monitor)
+    }
+
+    override fun addRunningListener(listener: (Set<PerfMonitor>) -> Unit): () -> Unit {
+        perfLocked(lock) {
+            runningListeners += listener
+            listener(announced)
+        }
+        return { perfLocked(lock) { runningListeners.remove(listener) } }
+    }
+
+    /** Under [lock], after the owners changed: tells the listeners when the set of running monitors did. */
+    private fun announceRunning() {
+        val now = owners.heldMonitors.toSet()
+        if (now == announced) return
+        announced = now
+        for (listener in runningListeners.toList()) listener(now)
     }
 
     internal val running: Set<PerfMonitor> get() = perfLocked(lock) { owners.heldMonitors.toSet() }

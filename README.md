@@ -225,6 +225,16 @@ HopiLauncher {
 HopiScreen(onClose = { showInspector = false })
 ```
 
+A Debug Kotlin/Native framework links every wrapper of each platform library it uses, built
+against the SDK Xcode builds with, so a symbol newer than your deployment target becomes a strong
+import. Built with Xcode 27.1, the sample's Debug app aborted in dyld before `main` on iOS 18.2:
+first `_kCGAdaptiveMaximumBitDepth` (CoreGraphics, which `hopi-ui` uses), then libresolv's
+`___res_9_p_cert_syms`. If yours does, weak-link the library dyld names in the app target's
+`OTHER_LDFLAGS`, as `sample/iosApp/project.yml` does (`-weak_framework CoreGraphics -weak-lresolv`).
+A weak-linked symbol is NULL on the older runtime, so Kotlin code must check the OS version
+(`NSProcessInfo.processInfo.isOperatingSystemAtLeastVersion`) before it reads one newer than the
+deployment target.
+
 ## For AI agents
 
 The log stream needs no setup. With `logSink = Summary` every finished request is one line (lines
@@ -389,7 +399,7 @@ hopi {
         enabled = true
         autoStart(HopiMonitor.Hangs)   // default: none
         hangThresholdMs = 250          // 100..10 000
-        hangHeartbeat = false          // true: keep another tool's Looper printer (wakes 8x/s while idle)
+        hangHeartbeat = false          // true: keep another tool's Looper printer (wakes main and the watchdog 8x/s each while idle)
     }
 }
 ```
@@ -473,7 +483,7 @@ Measured so far (the methods and caveats are in the architecture doc):
 | Release APK of the sample built without the flag | 12 Hopi classes (the noop twins), 0 from `hopi-core`; 345 and 97 with `-Phopi.enabled=true` (before the Gradle plugin; with it, 13 noop classes, no core or capture type referenced, whatever the flag) |
 | Automatic Android capture, emulator (API 35), debuggable builds, small loopback GET | +85 to +95 µs of the calling thread's CPU and +350 to +390 µs wall per request against the noop build (`benchmark/android-capture/`) |
 | Performance monitors, emulator (API 35, debug build), perf lab against outside references | 28 of 28 checks: 30 frames blocked 50 or 100 ms are 31 janky each (gfxinfo 29 to 30); hangs of 300 ms to 3 s and a 600 ms spin inside a Compose `onClick` caught once each within 0 to 5 ms, with stacks naming the lab's function; 2 burning threads 198 % (`/proc` 199 %); 64 MB heap and native allocations +64 MB; three trim levels. Rerun 2026-10-26 after the stage 5 fixes: 28 of 28 again; iPhone 17 simulator 21 of 21 (a 300 ms hang reads 300 to 302 ms on fresh installs, once Hopi names stacks only after the hang ended) |
-| Performance monitors' cost, emulator, 10 000 main-thread messages per run, 9 runs per arm | nothing started = noop (0 CPU, 0 wakes over 60 s idle); frames +0; hangs (Looper printer) +6.2 to +6.5 µs per message, +29 µs per `Dispatchers.Main` resume, 0 idle; hangs on the heartbeat +0 per message, 8 wakes/s idle; CPU and memory 1 wake per second, about 1.0 ms CPU per sample (`schedstat`, a debuggable app runs it interpreted); all four on and idle +0.10 % of one core; iOS simulator: hangs +4.8 context switches/s (one per main run-loop wake, which wakes 6.6/s in the noop build too), all four +6 (`benchmark/perf/`) |
+| Performance monitors' cost, emulator, 10 000 main-thread messages per run, 9 runs per arm | nothing started = noop (0 CPU, 0 wakes over 60 s idle); frames +0; hangs (Looper printer) +6.2 to +6.5 µs per message, +29 µs per `Dispatchers.Main` resume, 0 idle; hangs on the heartbeat +0 per message, 8 wakes/s idle in all as measured before its cadence fix (8/s on each of its two threads by design, re-measure pending); CPU and memory 1 wake per second, about 1.0 ms CPU per sample (`schedstat`, a debuggable app runs it interpreted); all four on and idle +0.10 % of one core; iOS simulator: hangs +4.8 context switches/s (one per main run-loop wake, which wakes 6.6/s in the noop build too), all four +6 (`benchmark/perf/`) |
 
 The first idle and the 300 KB body figures were taken with the earlier, Android-only version of
 the sample; the rest in the phase 3 device acceptance. Physical devices have not been measured yet.
@@ -526,7 +536,8 @@ sample/iosApp/scripts/capture-swift-test.sh 'platform=iOS Simulator,name=iPhone 
 
 The Debug app launches on both simulators, the iPhone 17 (iOS 27.0) and the iPhone 16 (iOS 18.2):
 an earlier Xcode 27.1 build aborted in dyld on iOS 18.2 (a CoreGraphics symbol iOS 18.2 lacks), and
-the current build no longer does (perf lab run on the iPhone 16, 2026-10-26).
+the current build no longer does, since the app target weak-links CoreGraphics and libresolv (see
+the iOS install section; perf lab run on the iPhone 16, 2026-10-26).
 
 ## Building
 

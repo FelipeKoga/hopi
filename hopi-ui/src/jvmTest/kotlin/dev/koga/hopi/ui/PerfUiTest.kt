@@ -27,6 +27,7 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import dev.koga.hopi.core.perf.PerfHook
 import dev.koga.hopi.core.perf.PerfMonitor
 import dev.koga.hopi.core.perf.PerfOwner
+import dev.koga.hopi.core.perf.PerfStartRequest
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.list.ListTags
 import dev.koga.hopi.ui.perf.HUD_DESCRIPTION
@@ -129,11 +130,34 @@ class PerfUiTest {
         shown = false
         waitForIdle()
         assertFalse(controller.data.inspectorOpen)
+        // Closed: the tab listens to nothing, the running set included.
+        waitUntil(timeoutMillis = 5_000) { !controller.hasRunningListeners && !controller.data.hasListeners }
+    }
+
+    @Test
+    fun aMonitorStoppedFromOutsideTurnsItsSwitchOffWhileTheTabIsOpen() = runComposeUiTest {
+        val controller = FakePerfController().also { PerfHook.register(it) }
+        setContent { HopiScreen(store, onClose = {}) }
+        onNodeWithContentDescription(ListTags.PERF).performClick()
+        waitForText("not available on jvm")
+        onNodeWithContentDescription(PerfTags.monitor("cpu")).assertIsOff().performClick()
+        waitUntil(timeoutMillis = 5_000) { controller.held(PerfMonitor.CPU) }
+        // The switch follows the rebuilt model, which comes after the start returned.
+        waitForText("started in the app")
+        onNodeWithContentDescription(PerfTags.monitor("cpu")).assertIsOn()
+
+        // A CLI or the desktop stops it through the bridge, with no sample or event to follow.
+        controller.stop(setOf(PerfMonitor.CPU))
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithContentDescription(PerfTags.monitor("cpu")).assertIsOff() }.isSuccess
+        }
     }
 
     @Test
     fun aLongPressTogglesTheHudWhichDrawsOnlyWhenItsTextChanges() = runComposeUiTest {
         val controller = FakePerfController().also { PerfHook.register(it) }
+        // Over nothing running the HUD reads "perf: off" and drops what arrives.
+        controller.start(PerfStartRequest(setOf(PerfMonitor.CPU, PerfMonitor.MEMORY)), PerfOwner.Code)
         var recompositions = 0
         setContent {
             HopiLauncher(store = { store }, recompositionProbe = { recompositions++ }) {
@@ -156,6 +180,6 @@ class PerfUiTest {
 
         onNodeWithContentDescription(LAUNCHER_DESCRIPTION).performTouchInput { longClick() }
         waitUntil(timeoutMillis = 5_000) { !hud() }
-        assertFalse(controller.data.hasListeners, "a hidden HUD listens to nothing")
+        assertFalse(controller.data.hasListeners || controller.hasRunningListeners, "a hidden HUD listens to nothing")
     }
 }

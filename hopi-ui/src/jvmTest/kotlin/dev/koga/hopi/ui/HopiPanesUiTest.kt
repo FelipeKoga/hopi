@@ -2,6 +2,9 @@ package dev.koga.hopi.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -13,10 +16,13 @@ import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.core.model.CapturedBody
@@ -42,10 +48,10 @@ class HopiPanesUiTest {
     @AfterTest
     fun closeStore() = store.close()
 
-    private fun submitAll(vararg transactions: HttpTransaction) {
+    private fun submitAll(vararg transactions: HttpTransaction, into: HopiStore = store) {
         for (transaction in transactions) {
-            while (store.nextId() < transaction.id) continue
-            assertTrue(store.submit(transaction))
+            while (into.nextId() < transaction.id) continue
+            assertTrue(into.submit(transaction))
         }
     }
 
@@ -57,6 +63,10 @@ class HopiPanesUiTest {
         responseBody = transaction.responseBody?.let { CapturedBody.notFetched(it.reportedBytes) },
         protocol = null,
     )
+
+    /** `GET /<path><id>` for each of [ids]. */
+    private fun requests(ids: LongRange, path: String = "r"): Array<HttpTransaction> =
+        ids.map { complete(it, url = "https://api.example.com/$path$it") }.toTypedArray()
 
     private fun ComposeUiTest.waitForText(text: String, substring: Boolean = false) {
         waitUntil(timeoutMillis = 5_000) { exists(text, substring) }
@@ -170,6 +180,51 @@ class HopiPanesUiTest {
         state.clearSelection()
         waitForText("No request selected")
         waitUntil(timeoutMillis = 5_000) { selections.lastOrNull() == null }
+    }
+
+    @Test
+    fun aListTheSelectionScrolledKeepsItsRowsInPlace() = runComposeUiTest {
+        // More rows than the panes show, newest first: /r20 at the top, /r3 far below it.
+        submitAll(*requests(1L..20L))
+        val state = panes(width = 1200)
+        waitForText("/r20")
+        waitForIdle()
+        // The keyboard moves the selection down to /r3, out of the first screen: the list scrolls to it.
+        repeat(18) { state.selectNext() }
+        assertEquals(3, state.selectedId)
+        waitForText("/r3")
+        val top = onNodeWithText("/r3").getBoundsInRoot().top
+
+        submitAll(*requests(21L..23L))
+        waitForText("23")
+        assertEquals(top, onNodeWithText("/r3").getBoundsInRoot().top, "the rows moved under the selection")
+    }
+
+    @Test
+    fun aScrolledListOpensTheStoreOfAnotherAppProcessAtItsNewest() = runComposeUiTest {
+        submitAll(*requests(1L..20L))
+        var shown by mutableStateOf(store)
+        setContent { Box(Modifier.requiredSize(1200.dp, 700.dp)) { HopiPanes(shown, onSelected = {}, onClear = {}) } }
+        waitForText("/r20")
+        val top = onNodeWithText("/r20").getBoundsInRoot().top
+        onNode(hasScrollToIndexAction()).performScrollToIndex(5)
+
+        // The app restarted: the viewer swaps in a store for the new process, whose ids start at 1
+        // again and whose catch-up already holds more rows than fit.
+        val relaunched = HopiStore(scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        try {
+            submitAll(*requests(1L..20L, path = "b"), into = relaunched)
+            shown = relaunched
+            waitUntil(timeoutMillis = 5_000) { !exists("/r", substring = true) }
+            assertEquals(top, onNodeWithText("/b20").getBoundsInRoot().top, "the new process's newest opened above the list")
+
+            // At its top, the list stays on newest from there.
+            submitAll(*requests(21L..23L, path = "b"), into = relaunched)
+            waitForText("23")
+            assertEquals(top, onNodeWithText("/b23").getBoundsInRoot().top)
+        } finally {
+            relaunched.close()
+        }
     }
 
     @Test

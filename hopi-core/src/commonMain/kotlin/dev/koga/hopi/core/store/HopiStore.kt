@@ -49,6 +49,9 @@ import kotlinx.coroutines.launch
  * connects, the process as it dies), which applies what waited before it returns. Reads ([transactions], [get], [since]) see the last published
  * snapshot and take no lock. A published snapshot shares all but the changed chunks of entries
  * with the one before it, so an update costs the same whether the store holds 5 entries or 500.
+ * Terminal writes queued and not yet applied hold at most [maxTotalBytes] of bodies between them
+ * besides those the store holds (or one write alone): a consumer that falls behind cannot make a
+ * backlog of captures grow the heap.
  */
 @HopiInternalApi
 public class HopiStore(
@@ -116,6 +119,17 @@ public class HopiStore(
     private val lostTerminalWrites = AtomicLong(0)
 
     /**
+     * Body bytes of the terminal writes queued and not yet released by a pass ([heldBytes]): what
+     * a consumer that fell behind keeps alive outside [maxTotalBytes]. An end that would take it
+     * past [maxTotalBytes] while another is queued goes in without its bodies ([SKIPPED_STORE_BACKLOG]),
+     * and an end that takes it to half of [maxTotalBytes] wakes the consumer out of its doze, as
+     * half the lane does. One atomic add per end that holds bodies; the consumer takes a pass's
+     * bytes off once the pass is published, so the events it holds until then are counted too.
+     */
+    private val queuedBytes = AtomicLong(0)
+    private val wakeAtQueuedBytes = maxOf(1L, maxTotalBytes / 2)
+
+    /**
      * Thread mode: callers of [awaitApplied] not yet taken by a pass. The consumer takes them before
      * a pass and releases [applied] once for each when the lanes are drained, so a caller returns
      * after a pass that began after its call. Read by the consumer only between passes.
@@ -156,7 +170,8 @@ public class HopiStore(
     /**
      * Emitted after the snapshot containing the change is published, also for writes the store did
      * not retain (cleared or evicted). A pending snapshot that arrives after its transaction's
-     * terminal one is ignored and emits nothing. Slow collectors lose the oldest.
+     * terminal one is ignored and emits nothing, and so is every later snapshot of a [withdraw]n
+     * record. Slow collectors lose the oldest.
      */
     public val events: SharedFlow<TransactionEvent> = _events.asSharedFlow()
 
@@ -194,11 +209,28 @@ public class HopiStore(
      */
     public val redactor: Redactor get() = outwardRedaction.load() ?: Redactor.Default
 
+    private val _redactors = MutableStateFlow(Redactor.Default)
+
+    /**
+     * [redactor] as a flow: it emits each time [includeRedaction] grows it, as a recorder installs (a
+     * client's plugin, URLSession capture's start, Android capture's first recorded request on that
+     * request's thread, once per process), so a screen showing a record redacts it again at once.
+     */
+    public val redactors: StateFlow<Redactor> = _redactors.asStateFlow()
+
     public fun includeRedaction(redactor: Redactor) {
         while (true) {
             val current = outwardRedaction.load()
             val next = current?.union(redactor) ?: redactor
-            if (next === current || outwardRedaction.compareAndSet(current, next)) return
+            if (next === current) return
+            if (outwardRedaction.compareAndSet(current, next)) break
+        }
+        // The latest, not this call's: a concurrent call may have grown it again since, and the
+        // last one to publish must not leave an older redactor in the flow.
+        while (true) {
+            val latest = this.redactor
+            _redactors.value = latest
+            if (this.redactor === latest) return
         }
     }
 
@@ -218,6 +250,13 @@ public class HopiStore(
     // Consumer only: what a pass drained, so the loop knows whether a lane may hold more.
     private var drainedToLimit = false
 
+    // Consumer only: the [queuedBytes] of the terminal writes the current pass took.
+    private var passBytes = 0L
+
+    // Consumer only: ids of [withdraw]n records, whose late snapshots are ignored. One per request
+    // that was in flight while a platform recorder started, so a few per process.
+    private val withdrawnIds = HashSet<Long>()
+
     // Everything the consumer reads is declared above: it may start before the constructor returns.
     private val consumer: Job? = scope?.launch { consumeOnDoorbell() }
 
@@ -231,7 +270,10 @@ public class HopiStore(
     /**
      * Queues [transaction] to insert or replace the entry with its id. Never suspends. Returns
      * false when the store is closed, or when a terminal snapshot is rejected and counted in
-     * [droppedTerminalWrites].
+     * [droppedTerminalWrites]. A terminal snapshot queued behind ends that already hold
+     * [maxTotalBytes] of bodies is kept without its bodies' bytes ([SKIPPED_STORE_BACKLOG]), but for
+     * a request body it shares with its start (an end built on its start), which the record keeps
+     * whenever that start reached the store.
      */
     public fun submit(transaction: HttpTransaction): Boolean = enqueue(transaction, transaction.state.isTerminal)
 
@@ -256,6 +298,19 @@ public class HopiStore(
      */
     public fun submitEnd(record: DeferredRecord): Boolean = enqueue(record, terminal = true)
 
+    /**
+     * Withdraws a record that another recorder may also have made (the Ktor plugin's, when a
+     * platform recorder started while the request was in the engine): the store drops the entry
+     * and ignores every later snapshot of its id, so the request is never listed twice, at the cost
+     * of maybe missing it. Queued like an end, after the record's start, and never suspends; false
+     * when the store is closed or the lane is full (counted in [droppedTerminalWrites]). [last] is
+     * the record's final snapshot, failed with an error that says why. Nothing is published for it,
+     * except when a pass before this one published the start and a viewer is attached: a viewer or
+     * a bridge tail may show that start, so [last] ends it there ([TransactionEvent.Completed],
+     * not retained, like any write the store does not keep).
+     */
+    public fun withdraw(last: HttpTransaction): Boolean = enqueue(Withdrawal(last), terminal = true)
+
     private fun enqueue(write: Any, terminal: Boolean): Boolean {
         if (!terminal) {
             val sent = writes.trySend(write).isSuccess
@@ -264,18 +319,74 @@ public class HopiStore(
             if (sent && viewers.load() > 0) wake()
             return sent
         }
-        val result = terminalWrites.trySend(write)
+        var queuedWrite = if (write is HttpTransaction) onStoredStart(write) else write
+        var held = heldBytes(queuedWrite)
+        var queued = 0L
+        if (held > 0) {
+            queued = queuedBytes.addAndFetch(held)
+            if (queued > maxTotalBytes && queued > held) {
+                // The consumer is a whole store of bodies behind: this end goes in with its sizes but
+                // without its bytes, as a body over the entry cap does, rather than not at all.
+                queuedBytes.addAndFetch(-held)
+                queuedWrite = withoutBodies(queuedWrite)
+                held = 0
+            }
+        }
+        val result = terminalWrites.trySend(queuedWrite)
         if (result.isSuccess) {
             // Nobody watching: the end waits for the doze to end, or wakes a consumer asleep with no timer.
-            if (viewers.load() > 0 || marked.incrementAndFetch() >= forceWakeAt) wake() else mark()
+            if (viewers.load() > 0 || queued >= wakeAtQueuedBytes || marked.incrementAndFetch() >= forceWakeAt) wake() else mark()
             return true
         }
+        if (held > 0) queuedBytes.addAndFetch(-held)
         if (result.isClosed) return false
         lostTerminalWrites.incrementAndFetch()
         // The consumer publishes the count on its next pass.
         wake()
         return false
     }
+
+    /**
+     * [end] as an [EndOnStoredStart] when its request body is the very one the store holds for its
+     * pending start (an end built on its start, as the Ktor plugin's and URLSession capture's are),
+     * else [end] itself. A start still in its lane is not enough: that lane drops its oldest under a
+     * flood, and the end would then hold the array alone, uncounted (a pass that evicts the start
+     * before the end is applied leaves it so until then: at most what that pass evicted). One
+     * volatile read and a binary search, for an end whose request body has bytes.
+     */
+    private fun onStoredStart(end: HttpTransaction): Any {
+        val request = end.requestBody
+        if (request == null || request.bytes.isEmpty()) return end
+        val start = get(end.id) ?: return end
+        return if (!start.state.isTerminal && start.requestBody === request) EndOnStoredStart(end) else end
+    }
+
+    /**
+     * Body bytes [write] keeps alive while it is queued, the same when it is queued and when it is
+     * applied: an [EndOnStoredStart] counts its response only, the store counting its request's
+     * array. A [submitDeferred] build counts none: nothing in Hopi queues bodies that way.
+     */
+    private fun heldBytes(write: Any): Long = when (write) {
+        is HttpTransaction -> write.capturedBytes
+        is EndOnStoredStart -> (write.end.responseBody?.capturedBytes ?: 0).toLong()
+        is DeferredRecord -> write.heldBytes()
+        else -> 0L
+    }
+
+    /** [write] with each body that holds bytes reduced to its size, on the producer's thread before it is queued. */
+    private fun withoutBodies(write: Any): Any = when (write) {
+        is HttpTransaction -> write.copy(requestBody = write.requestBody?.backlogOverByteCap(), responseBody = write.responseBody?.backlogOverByteCap())
+        // Its request's array stays with the store's start whatever becomes of the end: only the response goes.
+        is EndOnStoredStart -> EndOnStoredStart(write.end.copy(responseBody = write.end.responseBody?.backlogOverByteCap()))
+        is DeferredRecord -> {
+            write.shedBodies()
+            write
+        }
+        else -> write
+    }
+
+    private fun CapturedBody.backlogOverByteCap(): CapturedBody =
+        if (bytes.isEmpty()) this else CapturedBody.skipped(SKIPPED_STORE_BACKLOG, contentType, totalBytes ?: capturedBytes.toLong())
 
     private fun wake() {
         signal?.wake() ?: doorbell?.trySend(Unit)
@@ -341,9 +452,14 @@ public class HopiStore(
 
     private class Deferred(val build: () -> HttpTransaction)
 
+    private class Withdrawal(val last: HttpTransaction)
+
+    /** A terminal snapshot whose request body is the one the store held for its start when it was queued ([onStoredStart]). */
+    private class EndOnStoredStart(val end: HttpTransaction)
+
     /**
      * A record whose snapshots the consumer builds ([submitStart], [submitEnd]): the request thread
-     * queues the object itself, so a hand-off allocates nothing. Both functions run on the
+     * queues the object itself, so a hand-off allocates nothing. Both snapshot functions run on the
      * consumer, must return at once and must not block; a throw drops that write.
      */
     @HopiInternalApi
@@ -352,6 +468,22 @@ public class HopiStore(
 
         /** Must return a terminal snapshot. */
         public fun terminalSnapshot(): HttpTransaction
+
+        /**
+         * The bytes of the body arrays this record keeps for its end: what [submitEnd] counts as
+         * queued until the store applied the end. Read on the thread that submits the end and again
+         * on the consumer, so it must not change once [submitEnd] is called; must return at once and
+         * never throw.
+         */
+        public fun heldBytes(): Long
+
+        /**
+         * Lets go of the arrays [heldBytes] counts, which then returns 0: the store is behind by a
+         * whole store of queued bodies. Called on the thread that submits the end, before it is
+         * queued; [terminalSnapshot] then records each of those bodies skipped with
+         * [SKIPPED_STORE_BACKLOG] and the size it had.
+         */
+        public fun shedBodies()
     }
 
     /**
@@ -460,6 +592,11 @@ public class HopiStore(
             }
             pendingEvents.clear()
         }
+        // The pass's bodies are in the buffer now, or evicted and held by no queue: released.
+        if (passBytes != 0L) {
+            queuedBytes.addAndFetch(-passBytes)
+            passBytes = 0
+        }
         _droppedTerminalWrites.value = lostTerminalWrites.load()
         return drainedToLimit
     }
@@ -477,9 +614,13 @@ public class HopiStore(
     /** Returns true when [buffer] changed. */
     private fun apply(queued: Any, terminalLane: Boolean): Boolean {
         val changed = applyClear()
+        if (queued is Withdrawal) return withdrawNow(queued.last) || changed
         val write = try {
+            // What the producer counted is released with this pass, whatever becomes of the write.
+            if (terminalLane) passBytes += heldBytes(queued)
             when (queued) {
                 is HttpTransaction -> queued
+                is EndOnStoredStart -> queued.end
                 is DeferredRecord -> if (terminalLane) queued.terminalSnapshot() else queued.pendingSnapshot()
                 is Deferred -> queued.build()
                 else -> return changed
@@ -495,7 +636,9 @@ public class HopiStore(
             val stale = if (existing >= 0) buffer[existing].state.isTerminal else write.id <= evictedThrough
             if (stale) return changed
         }
-        val transaction = fitToByteCap(write)
+        // A withdrawn record's late start (its lane can deliver it after the withdrawal) brings nothing back.
+        if (withdrawnIds.isNotEmpty() && write.id in withdrawnIds) return changed
+        val transaction = fitToByteCap(withStartRequestBody(write, existing))
         events += when {
             transaction.state.isTerminal -> TransactionEvent.Completed(transaction)
             existing >= 0 -> TransactionEvent.Updated(transaction)
@@ -520,6 +663,43 @@ public class HopiStore(
             bufferBytes -= evicted.capturedBytes
             if (evicted.id > evictedThrough) evictedThrough = evicted.id
         }
+        return true
+    }
+
+    /**
+     * [write] with the request body of its pending start at [existing] when the backlog took its
+     * own ([SKIPPED_STORE_BACKLOG]) and the start holds that body, as its size says: an end built on
+     * its start carries the start's array, so letting it go freed nothing, and the record keeps it.
+     */
+    private fun withStartRequestBody(write: HttpTransaction, existing: Int): HttpTransaction {
+        val shed = write.requestBody ?: return write
+        if (existing < 0 || shed.skippedReason != SKIPPED_STORE_BACKLOG) return write
+        val start = buffer[existing]
+        val kept = start.requestBody
+        if (start.state.isTerminal || kept == null || kept.skippedReason != null || kept.reportedBytes != shed.totalBytes) return write
+        return write.copy(requestBody = kept)
+    }
+
+    /**
+     * Applies a [withdraw]: the entry goes, and so do this pass's events about it, which nobody has
+     * seen yet. A start published by an earlier pass may be on a viewer's screen or in a tail's
+     * stream, so while a viewer is attached [last] ends it there. Returns true when [buffer] changed.
+     */
+    private fun withdrawNow(last: HttpTransaction): Boolean {
+        val id = last.id
+        withdrawnIds += id
+        val events = pendingEvents
+        var startedInThisPass = false
+        for (i in events.indices.reversed()) {
+            val event = events[i]
+            if (event.transaction.id != id) continue
+            if (event is TransactionEvent.Started) startedInThisPass = true
+            events.removeAt(i)
+        }
+        val existing = buffer.binarySearchById(id)
+        if (existing < 0) return false
+        bufferBytes -= buffer.removeAt(existing).capturedBytes
+        if (!startedInThisPass && viewers.load() > 0) events += TransactionEvent.Completed(last)
         return true
     }
 
@@ -572,6 +752,12 @@ public class HopiStore(
 
         /** [CapturedBody.skippedReason] of a body dropped because its entry alone exceeded the store's byte cap. */
         public const val SKIPPED_OVER_STORE_CAP: String = "over store byte cap"
+
+        /**
+         * [CapturedBody.skippedReason] of a body dropped as its end was queued, because the ends
+         * already queued for a consumer that fell behind held [HopiStore.maxTotalBytes] of bodies.
+         */
+        public const val SKIPPED_STORE_BACKLOG: String = "store backlog over byte cap"
         public const val DEFAULT_EVENT_BUFFER_CAPACITY: Int = 1024
 
         private val defaultStore = AtomicReference<HopiStore?>(null)

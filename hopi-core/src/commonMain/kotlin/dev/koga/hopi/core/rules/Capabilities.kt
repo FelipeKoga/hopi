@@ -21,9 +21,13 @@ public object Capabilities {
     public const val NOT_FOLLOWED: String =
         "a mocked 3xx, 401 or 407 reaches the app as the final response on this source; the client does not follow it"
 
-    /** Every entry for [spec] on the sources its match names (all four when it names none). */
+    /**
+     * Every entry for [spec] on the sources its match names; when it names none, on the sources that
+     * can record on this platform ([platformSources]), so an Android app is never told what URLSession
+     * cannot do.
+     */
     public fun unsupported(spec: RuleSpec): List<Unsupported> {
-        val sources = spec.match.sources ?: RuleSource.entries.toSet()
+        val sources = sourcesOf(spec)
         val result = ArrayList<Unsupported>()
         for (source in RuleSource.entries) {
             if (source !in sources) continue
@@ -59,4 +63,22 @@ public object Capabilities {
         if (sources != null && source !in sources) return false
         return unsupportedOn(source, spec).none { it.excluded }
     }
+
+    /**
+     * True when every source [unsupported] checks [spec] against (the named ones, or
+     * [platformSources] when it names none) excludes it, whatever its switch says (a response edit
+     * aimed at URLSession only). False does not mean a source applies it: a named source this
+     * platform lacks excludes nothing yet never reads its array, and on iOS the Ktor plugin defers
+     * to URLSession capture for the Darwin engine.
+     */
+    public fun appliesNowhere(spec: RuleSpec): Boolean = sourcesOf(spec).none { applies(it, spec) }
+
+    private fun sourcesOf(spec: RuleSpec): Set<RuleSource> = spec.match.sources ?: platformSources
 }
+
+/**
+ * The sources that can record on this platform: what a rule naming no sources is checked against
+ * ([Capabilities.unsupported]). The rule arrays are not limited to them; a source this platform
+ * lacks never reads its own.
+ */
+internal expect val platformSources: Set<RuleSource>

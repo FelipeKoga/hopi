@@ -93,6 +93,9 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
     private var endBody: CapturedBody? = null
     private var endTee: TeeInputStream? = null
 
+    // The request body's size once [shedBodies] let go of its capture, else null.
+    private var shedRequestBytes: Long? = null
+
     /**
      * Takes the request snapshot before the app's first connecting call, once; with rules, applies
      * the first matching rule there. [output] is true for `getOutputStream`.
@@ -293,9 +296,14 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
         responseSkip = ResponseSkip.reason(responseType)
     }
 
-    /** The app's output stream, copying what it writes up to the cap. */
+    /**
+     * The app's output stream, copying what it writes up to the cap; after the end (a connection whose
+     * first connecting call failed, opened again) the stream itself: what the record holds, and what
+     * the store counted for its end, change no more.
+     */
     @Synchronized
     public fun requestStream(stream: OutputStream): OutputStream {
+        if (terminal.get()) return stream
         val target = target ?: return stream
         val capture = requestCapture ?: BoundedCapture(target.maxBodyBytes, requestLength).also { requestCapture = it }
         return TeeOutputStream(stream, capture)
@@ -371,9 +379,35 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
         return started.failedAfterResponse(error, durationMs, code, responseHeaders(), body, recordedProtocol()).copy(finalUrl = finalUrl)
     }
 
+    // Both captures froze before [finish] or [failed] queued the end, and none is made after it
+    // ([requestStream] and [Ruled.writeReplacement] look at [terminal] first), so neither changes.
+    override fun heldBytes(): Long = (requestCapture?.held ?: 0).toLong() + (endTee?.held ?: 0)
+
+    /**
+     * After the end, nothing reads the tee's fields again ([responseStream] and [disconnected] look
+     * at [terminal] first), so they are let go with it; an app that keeps its stream keeps its copy.
+     */
+    override fun shedBodies() {
+        requestCapture?.let { capture ->
+            if (capture.held == 0) return@let
+            shedRequestBytes = capture.total
+            requestCapture = null
+        }
+        endTee?.let { stream ->
+            if (stream.held == 0) return@let
+            endBody = stream.withoutBytes()
+            endTee = null
+            tee = null
+            teeSource = null
+        }
+    }
+
     private fun requestBody(): CapturedBody? {
-        val capture = requestCapture ?: return null
+        val capture = requestCapture
+        val shed = shedRequestBytes
+        if (capture == null && shed == null) return null
         val type = requestProperties.entries.firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }?.value?.firstOrNull()
+        if (capture == null) return CapturedBody.skipped(HopiStore.SKIPPED_STORE_BACKLOG, type, shed)
         return CapturedBody(capture.bytes(), capture.total, capture.truncated, type, skippedReason = null)
     }
 
@@ -444,6 +478,8 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
                 connectFailed(e)
                 throw e
             }
+            // Sent after the end (a disconnect landed first): the record's request stays as it ended.
+            if (terminal.get()) return
             val capture = BoundedCapture(target?.maxBodyBytes ?: 0, bytes.size.toLong())
             capture.take(bytes, 0, bytes.size)
             requestCapture = capture
@@ -642,6 +678,12 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
             val skip = responseSkip ?: return CapturedBody(capture.bytes(), capture.total, capture.truncated, responseType, skippedReason = null)
             return CapturedBody.skipped(skip, responseType, capture.total)
         }
+
+        /** Bytes the capture's array takes ([BoundedCapture.held]). */
+        val held: Int get() = capture.held
+
+        /** The body by its size alone, for [shedBodies]. */
+        fun withoutBytes(): CapturedBody = CapturedBody.skipped(HopiStore.SKIPPED_STORE_BACKLOG, responseType, capture.total)
 
         private inline fun <T> guarded(read: () -> T): T = try {
             read()

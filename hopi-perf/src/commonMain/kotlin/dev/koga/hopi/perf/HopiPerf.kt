@@ -59,8 +59,8 @@ public class HopiPerfConfig internal constructor() {
 
     /**
      * Android: a heartbeat message every `threshold / 2` instead of the Looper printer, for an app
-     * that needs another tool's printer; it wakes both threads while the app is idle (8 per second
-     * at 250 ms), which the printer does not.
+     * that needs another tool's printer; it wakes both threads while the app is idle (each 8 times
+     * a second at 250 ms), which the printer does not.
      */
     public var hangHeartbeat: Boolean = false
 

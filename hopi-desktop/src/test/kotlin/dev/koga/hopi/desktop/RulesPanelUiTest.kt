@@ -11,6 +11,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.hasContentDescription
@@ -27,12 +28,16 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
+import dev.koga.hopi.core.rules.EditSpec
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.core.rules.MatchSpec
 import dev.koga.hopi.core.rules.MockSpec
+import dev.koga.hopi.core.rules.ResponseEdit
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleResult
+import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleSpec
+import dev.koga.hopi.core.rules.UrlRuleRequest
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -41,7 +46,9 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -144,7 +151,7 @@ class RulesPanelUiTest {
     }
 
     @Test
-    fun hitsAreCountedFromTheTailAndAnAppRuleAppearsByItsNotice() = runComposeUiTest {
+    fun aRuledRequestReListsTheAppsHitsAndAnAppRuleAppearsByItsNotice() = runComposeUiTest {
         val app = FakeApp(root.resolve("2")).also { closeables += it }
         connected(app)
         openPanel()
@@ -152,6 +159,8 @@ class RulesPanelUiTest {
         // Added in the app (HopiRules, the CLI): the tail's notice re-lists.
         val rule = added(RuleSpec(MatchSpec(path = "/users/*"), times = 2, mock = MockSpec(500)))
         waitForText("0/2 hits")
+        // A recorder claims the rule, then writes the record: its summary has the panel list the app's count.
+        assertNotNull(RuleEngine.state.firstMatch(RuleSource.KTOR, UrlRuleRequest("GET", "https://api.example.com/users/1", emptyList())))
         app.add { completeTx(it, url = "https://api.example.com/users/1").copy(ruleId = rule, ruleApplied = "mock") }
         waitForText("1/2 hits")
         // The row's tag in the list.
@@ -193,6 +202,39 @@ class RulesPanelUiTest {
         onNodeWithTag(RulesTags.SAVE).performClick()
         waitUntil(timeoutMillis = 15_000) { RuleEngine.list().size == 1 }
         assertTrue(RuleEngine.list().single().spec.mock!!.body!!.bytes.contentEquals(bytes))
+    }
+
+    @Test
+    fun aSourceThatNeverAppliesARuleHasALineOfItsOwnAndARuleNoSourceAppliesIsInactive() = runComposeUiTest {
+        val app = FakeApp(root.resolve("7")).also { closeables += it }
+        val responseEdit = EditSpec(response = ResponseEdit(status = 503))
+        added(RuleSpec(MatchSpec(path = "/both", sources = setOf(RuleSource.KTOR, RuleSource.URL_SESSION)), edit = responseEdit))
+        added(RuleSpec(MatchSpec(path = "/ios-only", sources = setOf(RuleSource.URL_SESSION)), edit = responseEdit))
+        added(RuleSpec(MatchSpec(path = "/old", sources = setOf(RuleSource.OKHTTP)), mock = MockSpec(302)))
+        connected(app)
+        openPanel()
+        waitForText("* */old")
+        // Each exclusion, as the app reported it, in a line that says so; not the warning of a difference.
+        assertEquals(2, onAllNodes(hasText("not applied on urlsession: response edits are unsupported", substring = true)).fetchSemanticsNodes().size)
+        assertFalse(exists("⚠ urlsession"))
+        waitForText("⚠ okhttp: a mocked 3xx")
+        // Only the rule whose every source excludes it: Ktor applies the other.
+        waitForText("edit response  ·  0 hits · inactive")
+        assertEquals(1, onAllNodes(hasText("· inactive", substring = true)).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun anUpdateFormWithoutItsRuleLeavesThePanelUsable() = runComposeUiTest {
+        val app = FakeApp(root.resolve("8")).also { closeables += it }
+        val rules = connected(app)
+        openPanel()
+        waitForText("No rules.")
+        // Only RuleForm.updateOf makes an update form, always with its rule's id; one without sends nothing.
+        runOnIdle { rules.edit(RuleForm(FormKind.Update)) }
+        onNodeWithTag(RulesTags.SAVE).performClick()
+        waitForIdle()
+        assertFalse(rules.busy)
+        onNodeWithTag(RulesTags.SAVE).assertIsEnabled()
     }
 
     @Test

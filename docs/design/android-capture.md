@@ -28,8 +28,9 @@ Goals:
   listeners. What the app can read stays the same too: `client.interceptors()`,
   `client.networkInterceptors()` and the builder's lists.
 - Bounded: a request body and a response body each keep at most `maxBodyBytes`, and past the cap
-  they are only counted. No `peekBody` or read-ahead. Hopi does no work of its own on the main
-  thread. The only main-thread cost is the auto-start, measured.
+  they are only counted; the records queued for a store consumer that fell behind keep at most
+  `maxTotalBytes` of captures between them. No `peekBody` or read-ahead. Hopi does no work of its
+  own on the main thread. The only main-thread cost is the auto-start, measured.
 - Release (non-debuggable) variants are not instrumented and get the noop twin. They contain no
   capture class and no reference to one, and an automated check proves it.
 
@@ -412,7 +413,10 @@ request that asks for gzip itself is still recorded raw, because that is what it
 The timing is tighter than on iOS. `cover()` runs in the provider, before `Application.onCreate`,
 so a Ktor client built in `Application.onCreate` or later has no window in which a request is
 recorded twice. Only a Ktor request sent from another `ContentProvider` with a higher `initOrder`
-could fall into one, and none can rank above `Int.MAX_VALUE`.
+could fall into one, and none can rank above `Int.MAX_VALUE`; such a request is not recorded twice
+either since 2026-10-27: `start()` covers the engines before it sets `started`, and the plugin
+withdraws its record when it finds its engine covered by the time the engine answers, as on iOS
+(urlsession-capture.md, "Dedupe with the Ktor plugin").
 
 The other duplicate paths are closed too. OkHttp behind `URLStreamHandlerFactory` is recorded by
 the interceptor only (wrapper rule above). Android's platform `HttpURLConnection` is not OkHttp 3,
@@ -835,8 +839,10 @@ the same (the same server log) and that `hopi` finds no bridge.
    bodies there.
 10. **Pending records.** An OkHttp body or a `URLConnection` stream that the app never reads,
     closes or disconnects stays `Pending`, as in the Ktor plugin.
-11. **Memory**: every request in flight holds at most the cap (one shared-segment buffer or block
-    list) plus the store's own bound, the same formula as the plugin.
+11. **Memory**: every request in flight holds at most the cap per body, request and response (one
+    shared-segment buffer or block list each), plus the store's own bound, the same formula as the
+    plugin; the records whose end waits for a store consumer that fell behind hold at most
+    `maxTotalBytes` more between them (as built, see "The store thread's priority").
 12. **TestKit on 8 GB.** The functional tests run a second Gradle daemon (1 GB heap) next to the
     outer build. They run serially, once per base check, and stop their daemon. If memory
     pressure shows, they move to an opt-in task, and the base check keeps the unit tests only.
@@ -1123,8 +1129,23 @@ A review of the hardening pass confirmed seven defects; all are fixed, with test
   below the app's threads, in the app's own group. On the API 35 emulator (Android 15) both values
   leave the thread in `cpu:/top-app` and `cpuset:/top-app` (`ps -T` policy `ta`), so the emulator
   cannot show the difference; a phone under foreground load can. While the consumer is behind,
-  each queued terminal write keeps its capture (up to 256 KB) alive outside the store's byte cap,
-  up to the terminal lane's 4096 entries: open.
+  each queued end kept its captures alive outside the store's byte cap (a request and a response,
+  each up to the cap, so up to 512 KB at the default and 16 MB at the 8 MB clamp), up to the
+  terminal lane's 4096 entries. Closed 2026-10-27: the store counts what the queued ends hold
+  (`DeferredRecord.heldBytes`: the arrays of the request capture and of the response capture, one
+  atomic add per end that holds any), and an end that would take that past `maxTotalBytes` while
+  another waits lets go of its captures on the request thread before it is queued (`shedBodies`),
+  recorded with each body's size and `"store backlog over byte cap"`; half of `maxTotalBytes`
+  queued wakes the consumer out of its doze. A start here carries no request body (each capture is
+  made for its end alone), so an end counts and lets go of arrays only it holds, unlike the Ktor
+  plugin's and URLSession capture's ends, which share their request body with the start
+  (ARCHITECTURE.md, "Store"). Nothing is captured after the end: an output stream the app opens
+  then (a third-party connection whose first connect failed, opened again) and a rule's body sent
+  after a `disconnect()` reach the connection uncopied, so `heldBytes` stays what the store
+  counted. Still held by a queued record: the app's own `Request`
+  and its body object (OkHttp) or the connection with whatever the platform buffered
+  (`HttpURLConnection`), as before. The request thread now pays that atomic add plus one volatile
+  read of the request capture per end; re-measure on the emulator pending (`captureBench`).
 - **An older CLI** shows a `failedAfterResponse` record's status (`200`) in its code column
   instead of `ERR` (ARCHITECTURE.md, "A failure after the response arrived keeps the response").
 - **The iOS idle harness** summed the CPU of the threads alive at each end, so a thread that

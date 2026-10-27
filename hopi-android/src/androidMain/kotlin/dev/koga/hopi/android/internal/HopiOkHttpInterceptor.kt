@@ -125,6 +125,9 @@ internal class OkHttpRecord(
     private var endBody: CapturedBody? = null
     private var endCapture: BoundedCapture? = null
 
+    // The request body's size once [shedBodies] let go of its capture, else null.
+    private var shedRequestBytes: Long? = null
+
     // The raw header: OkHttp's `contentType()` parses a MediaType per response, which nothing here needs.
     private var responseType: String? = null
 
@@ -228,6 +231,23 @@ internal class OkHttpRecord(
         return started.failedAfterResponse(error, durationMs, code, flatten(headers), body, recordedProtocol()).copy(finalUrl = finalUrl)
     }
 
+    // Both captures are final by the time the end is queued: the request's was set (a volatile
+    // write) before the response came, the response's froze before [finish] or [failed] ran.
+    override fun heldBytes(): Long = (requestBody?.capture?.held ?: 0).toLong() + (endCapture?.held ?: 0)
+
+    override fun shedBodies() {
+        requestBody?.capture?.let { capture ->
+            if (capture.held == 0) return@let
+            shedRequestBytes = capture.total
+            requestBody = null
+        }
+        endCapture?.let { capture ->
+            if (capture.held == 0) return@let
+            endBody = CapturedBody.skipped(HopiStore.SKIPPED_STORE_BACKLOG, responseType, capture.total)
+            endCapture = null
+        }
+    }
+
     /** What [capture] holds of the response: its bytes, or, for a body only counted, its size and why. */
     private fun responseBody(capture: BoundedCapture): CapturedBody {
         val skip = responseSkip ?: return captured(capture, responseType)
@@ -256,6 +276,7 @@ internal class OkHttpRecord(
         val body = request.body ?: return null
         val type = body.contentType()?.toString()
         requestSkip?.let { return CapturedBody.skipped(it, type, null) }
+        shedRequestBytes?.let { return CapturedBody.skipped(HopiStore.SKIPPED_STORE_BACKLOG, type, it) }
         val wrapper = requestBody ?: return null
         val capture = wrapper.capture ?: return CapturedBody.skipped(wrapper.unfinishedReason, type, null)
         return captured(capture, type)

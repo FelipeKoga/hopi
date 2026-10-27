@@ -77,7 +77,7 @@ internal class OverviewField(val label: String, val value: String)
 /** The detail screen's content for one transaction snapshot. */
 internal class DetailModel(
     val transaction: HttpTransaction,
-    /** The URL after the store's redaction: what the screen shows and copies. */
+    /** The URL after the redaction in force when the model was built: what the screen shows. */
     val url: String,
     val title: String,
     val overview: List<OverviewField>,
@@ -303,10 +303,13 @@ internal fun curlOf(transaction: HttpTransaction, redactor: Redactor, maxChars: 
 /** True when [curlOf] had to cut the request body to fit. */
 internal fun curlBodyWasCut(curl: String): Boolean = curl.startsWith(CURL_BODY_CUT_WARNING) || "\n$CURL_BODY_CUT_WARNING" in curl
 
-/** What the share sheet receives, within [MAX_SHARE_CHARS]: a summary line, the URL, then the cURL command. */
+/**
+ * What the share sheet receives, within [MAX_SHARE_CHARS]: a summary line, the URL, then the cURL
+ * command, all with [redactor] (the store's at share time, which may have grown since [model] was built).
+ */
 internal fun shareTextOf(model: DetailModel, redactor: Redactor): String {
     val head = buildString {
-        append(model.transaction.method).append(' ').append(model.url).append('\n')
+        append(model.transaction.method).append(' ').append(redactor.url(model.transaction.url)).append('\n')
         model.overview.firstOrNull { it.label == "Status" }?.let { append("Status: ").append(it.value).append('\n') }
         model.overview.firstOrNull { it.label == "Duration" }?.let { append("Duration: ").append(it.value).append('\n') }
         append('\n')

@@ -277,9 +277,9 @@ inlined body (`:checkNoopParity`). So a debug build is real and a release build 
 `-Phopi.enabled` says; to ship the real modules in a release, a developer must remove the plugin,
 which is the deliberate, visible choice principle 1 asks for. The property keeps its meaning for
 iOS frameworks and for Android apps without the plugin. (The generated `HOPI_ENABLED` of
-`sample/shared` still follows the property, so the Android debug build's Diagnostics caption says
-"noop twins" when built without the flag although the plugin made it real; `HopiAndroid.isStarted`
-in the "Third-party SDK" action's output is the truthful signal.)
+`sample/shared` follows the property, so only the iOS app labels its build with it; the Android
+activity passes `HopiAndroid.isStarted` to `SampleBuild`, so its Diagnostics caption and evidence
+lines say what the plugin selected.)
 
 The sample checks the switch mechanically. `:sample:androidApp:verifyReleaseUsesNoop` reads the
 release APK's dex files with the plugin's `DexReader` (class definitions, every referenced type and
@@ -450,7 +450,36 @@ of `maxTotalBytes` is stored with its larger body (the request's on a tie; then,
 the other) replaced by a skipped body with reason `"over store byte cap"`, so one entry never
 evicts the whole history: at least a quarter of the store stays for older entries. The plugin's
 largest body cap (half the store) still fits whole with a small other body; a POST with both
-bodies at that cap keeps the response. Exposes:
+bodies at that cap keeps the response.
+The terminal writes queued and not yet applied hold at most `maxTotalBytes` of bodies between them
+(or one write alone), so a consumer starved by a busy app cannot let a backlog of captures grow the
+heap (since 2026-10-27; before, each of up to 4096 queued ends kept its bodies, up to two captures
+at the cap each). The request thread pays one atomic add per end that holds bodies; the consumer
+takes a pass's bytes off once the pass is published, so the events it holds until then are counted
+too. A recorder that queues itself (`DeferredRecord`) reports what its captures' arrays take
+(`heldBytes`); a snapshot (the Ktor plugin's, URLSession capture's) counts its bodies' arrays,
+except a request body that is the very one the store holds for its pending start: both build an
+end on its start, so that array is counted in the store, not again behind it, and stays with the
+end whatever the queue holds (one volatile read and a binary search of the published snapshot, for
+an end whose request body has bytes). A start still in the pending lane is not enough, since that
+lane drops its oldest under a flood and the end then holds the array alone. An
+end that would take the queue past `maxTotalBytes` while another end waits is not rejected: it goes
+in with each body reduced to its size and reason `"store backlog over byte cap"` (a recorder lets
+go of its captures first, `shedBodies`); one that went in without the request body its start
+holds, counted while that start waited in its lane, takes the start's back when it is applied
+after it (the same array, so letting it go freed nothing). An end that brings the queue to half
+of `maxTotalBytes` wakes the consumer out of its doze, as half the lane does, so a burst the
+consumer only dozed through keeps its bodies. `withdraw(last)` drops a record that another recorder
+may also have made (the Ktor plugin's, for a request the engine had when a platform recorder
+started, see URLSession capture) and ignores every later snapshot of its id. It is queued like an
+end; `last`, the record's final snapshot (failed, the error says why), is published as `Completed`
+(not retained) only when an earlier pass published the record's start and a viewer is attached,
+since only then can a list or a tail show that start; otherwise nothing of the record goes out. A
+viewer that showed the start and was detached or behind by then misses that end, as it misses the
+end of a record evicted or cleared before its withdrawal: the desktop's `RemoteSession` asks for
+the rows it still holds pending when it resumes and ends as gone one the app no longer has (see
+Agent access, `RemoteSession`).
+Exposes:
 
 - `transactions: StateFlow<List<HttpTransaction>>` for the UI (newest last),
 - `events: SharedFlow<TransactionEvent>` (Started / Updated / Completed) for collectors that may lose
@@ -595,7 +624,9 @@ How the plugin implements this (Ktor 3.5.2):
   the end) also makes the transaction `Failed`. An exception thrown after the send pipeline returned
   (`HttpCallValidator` response validation, for example) leaves it `Complete`.
 - Exactly one terminal snapshot is submitted per transaction (an atomic flag), all through the
-  store's non-suspending `submit`.
+  store's non-suspending `submit`, or none when the record is withdrawn because a platform
+  recorder started while the engine had the request (see URLSession capture, "One record per
+  request").
 - `enabled = false` returns before installing any hook or touching the store.
 
 ## URLSession capture (`hopi-urlsession`)
@@ -647,7 +678,12 @@ bodies `"not observable"`, using KVO on the task's `state` as its end, and a not
 covers: `PlatformCapture` (core) holds the covered engine packages, `start()` covers
 `io.ktor.client.engine.darwin.`, and the plugin checks its client's engine class on every send
 (one atomic read) and records nothing for a covered one, so a client built before `start()` defers
-from its next request. Other engines (CIO, OkHttp in an app without the Android plugin's instrumentation, MockEngine)
+from its next request. A request the engine already has when `start()` runs is never recorded
+twice: `start()` covers the engine before its hooks go live, and the plugin reads the coverage
+once more when the engine answers or fails (one more atomic read); covered by then, the request
+may have been seen by the resume hook, so the plugin withdraws its record (`HopiStore.withdraw`)
+and the request is recorded once by URLSession capture, or missed when it was resumed before the
+hooks (docs/design/urlsession-capture.md, "Dedupe with the Ktor plugin"). Other engines (CIO, OkHttp in an app without the Android plugin's instrumentation, MockEngine)
 are recorded by the plugin as before, `source = "ktor"`. The plugin's install-time work (caps,
 redaction, summary sink, bridge) still happens.
 
@@ -904,7 +940,11 @@ published whenever no enabled, unexhausted rule exists, so a recorder's
 whole cost without rules is one volatile read and one reference comparison
 (`if (state === RuleState.EMPTY)`). At publish each source gets only the rules it can apply
 (`Capabilities`), so a rule never matches where it cannot be applied and nothing checks
-capabilities per request. The first enabled rule that matches and still has `times` left wins
+capabilities per request. What a source cannot do of a rule is listed with it (`unsupported`,
+`applies` false for an exclusion, true for a stated difference) for the sources the rule names,
+or, when it names none, for those that can record on the platform (an expect/actual set: Ktor,
+OkHttp and `HttpURLConnection` on Android; Ktor and URLSession on iOS; Ktor on a plain JVM).
+The first enabled rule that matches and still has `times` left wins
 (higher `priority` first, then the newest); a claim is one compare-and-increment of the rule's
 shared hit counter, and the claim that exhausts a rule republishes the state without it.
 Matching reads each stack's own request objects through a `RuleRequest` view, allocated only when
@@ -1004,8 +1044,9 @@ simulator. Measured costs (emulator, debug build; design, "As built", stage 4): 
 identical to the noop build (0 CPU, 0 wakes idle); frames add nothing measurable on the main
 thread; hangs' Looper printer adds +6.2 to +6.5 µs per main-thread message and +29 µs per
 `Dispatchers.Main` resume (the framework formats the dispatch line for any printer) and nothing
-while idle; the heartbeat adds nothing per message and 8 wakes per second idle; the sampler wakes
-once per interval at about 1 ms of CPU per tick.
+while idle; the heartbeat adds nothing per message and, idle, 8 wakes per second on each of its two
+threads at 250 ms (one beat per `threshold / 2`; measured at 4 each before its cadence was fixed,
+re-measure pending); the sampler wakes once per interval at about 1 ms of CPU per tick.
 
 - **Off is free.** Nothing runs until a monitor starts: no thread, no listener, no lifecycle
   callback, no monitor class loaded. `HopiPerf.install` (or, on Android, `hopi-android`'s provider
@@ -1086,7 +1127,9 @@ once per interval at about 1 ms of CPU per tick.
   `hopi-connect`'s `PerfClient`, decoders and `RemotePerf` (see "Desktop viewer"); in the app, a
   Perf tab in `HopiScreen` and a HUD in `HopiLauncher` (see "UI"). Each reads the model only while
   shown: a listener registered while composed or streaming, removed after, and no timer anywhere
-  (the HUD and the tab update when the model hands out a closed second, a sample or an event).
+  (the HUD and the tab update when the model hands out a closed second, a sample or an event; both
+  also when the running set changes, which `PerfController.addRunningListener` reports, so a
+  stopped monitor's figures go at once and with none running the HUD reads "perf: off").
   The per-thread scan is counted across viewers (`watchThreads`), like the iOS cadence.
 
 ## cURL export
@@ -1435,19 +1478,27 @@ back into `HttpTransaction`s: the inverse of core's `TransactionJson`, round-tri
 `RemoteSession`. A `tail` reads nothing after it, so a session opens two connections on one
 endpoint (one adb forward): the tail streams summaries into a `HopiStore` of the viewer's own
 (2000 entries, 256 MB, keyed by the app's ids, with the store's default redaction on top of the
-app's), the other serves `get` and `clear`. A body crosses the bridge only for the selected
-transaction (`select`, fetched again when a pending selection completes) or an explicit `fetch`; a
-later summary of a fetched snapshot (a re-tail replays the backlog) never replaces its bodies. A
-`SLOW_CLIENT` reply (`SlowClientException.since`) re-tails at once from that `since` on the same
-endpoint. Anything else that ends a connection closes both and the endpoint and reports
+app's), the other serves `get`, `list` and `clear`. A body crosses the bridge only for the selected
+transaction (`select`, fetched again when a pending selection completes) or an explicit `fetch`;
+a later summary of a fetched snapshot (a re-tail replays the backlog) never replaces its bodies.
+A `SLOW_CLIENT` reply (`SlowClientException.since`) re-tails at once from that `since` on the same
+endpoint. That re-tail, and a connect that finds the same process, then ask the app about each row
+still pending here that the resumed backlog has not ended by its turn, the oldest 64 (the rest wait
+for their own summary or the next resume; resumes in the meantime coalesce into one more; since
+2026-10-27): a `list` of one summary from just below the row's id, so no headers or bodies cross.
+A row the app no longer has (its recorder withdrew it while this viewer was away or behind, or it
+was evicted or cleared) gets no summary again, and would stay pending and hold the resume point
+below it, so it ends as gone; an end the app still records for it replaces that row.
+Anything else that ends a connection closes both and the endpoint and reports
 `Disconnected`; the caller connects again on an event. A connect that finds another process (a
 SHA-256 of the token and the Android proof, both new with every app start, compared in memory and
 never shown) starts a fresh store, because the app's ids restart at 1, and drops the selection,
 whose id now means another transaction. A `get` answered `NOT_FOUND` marks the row's bodies
-`CapturedBody.gone`; a `get` answered pending after the tail brought the terminal summary is sent
-once more. `clear` clears this store up to the reply's `through` (all of it for an app that sends
-none). Nothing polls: one tail thread blocked on its socket, one request thread blocked on its
-queue.
+`CapturedBody.gone` and ends a pending row as failed ("gone from the app"), which an end the app
+still records (a request it evicted or cleared in flight) replaces; a `get` answered pending after
+the tail brought the terminal summary is sent once more. `clear` clears this store up to the
+reply's `through` (all of it for an app that sends none). Nothing polls: one tail thread blocked on
+its socket, one request thread blocked on its queue.
 
 **Targets.** `--platform` is inferred when only one of adb/simctl has a target: a `--device` names
 its platform; otherwise the platform with a ready target (adb state `device`, or a booted simulator)
@@ -1586,7 +1637,8 @@ bridge protocol unchanged, through `hopi-connect`: the app needs nothing new.
 **Data.** A `RemoteSession` per target: its own `HopiStore` (2000 entries, 256 MB), keyed by
 the app's ids, with `Redactor.Default` on top of the app's redaction. The panes select through
 `Viewer.select`, so only the selected transaction's body is fetched (`get`); list rows are
-summaries and show "Loading body…" until then. A new app process (another token or proof) gets
+summaries and show "Loading body…" until then (a resume's check of rows still pending is a
+one-line `list` each, without bodies). A new app process (another token or proof) gets
 a fresh store and the selection is cleared, since the ids restart.
 
 **Connections.** Two per app, as `RemoteSession` opens them (a streaming `tail`, and one for `get`
@@ -1647,8 +1699,10 @@ the same commands without binding the keys a second time; while a field of the R
 focus, the arrows, Enter and Esc stay with it.
 
 **Rules.** `RulesPanel`, 420 dp beside the list (⌘L or the Rules menu), reads only
-`RemoteSession.rules`: one row per rule (switch, match, action, hits and `times`, label, one
-warning line per `unsupported` source), Update (priority, times, reset hits: `rules.update` changes
+`RemoteSession.rules`: one row per rule (switch, match, action, hits and `times`, label, one line
+per `unsupported` entry the app reported: "not applied on urlsession: …" in full contrast for an
+exclusion, a muted warning for a stated difference; "inactive" after the hits when every source
+the rule names excludes it), Update (priority, times, reset hits: `rules.update` changes
 nothing else, and bodies and header values come back as sizes and redacted, so changing a match or
 an action is remove and add), Remove, Clear. Forms for mock, fail, delay and edit
 (`RuleForm`, which validates what it can before anything is sent) take headers as a table and a
@@ -1657,7 +1711,10 @@ the app's refusal is shown exactly as sent. The detail pane adds "Mock this resp
 prefilled with the record's exact request and `fromTransaction`, so the body is copied inside the
 app and never crosses the bridge). `RemoteSession` (hopi-connect) lists the rules on connect and again on
 each `{"type":"rules"}` notice of its tail (asked for only when `hello` said `"rules":true`), and
-counts hits locally from the `rule` mark of the summaries the tail brings, so nothing polls.
+again when the tail brings a summary (or a `get` reply) whose `rule` mark the last list may not include, so the hits
+shown are always the app's engine's (never counted on top of a list) and nothing polls: a burst of
+ruled requests costs at most one `rules.list` in flight and one queued (docs/design/rules.md,
+"Desktop viewer").
 
 **Export.** `SessionExport` streams one transaction at a time, giant bodies in 32K-char slices
 (`JsonWriter.chunkedValue`). Each transaction known only by its summary is first completed with
@@ -1717,8 +1774,12 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
 - **`sample/shared`** (KMP: `android`, `iosArm64`, `iosSimulatorArm64`; foundation only, no
   Material) holds everything both apps share. It selects `hopi-ktor`/`hopi-ui` or their
   noop twins with the `hopi.enabled` property exactly as in "Selecting real vs noop", and
-  generates `HOPI_ENABLED` from the same property, so the app says which one it was built
-  with. One process-wide Ktor client (`SampleHttp`; OkHttp on Android, Darwin on iOS,
+  generates `HOPI_ENABLED` from the same property, so the iOS app says which one it was built
+  with. On Android the plugin selects per variant whatever the property says, so the activity sets
+  `SampleBuild.androidCaptureStarted` from `HopiAndroid.isStarted` before the UI; the Diagnostics
+  caption and the evidence lines (`"build"` of the giant-JSON, perf-lab and perf-bench lines,
+  `"real"` of the rules self-test's `done` line) read `SampleBuild` on both platforms. One
+  process-wide Ktor client (`SampleHttp`; OkHttp on Android, Darwin on iOS,
   `ContentNegotiation` with kotlinx-serialization JSON) installs Hopi with
   `logSink = Summary` and `agentBridge = true`. The UI, wrapped in `HopiLauncher`, is a small
   shop with three tabs: **Items** (`GET /items`, a lazy list keyed by id, then `GET /items/{id}`
@@ -1880,7 +1941,14 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
 
 - **List:** newest first; method, status code, host + path, duration, size; Pending/Failed visible at
   a glance. Search by URL substring, filter by status class (2xx, 3xx, 4xx, 5xx, failed, pending,
-  each chip with its count). Lazy list keyed by id. `transactions` is collected only while
+  each chip with its count). Lazy list keyed by id, which keeps its first visible row in place when
+  rows are added above it; so that new requests do not land above the visible area, a list at its
+  top (first row, no offset) stays there as rows arrive, also when it comes back from a detail
+  (`requestScrollToItem(0)` from a `SideEffect`, before the new rows are measured). A list scrolled
+  away from its top, by hand or by a desktop selection moved from the keyboard, keeps its rows where
+  they are. Rows that replace the list's instead of adding to them start at the top: after a Clear
+  (the emptied list asks for it) and, in the desktop viewer, with the store of another app process
+  (`HopiPanes` keeps a position per store). `transactions` is collected only while
   `HopiScreen` is composed (a `produceState`, not `collectAsState`, so that the mapping runs
   off the main thread): each emission goes through a row cache on `Dispatchers.Default` that keeps
   one precomputed row (every string the row shows) per id and rebuilds it only when that id maps
@@ -1906,12 +1974,14 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   view keeps (with one flag per piece for the newline it dropped); copy rebuilds the text from
   them off the main thread. The cache lives only while the screen is composed. A detail is
   formatted again when its transaction's snapshot or the store's `redactor` changes (the redactor
-  grows when another client installs the plugin; it is read on each store emission, so the open
-  detail follows it at the next request). Truncation and skip reasons visible. Text is selectable
+  grows when another client installs the plugin; the store's `redactors` flow emits it, so the open
+  detail and the list follow it at once, not at the next request). Truncation and skip reasons visible. Text is selectable
   (within the pieces on screen).
 - **Actions:** copy cURL (core's `toCurl` with the store's `redactor`), copy URL, copy response
-  body, share, clear. Copy uses Compose's text clipboard. A clip crosses the same binder limit as
-  an intent (past about 1 MB `setPrimaryClip` throws in the app), so copied text is cut at
+  body, share, clear. Copy cURL, copy URL and share read the store's `redactor` when they run, not
+  the one the detail was formatted with, so what leaves the screen never lags a redactor that grew
+  while the detail was open. Copy uses Compose's text clipboard. A clip crosses the same binder
+  limit as an intent (past about 1 MB `setPrimaryClip` throws in the app), so copied text is cut at
   100 000 chars too, at a code point boundary, and the confirmation says so ("Response body
   copied (first 100k characters)"); a clipboard that still throws shows "… could not be copied"
   instead of crashing the app. The confirmation is a polite live region, so TalkBack and VoiceOver
@@ -1926,13 +1996,16 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   of the last 60 points, the per-thread list (`watchThreads` while shown), "Measure PSS" (off the
   main thread), memory events and the hangs with their stacks. The tab rebuilds its model on
   `Dispatchers.Default` when the model hands its listener a closed second, a sample, a hang, a
-  stall or a memory event (never a frame or a jank event), and after its own actions; nothing
-  while the app is idle. While `HopiScreen` is composed, `PerfData.inspectorOpen` is set, so
+  stall or a memory event (never a frame or a jank event), when the running set changes (a CLI,
+  a bridge or app code started or stopped a monitor), and after its own actions; nothing while
+  the app is idle. While `HopiScreen` is composed, `PerfData.inspectorOpen` is set, so
   frames drawn under it are left out. The HUD is one line over the app ("58 fps · 4 jank · CPU 12%
   · 142 MB"; iOS: "worst stall 84 ms · 3 stalls/10 s", or "cadence 120/s" with the cadence on),
   toggled by a long press on the launcher button or the tab; its text is computed on the writer's
   thread (`HudMeter`) and published only when it changed, so it draws at most once a second and
-  not at all while the app is idle; it takes no touch and never recomposes the button. On
+  not at all while the app is idle; it drops a stopped monitor's figures at once (the controller's
+  running set, `PerfController.addRunningListener`), and with none running it reads "perf: off";
+  it takes no touch and never recomposes the button. On
   Android, a launcher composed with a controller registered stores its activity in core's
   `PerfLauncher` (a weak reference, cleared on dispose), and a frames or hangs start attaches to
   that window at once with one main-thread message. `hopi-ui-noop` is unchanged: the noop launcher
@@ -1985,12 +2058,19 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
 
 **Rules.** A "Rules" button in the top bar opens a list read from `RuleEngine` only while it is
 composed (it refreshes when the rule set or the store changes): one row per rule with its match
-(header values redacted), action and hits, an on/off switch, remove, and "Remove all". A list row of
+(header values redacted), action and hits, an on/off switch, remove, and "Remove all". A source
+that will not apply the rule has a line of its own ("not applied on urlsession: …", full contrast),
+a stated difference stays a muted warning, and a rule whose every named source excludes it reads
+"inactive" after its hits (its switch stays as set); with no sources named, only the sources this
+platform can have are checked. A list row of
 a ruled record shows one badge, the strongest action first (`MOCK`, `FAIL`, `EDIT`, `DELAY`); the
 overview shows "Rule: #3: delay, mock". The detail adds "Mock this response" (an enabled rule
 matching the record's exact method, scheme, host, port and path, built in the app from the record
-with `fromTransaction`, `times` unset, Undo offered for 4 s), disabled with the reason when the
-response body is not held in full or when every recorder has `rules = false`. There is no rule editor on the phone. `HopiScreen`, `HopiLauncher` and
+with `fromTransaction` off the main thread (it may decode the body), `times` unset, Undo offered
+for 4 s), disabled with the reason when the
+response body is not held in full, is held in an encoding a mock does not decode (an OkHttp or
+`HttpURLConnection` record under br, zstd or stacked codings; gzip and deflate are decoded), or when
+every recorder has `rules = false`. There is no rule editor on the phone. `HopiScreen`, `HopiLauncher` and
 `hopi-ui-noop` are unchanged. `HopiPanes` gained `HopiPanesRules`, callbacks the desktop connects
 to the bridge, so the desktop's panes never use the desktop process's own engine.
 
@@ -2059,10 +2139,21 @@ and Kotlin/Native builders take 2, so device figures are measured separately bel
   every capture in flight (1x the cap each with a `Content-Length`, up to 2x without), the
   `events` buffer (up to 1,024 snapshots with their bodies, if the summary log sink lagged that
   far), and up to 64 queued bridge `get` replies (each a snapshot, which may have been evicted).
-  So: `maxTotalBytes` + concurrent captures x cap (x2 when chunked) + those queued snapshots.
-  A tail client's live queue is no longer part of it (body-free events, see Agent access). While
-  the store's consumer is stalled, its terminal channel holds every queued body (up to 4096
-  snapshots; 256 MB for 32 queued 8 MB bodies in the benchmark), released as soon as it runs.
+  So: `maxTotalBytes` + concurrent captures x cap (x2 when chunked) + those queued snapshots, plus,
+  while the store's consumer is behind, at most another `maxTotalBytes` of queued ends.
+  A tail client's live queue is no longer part of it (body-free events, see Agent access). The ends
+  queued for a stalled consumer hold at most `maxTotalBytes` of bodies between them (see Store): a
+  later end goes in with its sizes only (`"store backlog over byte cap"`), and a pass releases what
+  it applied once it is published. Before 2026-10-27 the terminal channel held every queued body
+  (up to 4096 snapshots): the benchmark's `stalled` row (32 queued 8 MB bodies, a 32 MB store)
+  retained 288 MB, 256 MB beyond the cap; it now retains 36 MB, 4 MB beyond (G1's rounding), the
+  28 later ends kept with their sizes only (measured 2026-10-27, not in the tables of record). Not
+  counted: a start still in the pending lane (at most 256) keeps the request body the Ktor plugin
+  or URLSession capture copied at the start, the array its request in flight or its queued end
+  holds too, and still after that end went in without it (its record then keeps the start's); and
+  an end whose start the store held counts only its response, so a pass that evicts that start
+  before the end is applied leaves the end holding the request's array alone until then, at most
+  what that pass evicted.
 - **CLI `get`:** linear, 59 to 152 ms for 16 MB, 4 to 20x the body allocated in the CLI's own
   process (JSON tree, pretty-print, escaping); it never touches the app. The bridge reply that
   feeds it costs the app 1.0x an ASCII body (3.3x CJK/emoji, 2.7x base64).

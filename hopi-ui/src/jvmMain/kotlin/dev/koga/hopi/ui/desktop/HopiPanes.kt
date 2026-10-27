@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -137,7 +136,9 @@ public fun HopiPanes(
         var tab by remember { mutableStateOf(DetailTab.Overview) }
         var filter by remember { mutableStateOf(StatusFilter.All) }
         val query = rememberTextFieldState()
-        val listState = rememberLazyListState()
+        // A fresh scroll position per store: another app process's rows, under ids that start at 1
+        // again, open at their newest, not where the last process's rows were scrolled to.
+        val listState = remember(store) { LazyListState() }
         val rowCache = remember(store) { RowModelCache() }
         val formatter = remember(store) { DetailFormatter() }
         var toast by remember { mutableStateOf<Toast?>(null) }

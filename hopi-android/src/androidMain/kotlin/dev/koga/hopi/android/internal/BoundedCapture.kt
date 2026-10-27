@@ -44,6 +44,12 @@ public class BoundedCapture(private val cap: Int, sizeHint: Long = -1) : OutputS
     public val truncated: Boolean get() = total > kept || replayed
 
     /**
+     * Bytes the array takes: [kept], or more while a body of unknown size grew by doubling, never
+     * more than the cap. What a record queued to the store keeps alive until the store builds it.
+     */
+    public val held: Int get() = array.size
+
+    /**
      * Ends the capture: later takes change nothing. Returns true for the first call only, so the
      * thread that gets true is the one that ends the record.
      */

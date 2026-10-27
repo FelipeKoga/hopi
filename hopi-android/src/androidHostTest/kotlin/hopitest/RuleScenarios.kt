@@ -122,6 +122,7 @@ internal object RuleScenarios {
             out["message"] = connection.responseMessage
             out["contentLength"] = connection.contentLengthLong
             out["contentType"] = connection.contentType
+            out["contentEncoding"] = connection.contentEncoding
             out["header0"] = connection.getHeaderField(0)
             out["headerX"] = connection.getHeaderField("X-Mock") ?: connection.getHeaderField("X-Edited")
             out["usingProxy"] = connection.usingProxy()

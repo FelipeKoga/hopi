@@ -103,7 +103,7 @@ class DeviceRulesPanelUiTest {
         /**
          * Whether the edit rule also sets `X-Hopi-Edited: desktop` on the response. Where response
          * edits are unsupported (URLSession) such a rule never applies, so the edit is request-only
-         * there and a separate response edit checks the panel's warning.
+         * there and a separate response edit checks the panel's "not applied" line.
          */
         val editResponse: Boolean,
         val editApplied: String,
@@ -293,13 +293,13 @@ class DeviceRulesPanelUiTest {
         val listed = session.rules.value.rules
         record("three rules listed", listed.map { it.id } == listOf(delay, fail, edit), listed.map { "#${it.id} ${it.match} -> ${it.action} unsupported=${it.unsupported}" }.toString())
         if (!plan.editResponse) {
-            // A response edit on URLSession: added with the app's warning under its row, then removed.
+            // A response edit on URLSession: added with the app's exclusion under its row, then removed.
             panelButton("Edit").performClick()
             onNodeWithTag(RulesTags.MATCH).performTextInput("GET */json?rv=host-${plan.editTarget}")
             responseHeader("X-Hopi-Edited", "desktop")
             val unsupported = save(panel)
-            val warned = runCatching { waitFor("⚠ urlsession: response edits are unsupported") }.isSuccess
-            record("response edit: the panel shows the app's URLSession warning", warned, "message='${panel.message}' unsupported=${rule(session, unsupported).unsupported}")
+            val warned = runCatching { waitFor("not applied on urlsession: response edits are unsupported") }.isSuccess
+            record("response edit: the panel says URLSession does not apply it", warned, "message='${panel.message}' unsupported=${rule(session, unsupported).unsupported}")
             screenshot("05b-unsupported-warning.png")
             rowButton("Remove", 3).performClick()
             waitFor("Rule #$unsupported removed")

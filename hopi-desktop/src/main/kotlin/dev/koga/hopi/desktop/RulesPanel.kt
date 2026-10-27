@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import dev.koga.hopi.connect.RemoteRule
 import dev.koga.hopi.connect.RemoteRules
 import dev.koga.hopi.connect.RemoteSession
+import dev.koga.hopi.connect.RemoteUnsupported
 import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.rules.FailKind
 import dev.koga.hopi.ui.desktop.HopiDesktopType
@@ -82,9 +83,10 @@ internal class RulesPanelState {
 
 /**
  * The rules panel beside the list (docs/design/rules.md, "Desktop viewer"): the app's rules as
- * [RemoteSession.rules] lists them (re-listed on each notice, hits counted from the tail), an
- * enable switch, update and remove per row, clear, and the add and update forms. Every command
- * goes over the session's bridge to the app; nothing reads this process's own engine.
+ * [RemoteSession.rules] lists them (re-listed on each notice and on each ruled request the tail
+ * brings, so the hits are the app's own), an enable switch, update and remove per row, clear, and
+ * the add and update forms. Every command goes over the session's bridge to the app; nothing reads
+ * this process's own engine, and what a source cannot do of a rule is what the app reported.
  * [chooseBodyFile] picks a body file (a native dialog in the app, a fixed file in tests).
  */
 @Composable
@@ -176,11 +178,12 @@ private fun submit(form: RuleForm, session: RemoteSession, state: RulesPanelStat
         state.message = e.message
         return
     }
-    state.busy = true
     when (form.kind) {
         FormKind.Update -> {
             val update = form.update()
             val id = form.ruleId ?: return
+            // Only once a command is launched: its end is the one place busy is cleared.
+            state.busy = true
             scope.launchCommand(
                 state,
                 { session.updateRule(id, priority = update.priority, times = update.times, clearTimes = update.times == null, resetHits = update.resetHits) },
@@ -189,12 +192,18 @@ private fun submit(form: RuleForm, session: RemoteSession, state: RulesPanelStat
                 "Rule #$id updated"
             }
         }
-        else -> scope.launchCommand(state, { session.addRule { body -> form.json(body) } }) { rule ->
-            state.form = null
-            listOf("Rule #${rule.id} added").plus(rule.unsupported.map { "warning: $it" }).joinToString("\n")
+        else -> {
+            state.busy = true
+            scope.launchCommand(state, { session.addRule { body -> form.json(body) } }) { rule ->
+                state.form = null
+                listOf("Rule #${rule.id} added").plus(rule.unsupported.map { if (it.applies) "warning: $it" else it.notApplied() }).joinToString("\n")
+            }
         }
     }
 }
+
+/** An exclusion as the panel words it: the source never gets the rule. */
+private fun RemoteUnsupported.notApplied(): String = "not applied on $source: $reason"
 
 /** Runs [command] (a session future) and shows [done]'s text, or the app's refusal as it gave it. */
 private fun <T> CoroutineScope.launchCommand(state: RulesPanelState, command: () -> CompletableFuture<T>, done: (T) -> String?) {
@@ -222,7 +231,7 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
             BasicText(
                 rule.match,
                 modifier = Modifier.weight(1f),
-                style = HopiDesktopType.mono.copy(color = if (rule.enabled) colors.text else colors.textFaint),
+                style = HopiDesktopType.mono.copy(color = if (rule.enabled && !rule.inactive) colors.text else colors.textFaint),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -234,6 +243,8 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
             rule.times?.let { append('/').append(it) }
             append(if (rule.hits == 1L && rule.times == null) " hit" else " hits")
             if (rule.exhausted) append(" · exhausted")
+            // Every source it names excludes it: it never applies, whatever its switch says.
+            if (rule.inactive) append(" · inactive")
             if (rule.priority != 0) append(" · priority ").append(rule.priority)
         }
         BasicText(
@@ -241,8 +252,13 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
             modifier = Modifier.padding(start = 42.dp, top = 2.dp),
             style = HopiDesktopType.meta.copy(color = colors.textMuted),
         )
-        for (warning in rule.unsupported) {
-            BasicText("⚠ $warning", modifier = Modifier.padding(start = 42.dp), style = HopiDesktopType.meta.copy(color = colors.textMuted))
+        // A source that never gets the rule in full contrast, first; a difference it applies with, muted.
+        for (entry in rule.unsupported.sortedBy { it.applies }) {
+            BasicText(
+                if (entry.applies) "⚠ $entry" else entry.notApplied(),
+                modifier = Modifier.padding(start = 42.dp),
+                style = HopiDesktopType.meta.copy(color = if (entry.applies) colors.textMuted else colors.text),
+            )
         }
     }
     Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))

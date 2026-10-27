@@ -25,6 +25,19 @@ class BoundedCaptureTest {
     }
 
     @Test
+    fun heldIsWhatTheArrayTakesAsItGrows() {
+        // What a record queued to the store counts: the array, not only the bytes kept in it.
+        val capture = BoundedCapture(64 * 1024)
+        assertEquals(0, capture.held)
+        capture.take(ByteArray(10), 0, 10)
+        assertEquals(8 * 1024, capture.held)
+        capture.take(ByteArray(9 * 1024), 0, 9 * 1024)
+        assertEquals(16 * 1024, capture.held)
+        assertEquals(arraySize(capture), capture.held)
+        assertEquals(10 + 9 * 1024, capture.kept)
+    }
+
+    @Test
     fun singleBytesAreCopiedBelowTheCapAndOnlyCountedPastIt() {
         val capture = BoundedCapture(2)
         for (b in "abc".encodeToByteArray()) capture.takeByte(b.toInt())

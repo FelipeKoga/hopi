@@ -79,17 +79,34 @@ class RuleEngineTest {
 
     @Test
     fun aSourceThatCannotApplyARuleNeverSeesItAndAddSaysSo() {
-        val spec = RuleSpec(MatchShorthand.parse("*/users/*"), edit = EditSpec(response = ResponseEdit(status = 503)))
+        // Every source named: a rule that names none is checked against the platform's sources only
+        // (aRuleNamingNoSourcesIsCheckedAgainstThePlatformsOwn).
+        val all = RuleSource.entries.toSet()
+        val spec = RuleSpec(MatchShorthand.parse("*/users/*", all), edit = EditSpec(response = ResponseEdit(status = 503)))
         val info = add(spec)
         val unsupported = info.unsupported.single()
         assertEquals(RuleSource.URL_SESSION, unsupported.source)
         assertTrue(unsupported.excluded)
         assertEquals(0, RuleEngine.state.rulesFor(RuleSource.URL_SESSION).size)
         assertEquals(1, RuleEngine.state.rulesFor(RuleSource.OKHTTP).size)
-        val redirect = add(mock("*/old", status = 302))
+        val redirect = add(mock("*/old", status = 302, sources = all))
         assertEquals(setOf(RuleSource.OKHTTP, RuleSource.URL_CONNECTION, RuleSource.URL_SESSION), redirect.unsupported.map { it.source }.toSet())
         assertTrue(redirect.unsupported.none { it.excluded }, "a mocked 302 still applies")
         assertEquals(1, RuleEngine.state.rulesFor(RuleSource.URL_SESSION).size)
+    }
+
+    @Test
+    fun aRuleNamingNoSourcesIsCheckedAgainstThePlatformsOwn() {
+        // Only the Ktor plugin records on a plain JVM, and it can apply both rules in full.
+        assertEquals(setOf(RuleSource.KTOR), platformSources)
+        val responseEdit = EditSpec(response = ResponseEdit(status = 503))
+        assertEquals(emptyList(), add(RuleSpec(MatchShorthand.parse("*/users/*"), edit = responseEdit)).unsupported)
+        assertEquals(emptyList(), add(mock("*/old", status = 302)).unsupported)
+        // The arrays still cover every source: URLSession gets the mock, never the response edit.
+        assertEquals(1, RuleEngine.state.rulesFor(RuleSource.URL_SESSION).size)
+        // A source the rule names is reported whatever the platform.
+        val named = add(RuleSpec(MatchShorthand.parse("*/v1/*", setOf(RuleSource.URL_SESSION)), edit = responseEdit))
+        assertEquals(listOf(RuleSource.URL_SESSION), named.unsupported.map { it.source })
     }
 
     @Test

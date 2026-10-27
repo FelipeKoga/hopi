@@ -3,6 +3,7 @@ package dev.koga.hopi.core.perf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /** The hang watchdog's state machine on a fake clock (docs/design/perf-monitors.md, "Tests"). */
@@ -230,16 +231,61 @@ class HangDetectorTest {
     fun theHeartbeatTreatsAnUnrunBeatAsBusy() {
         val heartbeat = HangDetector(busy, platform, data, thresholdMs = 250, heartbeat = true)
         platform.now = 1_000
-        assertEquals(HangWait.Until(1_250, busy = true), heartbeat.next(1_000))
+        // Posted; the watchdog looks again when the next beat is due, not at this one's deadline.
+        assertEquals(HangWait.Until(1_125, busy = true), heartbeat.next(1_000))
         assertEquals(1, platform.heartbeats)
         // The beat ran; the next one is posted half a threshold after the last.
         busy.end(1_010)
-        platform.now = 1_250
-        assertEquals(HangWait.Until(1_500, busy = true), heartbeat.next(1_250))
+        platform.now = 1_125
+        assertEquals(HangWait.Until(1_250, busy = true), heartbeat.next(1_125))
         assertEquals(2, platform.heartbeats)
-        // This beat does not run: a hang, flagged as the heartbeat's.
-        platform.now = 1_500
-        heartbeat.next(1_500)
+        // This beat does not run: none is posted behind it, and the watchdog sleeps to its deadline...
+        platform.now = 1_250
+        assertEquals(HangWait.Until(1_375, busy = true), heartbeat.next(1_250))
+        assertEquals(2, platform.heartbeats)
+        // ...where it is a hang, flagged as the heartbeat's.
+        platform.now = 1_375
+        heartbeat.next(1_375)
         assertTrue(data.hangs.since(0).single().heartbeat)
+    }
+
+    /** The documented cadence: a beat every half threshold while main is idle, 8 a second at 250 ms on each thread. */
+    @Test
+    fun anIdleMainThreadGetsABeatEveryHalfThreshold() {
+        val heartbeat = HangDetector(busy, platform, data, thresholdMs = 250, heartbeat = true)
+        var now = 1_000L
+        var wakes = 0
+        while (now < 2_000) {
+            platform.now = now
+            val wait = assertIs<HangWait.Until>(heartbeat.next(now))
+            wakes++
+            // Main runs the beat at once.
+            busy.end(now + 1)
+            now = wait.deadlineMs
+        }
+        assertEquals(8, platform.heartbeats, "beats in one second")
+        assertEquals(8, wakes, "watchdog wakes in one second")
+        assertEquals(0, data.hangs.count)
+    }
+
+    /** An input unit ends without a wake too: one seen when the watchdog looks never holds the next beat back to its deadline. */
+    @Test
+    fun anInputUnitSeenAtACheckDoesNotDelayTheNextBeat() {
+        val heartbeat = HangDetector(busy, platform, data, thresholdMs = 250, heartbeat = true)
+        platform.now = 1_000
+        assertEquals(HangWait.Until(1_125, busy = true), heartbeat.next(1_000))
+        busy.end(1_010)
+        // A tap is being dispatched when the watchdog looks: it looks again in half a threshold,
+        // not at the tap's deadline (1_350).
+        assertTrue(busy.enterInput(1_100))
+        platform.now = 1_125
+        assertEquals(HangWait.Until(1_250, busy = true), heartbeat.next(1_125))
+        assertEquals(1, platform.heartbeats)
+        busy.exitInput(1_130)
+        // Main is idle again: the next beat goes out then.
+        platform.now = 1_250
+        assertEquals(HangWait.Until(1_375, busy = true), heartbeat.next(1_250))
+        assertEquals(2, platform.heartbeats)
+        assertEquals(0, data.hangs.count)
     }
 }

@@ -6,6 +6,7 @@ import dev.koga.hopi.core.json.JsonWriter
 import java.util.Base64
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * The rule commands over one [BridgeClient] (docs/design/rules.md, "Bridge"). Every method needs a
@@ -155,14 +156,20 @@ public class RemoteRule(
     public val exhausted: Boolean,
     /** The match in shorthand form, as the app wrote it (header values redacted). */
     public val match: String,
+    /** The sources the match names (`okhttp`, `urlsession`); null when it names none and the app's platform decides. */
+    public val sources: Set<String>?,
     /** What the rule does, as text: `mock 500 (61 B)`, `fail timeout`, `edit request+response`, with the delay. */
     public val action: String,
-    /** `source: reason` for every source that cannot apply (all or part of) the rule. */
-    public val unsupported: List<String>,
+    /** Every source that cannot apply all or part of the rule, as the app's engine listed them. */
+    public val unsupported: List<RemoteUnsupported>,
 ) {
-    /** One more application seen locally (a summary's `rule` mark); exhausted when it reaches [times]. */
-    internal fun withHit(): RemoteRule =
-        RemoteRule(id, label, enabled, priority, times, hits + 1, exhausted || times != null && hits + 1 >= times, match, action, unsupported)
+    /**
+     * True when every source the match names excludes the rule ([RemoteUnsupported.applies] false):
+     * it applies to nothing in the app. Never for a rule that names no sources: the line does not
+     * say which sources the app's platform has (and Ktor, on every platform, excludes nothing).
+     */
+    public val inactive: Boolean
+        get() = !sources.isNullOrEmpty() && sources.all { source -> unsupported.any { it.source == source && !it.applies } }
 
     public companion object {
         /** Null when [json] is not a well-formed rule line. */
@@ -178,10 +185,12 @@ public class RemoteRule(
                 hits = json.long("hits") ?: 0,
                 exhausted = json.bool("exhausted") == true,
                 match = match.str("shorthand") ?: "?",
+                sources = (match["sources"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }?.toSet(),
                 action = action(json),
                 unsupported = (json["unsupported"] as? JsonArray).orEmpty().mapNotNull { element ->
                     val entry = element as? JsonObject ?: return@mapNotNull null
-                    "${entry.str("source") ?: "?"}: ${entry.str("reason").orEmpty()}"
+                    // Without `applies`, a stated difference: never an exclusion the app did not report.
+                    RemoteUnsupported(entry.str("source") ?: "?", entry.str("reason").orEmpty(), applies = entry.bool("applies") != false)
                 },
             )
         }
@@ -204,4 +213,14 @@ public class RemoteRule(
             }
         }.joinToString(", ").ifEmpty { "?" }
     }
+}
+
+/**
+ * One entry of a rule line's `unsupported` list: [source] (`urlsession`) never gets the rule
+ * ([applies] false, an exclusion), or applies it with the difference [reason] states.
+ */
+@HopiInternalApi
+public class RemoteUnsupported(public val source: String, public val reason: String, public val applies: Boolean) {
+    /** `source: reason`, as the CLI warns it. */
+    override fun toString(): String = "$source: $reason"
 }

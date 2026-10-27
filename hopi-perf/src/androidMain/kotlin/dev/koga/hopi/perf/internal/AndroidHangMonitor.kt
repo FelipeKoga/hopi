@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong
  * publishes the main thread's busy state, an input bracket on each started activity's window, and
  * the watchdog thread `hopi-perf-hang` at the default priority, asleep with no timeout while the
  * main thread is idle. With [heartbeat], no printer: the watchdog posts an empty message every
- * `threshold / 2` instead (8 wakes per second at 250 ms on both threads, idle included).
+ * `threshold / 2` instead (8 wakes per second at 250 ms on each of the two threads, idle included).
  *
  * The printer is set and cleared by a message posted to the main thread, so neither waits on a hung
  * main thread: [stop] stops the watchdog and the bracket at once, and the stop message clears the

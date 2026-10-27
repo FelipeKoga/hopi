@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.core.rules.Capabilities
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleInfo
 import dev.koga.hopi.core.rules.RuleJson
@@ -52,16 +53,24 @@ internal class RuleRow(
     val id: Long,
     val match: String,
     val action: String,
-    /** `3 hits`, `1/1 hits · exhausted`. */
+    /** `3 hits`, `1/1 hits · exhausted`, `0 hits · inactive`. */
     val hits: String,
     val label: String?,
     val enabled: Boolean,
-    /** `okhttp: …` for each source that cannot apply (all or part of) the rule. */
+    /**
+     * Every source the rule is checked against (the named ones, or the platform's when it names
+     * none) excludes it ([Capabilities.appliesNowhere]), whatever its switch says.
+     */
+    val inactive: Boolean,
+    /** `not applied on urlsession: …` for each source that never gets the rule. */
+    val exclusions: List<String>,
+    /** `okhttp: …` for each source that applies the rule with a stated difference. */
     val warnings: List<String>,
 )
 
 internal fun ruleRows(rules: List<RuleInfo>, redactor: Redactor): List<RuleRow> = rules.map { rule ->
     val times = rule.spec.times
+    val inactive = Capabilities.appliesNowhere(rule.spec)
     RuleRow(
         id = rule.id,
         match = RuleJson.describeMatch(rule.spec.match, redactor),
@@ -71,22 +80,25 @@ internal fun ruleRows(rules: List<RuleInfo>, redactor: Redactor): List<RuleRow> 
             times?.let { append('/').append(it) }
             append(if (rule.hits == 1L && times == null) " hit" else " hits")
             if (rule.exhausted) append(" · exhausted")
+            if (inactive) append(" · inactive")
         },
         label = rule.spec.label,
         enabled = rule.spec.enabled,
-        warnings = rule.unsupported.map { it.toString() },
+        inactive = inactive,
+        exclusions = rule.unsupported.filter { it.excluded }.map { "not applied on ${it.source.wireName}: ${it.reason}" },
+        warnings = rule.unsupported.filterNot { it.excluded }.map { it.toString() },
     )
 }
 
 /**
  * The app's rules, read from [RuleEngine] only while the caller is composed: again on each
- * revision (a change of the set) and on each store change (a ruled request counts a hit, which
- * publishes nothing).
+ * revision (a change of the set), on each store change (a ruled request counts a hit, which
+ * publishes nothing) and on each redactor the store grows to (a match value it now redacts).
  */
 @Composable
 internal fun rememberRuleRows(store: HopiStore, formatDispatcher: CoroutineDispatcher): State<List<RuleRow>?> =
     produceState<List<RuleRow>?>(null, store, formatDispatcher) {
-        combine(RuleEngine.revision, store.transactions) { _, _ -> ruleRows(RuleEngine.list(), store.redactor) }
+        combine(RuleEngine.revision, store.transactions, store.redactors) { _, _, _ -> ruleRows(RuleEngine.list(), store.redactor) }
             .conflate()
             .flowOn(formatDispatcher)
             .collect { value = it }
@@ -152,7 +164,7 @@ private fun RuleRowItem(row: RuleRow, colors: HopiColors, onToggle: (Long, Boole
             Column(Modifier.weight(1f)) {
                 BasicText(
                     "#${row.id}  ${row.match}",
-                    style = HopiType.monoStrong.copy(color = if (row.enabled) colors.text else colors.textFaint),
+                    style = HopiType.monoStrong.copy(color = if (row.enabled && !row.inactive) colors.text else colors.textFaint),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -163,6 +175,10 @@ private fun RuleRowItem(row: RuleRow, colors: HopiColors, onToggle: (Long, Boole
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // A source that never gets the rule in full contrast; a difference it applies with, muted.
+                for (exclusion in row.exclusions) {
+                    BasicText(exclusion, style = HopiType.meta.copy(color = colors.text))
+                }
                 for (warning in row.warnings) {
                     BasicText("⚠ $warning", style = HopiType.meta.copy(color = colors.textMuted))
                 }

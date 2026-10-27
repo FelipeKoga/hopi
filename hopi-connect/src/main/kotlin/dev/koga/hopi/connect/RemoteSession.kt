@@ -17,9 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * The app's rules as a [RemoteSession] last listed them ([rules]), with [RemoteRule.hits] counted
- * up locally from the `rule` mark of the summaries its tail brought since. [supported] is false
- * while not connected and for an app whose `hello` did not say `"rules":true`.
+ * The app's rules as a [RemoteSession] last listed them ([rules]), [RemoteRule.hits] as the app's
+ * engine counted them: a summary whose `rule` mark the list may not include lists them again.
+ * [supported] is false while not connected and for an app whose `hello` did not say `"rules":true`.
  */
 @HopiInternalApi
 public class RemoteRules(public val supported: Boolean, public val rules: List<RemoteRule>) {
@@ -46,18 +46,23 @@ public sealed interface RemoteState {
  * A host viewer's link to one app's bridge: two connections on one [BridgeEndpoint], because a
  * bridge `tail` reads nothing after it. One streams summaries ([BridgeDecoder.summary]) into
  * [store]; the other serves `get` and `clear`. Bodies cross the bridge only for the transaction
- * [select]ed (or [fetch]ed), so a giant body the viewer never opens is never sent.
+ * [select]ed (or [fetch]ed), so a giant body the viewer never opens is never sent; a resume also
+ * asks whether the app still has each row still pending here (below), with no bodies.
  *
  * [store] holds one app process: the app's ids start again at 1 when it restarts, so a
  * [connect] that finds another process (another token or proof) starts a fresh store from
  * [newStore] and closes the old one. A `SLOW_CLIENT` disconnect re-tails at once from the
- * `since` the bridge gave, on the same endpoint. Everything else that ends a connection closes
+ * `since` the bridge gave, on the same endpoint. That re-tail, and a [connect] that finds the
+ * same process, then ask once about each row still pending here (a one-line `list`, the oldest
+ * 64): one the app no longer has (withdrawn while this viewer was away or behind, evicted,
+ * cleared) would never end, and ends as gone. Everything else that ends a connection closes
  * both, and the endpoint (its adb forward), and reports [RemoteState.Disconnected]: the caller
  * decides when to [connect] again (an event: adb's device list, `bridge.json` changing).
  *
  * Rules (docs/design/rules.md, "Desktop viewer"): for an app whose `hello` said `"rules":true`,
- * the tail asks for rules notices, [rules] is listed on connect and again on each notice, and the
- * rule commands run on the request connection, after its verified `hello` ([RuleClient]).
+ * the tail asks for rules notices, [rules] is listed on connect, again on each notice and on each
+ * ruled request the last list may not include, and the rule commands run on the request
+ * connection, after its verified `hello` ([RuleClient]).
  *
  * Perf (docs/design/perf-monitors.md, "Desktop viewer"): for an app whose `hello` said
  * `"perf":true`, [perf] opens a third connection for a `perf.tail`, only while a viewer watches it.
@@ -124,9 +129,11 @@ public class RemoteSession(
     private var selected: Long? = null
     private val fetchQueued = AtomicBoolean(false)
     private val relistQueued = AtomicBoolean(false)
+    private val checkQueued = AtomicBoolean(false)
 
-    // Local hit counting since the last list: the highest id seen when it was read, and the ids
-    // above it already counted (a pending and a terminal summary of one request count once).
+    // For the lists ruled summaries and `get` replies ask for (relistForHit): the highest id seen
+    // when the last list was asked for, and the ids above it that asked for another already (a
+    // pending and a terminal summary of one request ask once).
     private var rulesBaseline = 0L
     private val counted = HashSet<Long>()
 
@@ -172,6 +179,7 @@ public class RemoteSession(
             // The selection survives a reconnect: fetch it again if the new link has not got it.
             fetchSelectedSoon()
             if (rules != null) relistSoon()
+            if (sameProcess) checkPendingSoon()
         } catch (e: CliException) {
             // A close() between the tail's handshake and adopting the link leaves the tail here.
             tail?.close()
@@ -318,13 +326,19 @@ public class RemoteSession(
         }
     }
 
-    /** Lists the rules again on the request thread; notices arriving meanwhile coalesce into one. */
+    /**
+     * Lists the rules again on the request thread; notices and ruled summaries arriving meanwhile
+     * coalesce into one more, so a burst of ruled requests costs at most one list in flight and one
+     * queued.
+     */
     private fun relistSoon() {
         if (!relistQueued.compareAndSet(false, true)) return
         try {
             requests.execute {
                 relistQueued.set(false)
-                val current = synchronized(lock) { link } ?: return@execute
+                // Only the ids seen before asking are sure to be in the list's counts.
+                val (current, baseline) = synchronized(lock) { link to highestSeen }
+                if (current == null) return@execute
                 val client = current.rules ?: return@execute
                 val listed = try {
                     client.list().map(::decoded)
@@ -334,8 +348,8 @@ public class RemoteSession(
                 }
                 synchronized(lock) {
                     if (link !== current) return@synchronized
-                    rulesBaseline = highestSeen
-                    counted.clear()
+                    rulesBaseline = baseline
+                    counted.removeAll { it <= baseline }
                     _rules.value = RemoteRules(true, listed)
                 }
             }
@@ -344,13 +358,19 @@ public class RemoteSession(
         }
     }
 
-    /** Under [lock]: the summary of [id] carries rule [ruleId]'s mark; count it once, if it is newer than the list. */
-    private fun countHit(id: Long, ruleId: Long) {
-        val shown = _rules.value
-        if (!shown.supported || id <= rulesBaseline || !counted.add(id)) return
-        val index = shown.rules.indexOfFirst { it.id == ruleId }
-        if (index < 0) return
-        _rules.value = RemoteRules(true, shown.rules.toMutableList().also { it[index] = it[index].withHit() })
+    /**
+     * Under [lock], for the current link: the summary or the `get` reply of [id] carries a rule
+     * mark, [newMark] when this viewer held [id] without one (or not at all). Lists again when the
+     * last list may not include the hit, so the hits shown are only ever the app's own count: above
+     * [rulesBaseline] once per request; at or below it, where Ktor, OkHttp and `HttpURLConnection`
+     * claimed before the record's id existed, only for a new mark, as URLSession claims a mock or
+     * fail once the task starts loading, after its record started. From the moment the link is up,
+     * so a hit the first list after a connect may have missed costs one more list, not a wrong count.
+     */
+    private fun relistForHit(id: Long, newMark: Boolean) {
+        if (link?.rules == null) return
+        val maybeNewer = if (id > rulesBaseline) counted.add(id) else newMark
+        if (maybeNewer) relistSoon()
     }
 
     /** Closes both connections and the endpoint, stops the request thread and closes [store]. */
@@ -404,6 +424,7 @@ public class RemoteSession(
                     current.tail.close()
                     return
                 }
+                checkPendingSoon()
                 continue
             } catch (e: CliException) {
                 lost(current, e.message.orEmpty())
@@ -423,10 +444,11 @@ public class RemoteSession(
             if (link !== current) return
             val store = _store.value
             val id = reply.json.long("id") ?: return
-            val startedAt = store.get(id)?.startedAtEpochMs ?: clock()
+            val known = store.get(id)
+            val startedAt = known?.startedAtEpochMs ?: clock()
             val transaction = BridgeDecoder.summary(reply.json, startedAt) ?: return
             if (id == fetching && transaction.state.isTerminal) fetchingSawTerminal = true
-            transaction.ruleId?.let { countHit(id, it) }
+            if (transaction.ruleId != null) relistForHit(id, newMark = known?.ruleId == null)
             val had = fetched[id]
             if (had != null) {
                 // The detail already holds this snapshot or a later one.
@@ -456,6 +478,51 @@ public class RemoteSession(
         } catch (_: RejectedExecutionException) {
             // Closed.
         }
+    }
+
+    /**
+     * After a reconnect to the same process or a `SLOW_CLIENT` re-tail: asks whether the app still
+     * has each row still pending here, the oldest [MAX_PENDING_CHECKS] when its turn comes (the rest
+     * wait for their own summary or the next resume). The resumed backlog brings every row the app
+     * still has, and a row it ended first is not asked about. One the app no longer has (its
+     * recorder withdrew it while this viewer was away or behind, or it was evicted, or cleared in
+     * the app) gets no summary again: it would stay pending and hold [resumeSince] below it, so it
+     * ends as gone ([markGone]). Each question is a `list` of one summary from just below the id
+     * ([appLacks]), so no headers or bodies cross; resumes that come meanwhile coalesce into one more.
+     */
+    private fun checkPendingSoon() {
+        if (!checkQueued.compareAndSet(false, true)) return
+        try {
+            requests.execute {
+                checkQueued.set(false)
+                val (current, ids) = synchronized(lock) { link to pending.sorted().take(MAX_PENDING_CHECKS) }
+                if (current == null) return@execute
+                for (id in ids) {
+                    if (!synchronized(lock) { link === current && id in pending }) continue
+                    if (appLacks(current, id) ?: return@execute) markGone(current, id)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // Closed.
+        }
+    }
+
+    /**
+     * Request thread only: whether the app no longer has [id], read from the first summary of a
+     * `list` that starts just below it (one line, no bodies); null when the link is lost.
+     */
+    private fun appLacks(current: Link, id: Long): Boolean? = try {
+        current.request.send(BridgeClient.request("list").field("since", id - 1).field("limit", 1).endObject().toString())
+        var first: Long? = null
+        while (true) {
+            val reply = current.request.reply()
+            if (reply.type == "end") break
+            if (first == null && reply.type == "transaction") first = reply.json.long("id")
+        }
+        first != id
+    } catch (e: CliException) {
+        lost(current, e.message.orEmpty())
+        null
     }
 
     /**
@@ -493,6 +560,8 @@ public class RemoteSession(
                     fetched[id] = transaction.state
                     if (transaction.state.isTerminal) pending -= id
                     if (id > highestSeen) highestSeen = id
+                    // A mark the tail has not brought yet (URLSession marks a record at its end).
+                    if (transaction.ruleId != null) relistForHit(id, newMark = _store.value.get(id)?.ruleId == null)
                     submit(_store.value, transaction)
                     false
                 }
@@ -503,23 +572,31 @@ public class RemoteSession(
     }
 
     /**
-     * The app no longer has [id] (its store evicted it, or a clear made in the app): the summary
-     * here stays, its bodies marked [CapturedBody.gone] so the detail stops loading and says why,
-     * and it is not asked for again.
+     * The app no longer has [id] (its store evicted it, a clear made in the app, or its recorder
+     * withdrew it): the summary here stays, its bodies marked [CapturedBody.gone] so the detail
+     * stops loading and says why, and it is not asked for again. A pending row also ends, failed
+     * with [CapturedBody.GONE] as its error, and leaves [pending], so it no longer holds
+     * [resumeSince] below it. [fetched] keeps the app's last state of it (pending), because the app
+     * may still record its end (a request it evicted or cleared in flight), which then replaces the
+     * row; until then a new selection asks for it once more, and its `NOT_FOUND` changes nothing.
      */
     private fun markGone(current: Link, id: Long) {
         synchronized(lock) {
             if (link !== current) return
             fetching = null
+            pending -= id
             val store = _store.value
             val shown = store.get(id) ?: return
+            // Ended here before, not by the app: the app's own end must still replace it.
+            if (shown.error == CapturedBody.GONE && fetched[id]?.isTerminal == false) return
             fetched[id] = shown.state
-            if (shown.requestBody?.isNotFetched != true && shown.responseBody?.isNotFetched != true) return
+            val ended = if (shown.state.isTerminal) shown else shown.copy(state = TransactionState.Failed, error = CapturedBody.GONE)
+            if (ended === shown && shown.requestBody?.isNotFetched != true && shown.responseBody?.isNotFetched != true) return
             submit(
                 store,
-                shown.copy(
-                    requestBody = shown.requestBody?.let { if (it.isNotFetched) CapturedBody.gone(it.reportedBytes) else it },
-                    responseBody = shown.responseBody?.let { if (it.isNotFetched) CapturedBody.gone(it.reportedBytes) else it },
+                ended.copy(
+                    requestBody = ended.requestBody?.let { if (it.isNotFetched) CapturedBody.gone(it.reportedBytes) else it },
+                    responseBody = ended.responseBody?.let { if (it.isNotFetched) CapturedBody.gone(it.reportedBytes) else it },
                 ),
             )
         }
@@ -590,6 +667,9 @@ public class RemoteSession(
         public const val DEFAULT_MAX_TOTAL_BYTES: Long = 256L * 1024 * 1024
         public const val DEFAULT_READ_TIMEOUT_MS: Int = 10_000
         private const val RULES_UNSUPPORTED = "this app's Hopi does not support rules (older Hopi, or rules = false)"
+
+        /** Pending rows one resume asks about ([checkPendingSoon]): one one-line `list` each. */
+        private const val MAX_PENDING_CHECKS = 64
 
         /** The token (iOS, JVM) and the proof (Android) are new with every app start. */
         private fun fingerprint(endpoint: BridgeEndpoint, hello: Reply): ByteArray {

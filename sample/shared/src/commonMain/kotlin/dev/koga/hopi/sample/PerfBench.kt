@@ -56,7 +56,7 @@ public suspend fun runPerfBench(spec: String): String {
     }
     // Lets the launch's own work (first frames, the monitors' attach message, JIT) drain first.
     delay(SETTLE_MS)
-    val head = "\"build\":\"${if (HOPI_ENABLED) "real" else "noop"}\",\"monitors\":\"${monitors.joinToString(",") { it.name.lowercase() }}\"," +
+    val head = "\"build\":\"${if (SampleBuild.realHopi) "real" else "noop"}\",\"monitors\":\"${monitors.joinToString(",") { it.name.lowercase() }}\"," +
         "\"heartbeat\":$heartbeat,\"running\":\"${HopiPerf.running.joinToString(",") { it.name.lowercase() }}\""
     if (mode == "idle") {
         val ready = "{\"perfBench\":\"idle\",$head,\"at\":${labWallMs()}}"

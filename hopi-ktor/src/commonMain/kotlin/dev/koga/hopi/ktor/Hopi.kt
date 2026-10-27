@@ -107,13 +107,15 @@ private class Recorder(
             PlatformCapture.markPassThrough()
             request.headers.append(PlatformCapture.PASS_THROUGH_HEADER, "1")
         }
-        val exchange = Exchange(store, pending, started, capture.streamed)
+        // Uncovered here: the coverage is read again when the engine answers or fails, in case a
+        // platform recorder started meanwhile (Exchange.withdrawnForPlatform).
+        val exchange = Exchange(store, pending, started, capture.streamed, uncoveredEngine = if (covered) null else engineClassName)
         request.attributes.put(ExchangeKey, exchange)
         store.submit(pending)
         try {
             context.proceedWith(capture.outgoing)
         } catch (cause: Throwable) {
-            exchange.fail(cause)
+            if (!exchange.withdrawnForPlatform()) exchange.fail(cause)
             throw cause
         }
         exchange.callReturned()
@@ -147,7 +149,9 @@ private class Recorder(
             request.headers.append(PlatformCapture.PASS_THROUGH_HEADER, "1")
         }
         val application = rule?.let { RuleApplication(it, mocked = it.mock != null, request.executionContext) }
-        val exchange = Exchange(store, pending, started, capture.streamed, application)
+        // A mock or a fail never reaches the engine, so no platform recorder can see it.
+        val engine = if (covered || rule?.mock != null || rule?.fail != null) null else engineClassName
+        val exchange = Exchange(store, pending, started, capture.streamed, application, uncoveredEngine = engine)
         request.attributes.put(ExchangeKey, exchange)
         store.submit(pending)
         try {
@@ -171,7 +175,7 @@ private class Recorder(
                 else -> context.proceedWith(capture.outgoing)
             }
         } catch (cause: Throwable) {
-            exchange.fail(cause)
+            if (!exchange.withdrawnForPlatform()) exchange.fail(cause)
             throw cause
         }
         exchange.callReturned()
@@ -183,6 +187,11 @@ private class Recorder(
         if (exchange.plan != ResponsePlan.None) return
         // A rule's response side: its delay, then its edit, before anything below reads the response.
         val received = exchange.application?.let { applyResponseRule(it, response) } ?: response
+        if (exchange.withdrawnForPlatform()) {
+            // A platform recorder started while the engine had the request: the call goes on unrecorded.
+            if (received !== response) context.proceedWith(received)
+            return
+        }
         exchange.recordResponse(received)
         val contentType = received.headers[HttpHeaders.ContentType]
         val contentLength = received.contentLength()

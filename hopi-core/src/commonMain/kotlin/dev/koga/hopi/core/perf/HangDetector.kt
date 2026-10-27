@@ -51,8 +51,9 @@ public sealed interface HangWait {
 
     /**
      * Until [deadlineMs] of [HangPlatform.nowMs]; only a hang's end, a stop or a lease change cut
-     * it short. [busy]: the deadline is a running unit's, so a wake far past it means the process
-     * was stopped (see [HangDetector]).
+     * it short. [busy]: the deadline is a running unit's (in heartbeat mode, a look within half a
+     * threshold until the unit is a hang), so a wake far past it means the process was stopped
+     * (see [HangDetector]).
      */
     public data class Until(val deadlineMs: Long, val busy: Boolean) : HangWait
 }
@@ -68,6 +69,11 @@ public sealed interface HangWait {
  * - main busy: until the unit's start plus the threshold; the same unit still running then is a
  *   hang, captured at 1x, 2x and 4x the threshold (at most 3 stacks), each capture discarded when
  *   the sequence number changed meanwhile (the stack belongs to another unit);
+ * - heartbeat mode (Android `hangHeartbeat`, no Looper printer): while main is idle the watchdog
+ *   begins a unit itself and posts it ([HangPlatform.postHeartbeat]) every half threshold; a
+ *   unit's end wakes nothing until it is a hang, so until then the watchdog looks again within
+ *   half a threshold; a beat main has not run by its deadline is a hang, timed from its post (so
+ *   up to half a threshold short);
  * - a wake later than its deadline by more than one threshold means the whole process was stopped
  *   (the freezer, a debugger suspending every thread): the unit's start moves to the late wake, so
  *   the freeze is never reported as a hang; one that goes on after the thaw is, one threshold later,
@@ -161,8 +167,12 @@ public class HangDetector(
             }
             val due = watchedStart + threshold * MULTIPLIERS[captures]
             if (time < due) {
-                lastDeadline = due
-                return HangWait.Until(due, busy = true)
+                // Heartbeat: until the unit is a hang its end wakes nothing (a beat runs long before
+                // its deadline, a tap's dispatch too), so the watchdog looks again within half a
+                // threshold to post the next beat.
+                val wakeAt = if (heartbeat && current == null) minOf(due, time + threshold / 2) else due
+                lastDeadline = wakeAt
+                return HangWait.Until(wakeAt, busy = true)
             }
             detect(time, seq, threshold)
             time = platform.nowMs()
