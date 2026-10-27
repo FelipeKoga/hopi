@@ -42,10 +42,8 @@ spin lock, rings allocated while off, and the iOS 300 ms reading; design, "As bu
 idle); the printer costs +6.2 to +6.5 µs per main-thread message and +29 µs per `Dispatchers.Main`
 resume (its 3 µs gate is not met; it stays the default, the heartbeat's alternative misses hangs
 near the threshold and wakes each of its two threads 8 times a second, 16 in all, since its
-cadence fix (measured at 4 each before it, re-measure pending); design, "As built", stage 4). Open:
-- Re-measure the Android heartbeat on the emulator after its cadence fix: idle wakes on each of
-  its two threads (`idle.py` with `heartbeat=1`) and hang readings against the 125 ms bound
-  (`verify.py <out> --steps all,heartbeat`, as for `android-verify-heartbeat.json`).
+cadence fix (7.8 to 7.9 each on the emulator on 2026-10-27, its hangs read within the 125 ms
+bound; 4 each before it); design, "As built", stage 4). Open:
 - A physical Android phone and iPhone; every figure so far is from the emulator or the simulator.
 - iOS overhead (observer cost per run-loop iteration, display link, sampler): `bench.py --platform ios`.
 - The sampler's tick costs about 1.0 ms of CPU in a debug build (`schedstat`; budget 5 to 50 µs):
@@ -141,9 +139,22 @@ so the app pays no extra cost.
   the app.
 - **Cost on the app.** Same as a connected CLI `tail`: measured on the JVM bridge, the app's
   bridge threads take 0 ns CPU while the viewer is connected and idle; on the API 35 emulator
-  emulator (`DeviceViewerUiTest`) the sample's 5 Hopi threads took 0 ticks over 60 s with
-  the viewer connected, and 500 `POST /items` took 2660 to 2781 ms connected against 2526 to
-  2704 ms disconnected (3 alternating rounds each).
+  (`DeviceViewerUiTest`, 2026-10-23, before automatic capture) the sample's 5 Hopi threads took
+  0 ticks over 60 s with the viewer connected (6 threads, 0 ticks on 2026-10-27), and 500
+  `POST /items` took 2660 to 2781 ms connected against 2526 to 2704 ms disconnected (3
+  alternating rounds each).
+- **`DeviceViewerUiTest` on Android, partly stale** (found 2026-10-27, run after that day's fixes;
+  its two capture-related causes show the same on the tree before them): 17 of 18. "5 MB body
+  opens" fails: the launch's giant GET goes through Ktor's OkHttp engine, so OkHttp capture
+  records it at the `hopi { }` cap (256 KB by default, which the sample keeps), while
+  `--el maxBodyBytes 8388608` reaches only `install(Hopi)`; the sample's giant-body measurements
+  on Android have the same limit (iOS passes the setting to `HopiUrlSession`). "5 MB body renders"
+  passes on that truncated body (it checks no size), and "request overhead, 500 POST /items"
+  passes with no figure: the app's result line sits below the fold of the Diagnostics tab, grown
+  since automatic capture, out of `ui.py dump`. The test also counts the POSTs in
+  `build/evidence/desktop/devserver.log`, a path it has always read and no doc names; that run's
+  dev server logged elsewhere while a 2026-10-23 log sat there, so each block waited out its
+  3 minutes.
 - Open questions: whether the in-app screen becomes optional (noop-by-default UI artifact, with the
   desktop as the main viewer); physical iOS devices (no bridge in v1).
 
@@ -166,13 +177,18 @@ so the app pays no extra cost.
   alone. Verified end to end and measured on the API 35 emulator only.
   Open: the per-request cost after the speed fixes (2026-10-25, debuggable emulator, small
   request, capture minus noop): calling-thread CPU +16 to +26 µs on OkHttp and +26 to +31 µs on
-  `HttpURLConnection` (the 30 µs target is met on OkHttp, at its limit on `HttpURLConnection`),
+  `HttpURLConnection` (the 30 µs target is met on OkHttp, at its limit on `HttpURLConnection`;
+  on 2026-10-27, after the bug fixes, 8 rounds: medians +24 µs on OkHttp, 2 rounds over 30, and
+  +22.5 µs on `HttpURLConnection`, 1 over 30; the fixes, the store's queued-bytes budget among
+  them, cost a median of +3 µs of calling-thread CPU on OkHttp, up to about 10 not ruled out, and
+  0 on `HttpURLConnection` against the tree before them, android-capture.md, "Review fixes"),
   median wall still 10 to 30 µs above the noop-vs-noop noise on both (about the calling thread's
   own CPU, so the wall target needs the CPU itself lower: the two kotlinx `Channel` lanes, profile
   item 2, and the `HttpURLConnection` response-header read, item 4, are the next levers); 10
   non-matching rules add about 7 µs on `HttpURLConnection` and 7 to 19 µs of process CPU on
   URLSession against a 3 µs target; a phone run of the same `captureBench` (on the emulator a
-  futex wake is a VM exit, so the ranking may differ on hardware); the request-thread cost of the store's queued-bytes budget (2026-10-27: one atomic add per end that holds bodies, one volatile read of the request capture), not measured on the emulator yet; the provider's startup (5.4 ms median on a debuggable emulator, target 1 ms); OkHttp 3.12/3.13; HTTPS through the
+  futex wake is a VM exit, so the ranking may differ on hardware); the provider's startup
+  (5.4 ms median on a debuggable emulator, target 1 ms); OkHttp 3.12/3.13; HTTPS through the
   wrapper on a device; a physical device run; Cronet and WebView.
 
 ### Rules: mock, edit (built)
@@ -204,8 +220,11 @@ so the app pays no extra cost.
 - Open:
   - Device verification ran on the API 35 emulator and the iPhone 17 (iOS 27.0) and
     iPhone 16 (iOS 18.2) simulators (rules self-test 44/44 and 32/32), and the desktop panel was
-    checked against both through a composed `ViewerContent` test (41/41, 42/42); driving the real
-    window needs Screen Recording and Accessibility grants this machine lacks.
+    checked against both through a composed `ViewerContent` test (41/41, 42/42); again on the
+    emulator on 2026-10-27, after the bug fixes: 36 of 36 (replay's checks gone with it), and an
+    untouched list now keeps the newest row in view after a burst, which it did not on
+    2026-10-25; the iOS run was not repeated. Driving the real window needs Screen Recording and
+    Accessibility grants this machine lacks.
   - The performance plan: 10 non-matching rules are measured (design, "Performance"; not met on
     `HttpURLConnection` and URLSession, unresolvable at 3 µs on OkHttp) and idle with rules set is
     0 wakes on both platforms; 1 and 64 rules and mock latency are still unmeasured.

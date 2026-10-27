@@ -1145,7 +1145,25 @@ A review of the hardening pass confirmed seven defects; all are fixed, with test
   counted. Still held by a queued record: the app's own `Request`
   and its body object (OkHttp) or the connection with whatever the platform buffered
   (`HttpURLConnection`), as before. The request thread now pays that atomic add plus one volatile
-  read of the request capture per end; re-measure on the emulator pending (`captureBench`).
+  read of the request capture per end. Measured on 2026-10-27 with every fix of that day in
+  (`benchmark/android-capture/2026-10-27/`, criteria in
+  `benchmark/perf/2026-10-27/session-verdicts.md`): API 35 emulator, debuggable builds, dev server
+  `--nodelay`, `/json` back to back, 1000 after 1000 warm-up, arms noop, before (9356117, the tree
+  without the fixes), after (1c81938) and noop2. The 4 rounds registered before any data, in that
+  order: after minus before calling-thread CPU +4, −22, −2, +37 µs on OkHttp and +1, −6, +1, +12
+  on `HttpURLConnection`, inside the noop2 − noop band in 3 of 4 rounds on each (pass); median
+  wall inside it on OkHttp (pass), not on `HttpURLConnection` (+84, −70, −1, −39 against −19..+0,
+  scattered both ways: fail). A follow-up set after reading those, 4 rounds with after and before
+  swapped on a quieter guest: CPU +11, −3, +9, +2 µs on OkHttp and −1, −3, +3, −2 on
+  `HttpURLConnection`, outside that run's narrower bands (−15..0, −2..+1). Over the 8 rounds the
+  CPU difference is a median of +3 µs on OkHttp (mean +4.5; the pooled band's +39 edge comes from
+  the session's first block, a noop at guest load 8.4 that read 267 µs) and 0 on
+  `HttpURLConnection`: no cost shows on `HttpURLConnection`, and on OkHttp one of up to about
+  10 µs is not ruled out. Process CPU per block (the whole process, launch and JIT included) was
+  lower after than before in 6 of 8 rounds, inconclusive by the follow-up's own rule, and the
+  difference sits in the JIT pool and the main thread, not in Hopi's threads (within ±22 ms a
+  block). Against noop, after the fixes, 8 rounds: calling-thread CPU +24 µs median on OkHttp
+  (2 rounds over 30) and +22.5 on `HttpURLConnection` (1 over 30), median wall +27 and +12 µs.
 - **An older CLI** shows a `failedAfterResponse` record's status (`200`) in its code column
   instead of `ERR` (ARCHITECTURE.md, "A failure after the response arrived keeps the response").
 - **The iOS idle harness** summed the CPU of the threads alive at each end, so a thread that

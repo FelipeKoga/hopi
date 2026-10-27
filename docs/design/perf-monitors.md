@@ -1140,8 +1140,17 @@ beat's end wakes nothing). Fixed after stage 5 (`HangDetectorTest`): until a uni
 watchdog looks again within `threshold / 2` (the end of a beat, or of a tap's dispatch, wakes
 nothing), so it beats every `threshold / 2` (8 wakes per second on each thread at 250 ms, 16 in
 all), a hang reads at most 125 ms short, and only one shorter than 1.5 thresholds can be missed
-(2 before). Re-measure pending on the emulator. The click burn stayed exact (the input bracket
-does not depend on the printer).
+(2 before). Re-measured on the emulator on 2026-10-27 (`benchmark/perf/2026-10-27/`, verdicts
+written before the data in `session-verdicts.md`): idle, the watchdog woke 470 to 471 times and
+the main thread 475 to 477 times in 60 s (7.8 to 7.9 per second each, 3 runs), with 110 to 160 ms
+of watchdog CPU per minute. In two lab runs the 1 s hang read 917 and 938 ms against 1003 and
+1001 ms measured in the unit, the 3 s hang 2950 and 2949 ms against 3002 and 3004, and the 600 ms
+burn 556 and 561 ms against 601, each within 125 ms; the 300 ms hang (1.2 thresholds) was missed
+both times, which the bound allows (22 and 21 of 26: `verify.py`'s ±20 ms duration checks are the
+printer's bound, and the 20 ms jank step read 4 janky frames in one run, as on 2026-10-25). The
+click burn stayed exact, 605 and 604 ms (the input bracket does not depend on the printer). The
+printer run of the same session: 28 of 28 (hangs 311, 1004, 3001 and 602 ms, the click burn
+603 ms).
 
 **Verdict: the printer stays the default** and the heartbeat stays the opt-in
 (`hangHeartbeat`) for an app that needs another tool's printer. The printer is exact (0 to 5 ms),
@@ -1161,6 +1170,7 @@ offers none; `Looper.setObserver` is hidden API).
 | hangs (printer) | 0 CPU, 0 wakes (the watchdog sleeps untimed) | 0 wakes |
 | frames | 0 CPU, 0 wakes (nothing draws) | 0 wakes |
 | hangs (heartbeat, before its cadence fix) | `hopi-perf-hang` 239 wakes, 90 ms | 245 wakes, 10 ms |
+| hangs (heartbeat, after it: 2026-10-27, 3 runs, `benchmark/perf/2026-10-27/`) | `hopi-perf-hang` 470 to 471 wakes, 110 to 160 ms | 475 to 477 wakes, 10 to 20 ms |
 | CPU and memory | `hopi-perf-samp` 60 wakes, 70 ms | 0 wakes |
 | all four | `hopi-perf-samp` 60 wakes, 70 ms | 0 wakes |
 | CPU alone, memory alone (120 s each) | `hopi-perf-samp` 119 wakes, 100 ms each | 0 wakes |
