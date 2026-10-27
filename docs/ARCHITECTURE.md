@@ -1,11 +1,13 @@
 # Hopi architecture
 
-Hopi is a real-time debugging toolkit for Kotlin Multiplatform / Compose Multiplatform apps on
-Android and iOS, inspired by DebugSwift. v1 ships one tool: an HTTP inspector for apps that use the
-Ktor client, plus automatic capture of every URLSession request of an iOS process and of every
-OkHttp and `HttpURLConnection` request of an Android app (third-party SDKs included, see
-"URLSession capture" and "Android capture"). It is built for two audiences at once: a developer looking at an in-app screen, and an
-AI coding agent reading the same traffic from a terminal.
+Hopi is a set of real-time devtools for Kotlin Multiplatform / Compose Multiplatform apps on
+Android and iOS, inspired by DebugSwift. Each tool is a module of its own, off until opted in. The
+tools built so far: the network inspector (the Ktor client plugin, plus automatic capture of every
+URLSession request of an iOS process and of every OkHttp and `HttpURLConnection` request of an
+Android app, third-party SDKs included, see "URLSession capture" and "Android capture"), rules
+that mock, fail, delay or edit those requests (see "Rules"), and the performance monitors (see
+"Performance monitors"). It is built for two audiences at once: a developer looking at an in-app
+screen, and an AI coding agent reading the same data from a terminal.
 
 This document is the contract every module is built against. Change it before changing code.
 

@@ -1,11 +1,14 @@
 # Roadmap
 
-v1 is the HTTP inspector (see `ARCHITECTURE.md`). Everything below is backlog, to be explored and
-designed before it is built.
+Hopi is a set of devtools for KMP and CMP apps. Built so far: the network inspector, rules and the
+performance monitors (see `ARCHITECTURE.md`). Everything below not marked built is backlog, to be
+explored and designed before it is built.
 
 ## Rule for every new tool
 
 Each tool is its own module with its own `-noop` twin, **off by default**, and opt-in individually.
+(Proposed: replace the twins with one API module and pluggable runtimes,
+`docs/design/api-runtime-split.md`.)
 Its cost when off is zero, its cost when on is stated in its design doc and measured on the sample
 app before it ships. Prefer platform-provided signals the OS already computes over sampling loops
 that wake threads. Anything that has to sample states its interval and its overhead. This is the

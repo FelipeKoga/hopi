@@ -67,7 +67,7 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             packageName = "Hopi"
             packageVersion = desktopVersion
-            description = "Hopi desktop viewer: HTTP traffic of a running app"
+            description = "Hopi desktop viewer: devtools for a running KMP or CMP app"
             vendor = "dev.koga"
             // Beyond the defaults: the bridge.json watch's sensitivity modifier (com.sun.nio.file).
             modules("jdk.unsupported")

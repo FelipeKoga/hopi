@@ -1,20 +1,30 @@
 # Hopi
 
-Hopi is a real-time HTTP inspector for Kotlin Multiplatform and Compose Multiplatform apps on
-Android and iOS that use the Ktor client. It can also record requests automatically, third-party
-SDKs included: every URLSession request of an iOS process, and every OkHttp and
-`HttpURLConnection` request of an Android app (one Gradle plugin line, no code). Every request shows up in these places:
+Hopi is a set of real-time devtools for Kotlin Multiplatform and Compose Multiplatform apps on
+Android and iOS. Each tool is a module of its own, off until you opt in, and shows what it sees in
+the same places:
 
-- an in-app screen (list, detail, cURL, share) behind a small floating button,
-- one NDJSON line per request in logcat or the iOS unified log,
+- an in-app screen behind a small floating button,
+- one NDJSON line per event in logcat or the iOS unified log,
 - a host CLI, `hopi`, whose `--json` output is a stable contract for AI coding agents,
-- a desktop viewer (Compose Desktop, macOS first) that shows the same traffic on your screen.
+- a desktop viewer (Compose Desktop, macOS first) that shows the same data on your screen.
 
-Rules change what a request does while you debug: a made-up response (**mock**), a failure the
-platform's own way (**fail**), a **delay**, or a rewritten request or response (**edit**). They
-live in the app's memory for the session only, apply on every source to the extent each can
-without weakening the app's TLS or pinning, and mark every record they touch (see
-[Rules](#rules-mock-fail-delay-edit)).
+The tools so far:
+
+- **Network**: every HTTP request of the app, from the Ktor client plugin or recorded
+  automatically, third-party SDKs included: every URLSession request of an iOS process, and every
+  OkHttp and `HttpURLConnection` request of an Android app (one Gradle plugin line, no code). List,
+  detail, cURL, share, HAR export.
+- **Rules**: change what a request does while you debug: a made-up response (**mock**), a failure
+  the platform's own way (**fail**), a **delay**, or a rewritten request or response (**edit**).
+  They live in the app's memory for the session only, apply on every source to the extent each can
+  without weakening the app's TLS or pinning, and mark every record they touch (see
+  [Rules](#rules-mock-fail-delay-edit)).
+- **Performance**: frames, hangs (with the main thread's stack), CPU and memory, each monitor
+  started on its own (see [Performance monitors](#performance-monitors-frames-hangs-cpu-memory)).
+
+More tools are planned (accessibility audit, analytics debugger, state tracker); see
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 It is built to cost nothing when nobody is looking: no timers, no polling, no request of its own,
 a rule check of one volatile read per request while no rule exists,

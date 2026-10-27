@@ -198,7 +198,8 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
 internal val USAGE_TEXT: String = """
     |Usage: hopi <command> [options]
     |
-    |Reads the HTTP traffic an app records with Hopi (agentBridge = true).
+    |Reads what Hopi records in a running app (HTTP traffic, rules, performance) and drives its
+    |rules and monitors. The app needs agentBridge = true.
     |
     |Commands:
     |  devices                 list reachable targets: adb devices and booted iOS simulators

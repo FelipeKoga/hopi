@@ -96,7 +96,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The HTTP inspector, full screen: the captured requests, newest first, and the detail of one.
+ * The in-app devtools, full screen: the captured requests, newest first, and the detail of one.
  * The back gesture leaves a detail, then calls [onClose]. It collects the process-wide store only
  * while it is composed.
  */

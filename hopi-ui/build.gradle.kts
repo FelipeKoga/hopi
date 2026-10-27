@@ -8,7 +8,7 @@ plugins {
     alias(libs.plugins.compose.multiplatform)
 }
 
-description = "HopiScreen and HopiLauncher, the in-app inspector (Compose Multiplatform)."
+description = "HopiScreen and HopiLauncher, the in-app devtools screen (Compose Multiplatform)."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
 kotlin {
