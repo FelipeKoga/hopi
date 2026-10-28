@@ -242,6 +242,7 @@ abstract class PublicationCheck : DefaultTask() {
 // and hopi-perf(-noop) and swaps the ktor/ui/rules/perf twins, all of them listed here.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
 val publishedModules = mapOf(
+    "hopi-api" to allTargets,
     "hopi-core" to allTargets,
     "hopi-ktor" to allTargets,
     "hopi-ktor-noop" to allTargets,

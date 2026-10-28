@@ -1,6 +1,6 @@
 package dev.koga.hopi.android.internal
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * The class annotation the `dev.koga.hopi` plugin adds to OkHttp's `RealCall` when it rewrote its

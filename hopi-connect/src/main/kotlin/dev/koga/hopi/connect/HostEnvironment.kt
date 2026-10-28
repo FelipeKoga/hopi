@@ -1,6 +1,6 @@
 package dev.koga.hopi.connect
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files

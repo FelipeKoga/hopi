@@ -6,7 +6,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.SystemClock
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.log.emitPlatformLogLine
 import dev.koga.hopi.core.perf.PerfBootstrap
 

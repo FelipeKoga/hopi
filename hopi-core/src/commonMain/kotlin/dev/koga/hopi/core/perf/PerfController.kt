@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.perf
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import kotlin.concurrent.atomics.AtomicReference
 
 /** Who holds a running monitor (docs/design/perf-monitors.md, "Owners"). */

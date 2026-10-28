@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.perf
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /** What the perf model hands its listeners (a bridge `perf.tail`, the HUD): events, closed seconds, samples. */
 @HopiInternalApi

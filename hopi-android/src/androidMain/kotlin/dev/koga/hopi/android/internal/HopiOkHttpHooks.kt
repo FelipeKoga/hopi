@@ -2,7 +2,7 @@
 
 package dev.koga.hopi.android.internal
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 

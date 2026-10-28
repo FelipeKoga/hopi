@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.capture
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.bridge.AgentBridgeHook
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.log.applyBeforeProcessDeath

@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.model
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 @HopiInternalApi
 public enum class TransactionState(public val wireName: String) {

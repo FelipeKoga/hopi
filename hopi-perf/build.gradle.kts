@@ -27,7 +27,7 @@ kotlin {
     }
 
     compilerOptions {
-        optIn.add("dev.koga.hopi.core.HopiInternalApi")
+        optIn.add("dev.koga.hopi.api.HopiInternalApi")
         optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
         optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
     }

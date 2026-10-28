@@ -1948,10 +1948,11 @@ Not part of this pass.
 
 ### Base check today
 
-Verified against `README.md:560-564`, identical to this section before the re-plan:
+Kept equal to the base check of `README.md` ("Building"); a stage that adds, deletes or renames a
+task path edits both (rule 5). As of stage 3:
 
 ```bash
-./gradlew :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
+./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
   :hopi-perf:jvmTest :hopi-perf-noop:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \
@@ -2102,6 +2103,30 @@ Stage numbers below are the new ones.
 - 15 stage-order items (14 problems and the edge inventory), the reason section 6 was rewritten;
   section 6, stage 1, says where each is carried.
 
+### [run] results, by stage
+
+Stage 3 (2026-10-28, at `a6be8e8` plus the stage's edits):
+
+- **E7 X1**: `./gradlew :hopi-connect:check :hopi-rules:check --dry-run` lists
+  `:hopi-connect:checkKotlinAbi` and `:hopi-rules:checkKotlinAbi`: KGP puts `checkKotlinAbi` into
+  each module's `check`, so no module needs it wired, and removing the parity tasks loses no ABI check.
+- **E7 X2**: `./gradlew :hopi-android:check :hopi-android-noop:check :hopi-perf:check --dry-run`
+  lists each module's `testAndroidHostTest`: host tests run in `check`, so
+  `:hopi-android-noop:testAndroidHostTest` always ran in the base check; the explicit entries of
+  section 7 are redundant and stay.
+- **E7 X3** (baseline, `dependencies`, Hopi projects only): `:sample:androidApp`
+  `releaseRuntimeClasspath`: `:hopi-android-noop`, `:hopi-ktor-noop`, `:hopi-perf-noop`,
+  `:hopi-rules-noop`, `:hopi-ui-noop`; `debugRuntimeClasspath`: `:hopi-android`, `:hopi-core`, and
+  each twin pair substituted to the real module (`:hopi-ktor`, `:hopi-perf`, `:hopi-rules`,
+  `:hopi-ui`). `:sample:shared` `iosSimulatorArm64CompileKlibraries`: without `-Phopi.enabled=true`
+  the noops of ktor, perf, rules, ui and urlsession; with it `:hopi-core`, `:hopi-ktor`,
+  `:hopi-perf`, `:hopi-rules`, `:hopi-ui`, `:hopi-urlsession`.
+- **E4 X1**: with `filters { exclude.annotatedWith.add("dev.koga.hopi.api.HopiInternalApi") }`,
+  `hopi-api`'s three dumps hold only the annotation class; `HopiRuntimes` (annotated at class level)
+  is in none. The filter works; no name filter is needed.
+- **P2's "the marker appears in ABI dumps"** is refuted: after the rename, `./gradlew
+  updateKotlinAbi` changed no dump but adding `hopi-api`'s own.
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2148,7 +2173,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 0. Preflight | done: owner decisions recorded, baseline green | `e1ef40a` |
 | 1. Evaluation and re-plan | done: E1 to E8 and the cross-check in `docs/design/runtime-split-evaluation/`; sections 3.9, 6 to 10 rewritten | `27b1714` |
 | 2. Contract documents (after a separate fix commit) | done: the redirect wording fixed (`:hopi-core:jvmTest` and `:hopi-ui:jvmTest` green; `PerfUiTest` timed out once waiting 5 s for the PSS line and passed on two reruns, a timing flake in a test stage 5 deletes); ARCHITECTURE principle 1, the migration note and the Modules table's stages; ROADMAP's rule for every new tool and its surfaces; the old proposal's status line | `2e9cce0` (fix), (this commit) |
-| 3. The API module | | |
+| 3. The API module | done: `hopi-api` (registry `HopiRuntimes` with the Ktor hooks' slot; no dependency; four targets; published); `@HopiInternalApi` renamed in 91 files (P2); E7 X1 to X3 and E4 X1 in section 9 | (this commit) |
 | 4. Start sequence and tools in core | | |
 | 5. Remove the in-app UI | | |
 | 6. iOS entry | | |

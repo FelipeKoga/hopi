@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.redact.Redactor
 
 /** A request after a [RequestEdit]: what a source sends, and what the record holds as sent. */

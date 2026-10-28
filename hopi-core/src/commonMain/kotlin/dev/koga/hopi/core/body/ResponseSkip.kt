@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.body
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /** Response bodies no recorder captures, by content type; their bytes are counted, never kept. */
 @HopiInternalApi

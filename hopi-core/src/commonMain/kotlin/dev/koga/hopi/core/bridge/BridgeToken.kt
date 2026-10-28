@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.bridge
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * The per-process secret a token transport's clients send as their first line. Never logged,

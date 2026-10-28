@@ -9,7 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.perf.PerfBootstrap
 import dev.koga.hopi.core.perf.PerfData
 import dev.koga.hopi.core.perf.PerfLauncher

@@ -1,7 +1,7 @@
 package dev.koga.hopi.core.perf
 
 import android.app.Activity
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import java.lang.ref.WeakReference
 
 /**

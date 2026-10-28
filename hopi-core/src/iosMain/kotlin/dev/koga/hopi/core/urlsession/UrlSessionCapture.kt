@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.urlsession
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.body.ResponseSkip
 import dev.koga.hopi.core.capture.CaptureInstallation
 import dev.koga.hopi.core.capture.PlatformCapture

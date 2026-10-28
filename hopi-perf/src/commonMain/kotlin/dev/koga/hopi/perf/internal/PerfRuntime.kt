@@ -1,6 +1,6 @@
 package dev.koga.hopi.perf.internal
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.bridge.AgentBridgeHook
 import dev.koga.hopi.core.perf.PerfController
 import dev.koga.hopi.core.perf.PerfData

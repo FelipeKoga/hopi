@@ -94,7 +94,8 @@ older ones are not tested):
 | `hopi-perf-noop` | Same public API as `hopi-perf`, does nothing |
 | `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-android` to debug builds and `hopi-android-noop` to release builds |
 
-`hopi-core` (shared by the real modules), `hopi-android` and `hopi-android-noop` (added by the
+`hopi-core` (shared by the real modules), `hopi-api` (Hopi's opt-in annotation and runtime
+registry, which `hopi-core` brings), `hopi-android` and `hopi-android-noop` (added by the
 plugin) and `hopi-instrument` (the plugin's rewriter) are published too; you never name them. Each
 KMP artifact has its Android, JVM, `iosArm64` and `iosSimulatorArm64` publications with sources
 and Gradle module metadata, so `dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right
@@ -557,7 +558,7 @@ the noop parity check (a real module and its twin must have exactly the same pub
 publication check. The base check, one Gradle invocation:
 
 ```bash
-./gradlew :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
+./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
   :hopi-perf:jvmTest :hopi-perf-noop:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \

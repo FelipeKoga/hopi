@@ -1,6 +1,6 @@
 package dev.koga.hopi.connect
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /** Process exit codes; part of the CLI's contract with scripts and agents. */
 @HopiInternalApi

@@ -46,7 +46,7 @@ other sections describe what is built until their stage lands.
 
 | Module                | Depends on                           | Purpose                                                    | Runtime-split plan stage |
 | --------------------- | ------------------------------------ | ---------------------------------------------------------- | --- |
-| `hopi-core`      | kotlinx-coroutines                   | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server | 3: depends on `hopi-api`; 4: start sequence, Android provider; 7: rules runtime |
+| `hopi-core`      | hopi-api, kotlinx-coroutines         | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server | 3: depends on `hopi-api`; 4: start sequence, Android provider; 7: rules runtime |
 | `hopi-ktor`      | core, ktor-client-core               | The Ktor client plugin                                     | 10: thin, over `hopi-api`; its recorder moves to `hopi-network` |
 | `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          | goes in 10 |
 | `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       | 5: the desktop viewer's screens only (JVM, unpublished) |
@@ -64,7 +64,7 @@ other sections describe what is built until their stage lands.
 | `hopi-cli`       | connect, core (JVM)                  | Host CLI for developers and AI agents                      |  |
 | `hopi-desktop`   | connect, ui (JVM), core (JVM), Compose Desktop | Desktop viewer app (macOS `.dmg`); never a dependency of an app |  |
 | `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests; `sample/fakesdk` is a Java library that stands in for a third-party SDK and knows nothing of Hopi | every stage |
-| `hopi-api` (planned)  | nothing                              | The API an app calls (rules, perf), `@HopiInternalApi` and the runtime registry; does nothing alone; the only Hopi module a release build links besides `hopi-ktor` | 3 (rules: 7, perf: 8) |
+| `hopi-api`       | nothing                              | `@HopiInternalApi` and the runtime registry `HopiRuntimes` (one write-once slot per runtime kind; the Ktor hooks' slot so far); later the API an app calls (rules, perf); does nothing alone; the only Hopi module a release build links besides `hopi-ktor` | 3: built; rules: 7, perf: 8 |
 | `hopi-start` (planned) | core, network, perf                | `Hopi.start { }`, the iOS entry (exported by Debug frameworks) and the JVM entry | 6 (JVM: 10) |
 | `hopi-network` (planned) | core                             | Android and iOS network capture and the Ktor adapter; replaces `hopi-android` and `hopi-urlsession` | 9 (Ktor adapter: 10) |
 
@@ -72,7 +72,8 @@ Targets for every KMP library module: `android`, `iosArm64`, `iosSimulatorArm64`
 target exists so logic tests run on the host in seconds; it is also a legitimate desktop target).
 
 `hopi-core` is public so the other Hopi modules can use it, but every declaration that is
-not part of the consumer API is annotated `@HopiInternalApi` (a `RequiresOptIn` annotation).
+not part of the consumer API is annotated `@HopiInternalApi` (`dev.koga.hopi.api.HopiInternalApi`,
+a `RequiresOptIn` annotation declared in `hopi-api`, which every module that uses core sees).
 The exceptions are the two iOS cinterop bindings, which cinterop cannot annotate: the os_log shim
 (see Agent access) lives in `dev.koga.hopi.core.internal.oslog` and binds only `hopi_os_log_line`
 (no os/log.h declarations are re-exported), and the URLSession capture library (see URLSession
@@ -216,7 +217,7 @@ Gradle plugin: compose-ui is there because `HopiScreen`'s `modifier` parameter i
 `androidx.compose.ui.Modifier`, which lives in compose-ui (it brings ui-graphics, ui-text and
 ui-unit, no foundation and no Material). Neither noop depends on `hopi-core`; each noop's JVM
 tests assert that its test runtime classpath holds no `hopi-core` and that core's classes
-cannot be loaded.
+cannot be loaded, and `hopi-api`'s JVM tests assert the same of `hopi-api`.
 
 **Parity is checked mechanically.** The real and noop modules enable the Kotlin Gradle plugin's built-in ABI
 validation (`kotlin { abiValidation { … } }`, KGP 2.4.20, `@ExperimentalAbiValidation`), which

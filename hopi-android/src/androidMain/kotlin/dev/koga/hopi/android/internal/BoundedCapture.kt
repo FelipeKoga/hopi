@@ -1,6 +1,6 @@
 package dev.koga.hopi.android.internal
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import java.io.OutputStream
 import okio.Buffer
 

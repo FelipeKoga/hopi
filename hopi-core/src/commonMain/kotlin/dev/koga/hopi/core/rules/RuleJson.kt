@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.redact.Redactor

@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.redact
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * Replaces secret header values and query parameter values with [REDACTED]. Header and parameter

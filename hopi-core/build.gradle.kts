@@ -13,7 +13,7 @@ kotlin {
     explicitApi()
 
     compilerOptions {
-        optIn.add("dev.koga.hopi.core.HopiInternalApi")
+        optIn.add("dev.koga.hopi.api.HopiInternalApi")
         optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
     }
 
@@ -43,6 +43,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // @HopiInternalApi and the runtime registry: every module that uses core sees them.
+            api(project(":hopi-api"))
             // StateFlow and SharedFlow are part of core's API surface.
             api(libs.kotlinx.coroutines.core)
         }

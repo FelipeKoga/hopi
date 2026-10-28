@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.store
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.concurrent.BlockingSemaphore
 import dev.koga.hopi.core.concurrent.newBlockingSemaphore
 import dev.koga.hopi.core.concurrent.startBackgroundThread

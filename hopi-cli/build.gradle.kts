@@ -7,7 +7,7 @@ kotlin {
     explicitApi()
 
     compilerOptions {
-        optIn.add("dev.koga.hopi.core.HopiInternalApi")
+        optIn.add("dev.koga.hopi.api.HopiInternalApi")
     }
 }
 

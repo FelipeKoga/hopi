@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.body
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.model.CapturedBody
 import kotlin.math.roundToLong
 

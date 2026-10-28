@@ -1,7 +1,7 @@
 package dev.koga.hopi.core.perf
 
 import android.app.Application
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * How `hopi-android`'s provider hands the app to `hopi-perf` when the Gradle plugin put it in the

@@ -1,6 +1,6 @@
 package dev.koga.hopi.connect
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.json.JsonWriter
 import java.io.BufferedReader
 import java.io.IOException

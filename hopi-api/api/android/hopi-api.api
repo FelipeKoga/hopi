@@ -1,0 +1,3 @@
+public abstract interface annotation class dev/koga/hopi/api/HopiInternalApi : java/lang/annotation/Annotation {
+}
+

@@ -11,7 +11,7 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * The hang monitor's input bracket (docs/design/perf-monitors.md, "Input dispatch"): input events

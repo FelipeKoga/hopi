@@ -32,6 +32,7 @@ dependencyResolutionManagement {
 // Also a regular included build: hopi-android's host tests use its rewriter (hopi-instrument).
 includeBuild("gradle-plugin")
 
+include(":hopi-api")
 include(":hopi-core")
 include(":hopi-ktor")
 include(":hopi-ktor-noop")

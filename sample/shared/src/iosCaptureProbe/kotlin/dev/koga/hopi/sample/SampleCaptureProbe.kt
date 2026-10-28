@@ -1,6 +1,6 @@
 package dev.koga.hopi.sample
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.store.HopiStore
 import kotlinx.coroutines.CompletableDeferred
