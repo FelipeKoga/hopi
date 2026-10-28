@@ -2401,8 +2401,21 @@ Stage 6 leaves for later stages:
   or `true`, the two values that set `HOPI`, so the framework and Swift never disagree; an unset
   `HOPI_ENABLED` now means off (before: on). Both Debug configurations set `YES` (XcodeGen writes a
   boolean that way).
-- `ViewerTest`'s two bridge-file-watch tests fail now and then on a loaded host (section 9, the
-  base check): diagnosed and fixed, or hardened, before the next stage's base check.
+- `ViewerTest`'s two bridge-file-watch tests failed now and then on a loaded host (section 9, the
+  base check). Fixed in the `fix(desktop)` commit that follows stage 6's, two viewer bugs:
+  - The session-state collector's `run { onSessionState(session) }` sat inside a coroutine, where
+    the stdlib's `T.run` took the call, so a dropped link was handled on a `Dispatchers.Default`
+    thread, racing the worker. A viewer closed as its app stopped could then leave a bridge-file
+    watch polling for the rest of the process, and the next test saw that thread. The worker's
+    dispatcher is now `onWorker`, which no stdlib function shadows.
+  - The JDK's polling watch service fails to register a directory whose file is deleted while it
+    lists it (the app's `bridge.json`, as the app exits), and the watcher then waited for an event
+    that could not come. It now tries the registration again, and while a wanted directory is not
+    registered it looks again every 2 s.
+
+  `ViewerTest`'s teardown now fails the test whose viewer leaves a watch running, and its `await`
+  reports the last value and the viewer's threads. `ViewerTest` passed 8 of 8 reruns after the fix
+  (one failure in 4 runs before).
 
 ---
 

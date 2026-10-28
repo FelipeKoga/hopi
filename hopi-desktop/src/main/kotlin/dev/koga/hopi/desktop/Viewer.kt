@@ -131,22 +131,22 @@ internal class Viewer(
     private var closed = false
 
     /** Starts device tracking and the first discovery. */
-    fun start(): Unit = run {
+    fun start(): Unit = onWorker {
         startDeviceTracking(restartOnEnd = true)
         discoverNow()
     }
 
     /** The window gained or lost focus: the picker's JVM processes are watched only while it has it. */
-    fun windowFocused(focused: Boolean): Unit = run {
+    fun windowFocused(focused: Boolean): Unit = onWorker {
         windowFocused = focused
         updateWatches()
     }
 
     /** Lists the targets again (the picker's refresh). */
-    fun refresh(): Unit = run { discoverNow() }
+    fun refresh(): Unit = onWorker { discoverNow() }
 
     /** Views [target] from now on: a fresh session (or the same one when it is the target already shown). */
-    fun connect(target: Target): Unit = run {
+    fun connect(target: Target): Unit = onWorker {
         epoch++
         if (!target.sameAs(this.target) || current == null) {
             closeTarget()
@@ -154,20 +154,20 @@ internal class Viewer(
             val session = newSession { open(target) }
             current = session
             _session.value = session
-            stateWatch = scope.launch { session.state.collect { run { onSessionState(session) } } }
+            stateWatch = scope.launch { session.state.collect { onWorker { onSessionState(session) } } }
             watchTarget(target)
         }
         attempt()
     }
 
     /** Tries the current target again now. */
-    fun reconnect(): Unit = run {
+    fun reconnect(): Unit = onWorker {
         epoch++
         attempt()
     }
 
     /** Stops viewing: both connections, the adb forward and the watchers are closed, the list is emptied. */
-    fun disconnect(): Unit = run {
+    fun disconnect(): Unit = onWorker {
         epoch++
         closeTarget()
         setStatus(ViewerStatus.Idle)
@@ -250,7 +250,7 @@ internal class Viewer(
         if (!closed && root != null && windowFocused && status !is ViewerStatus.Connected) {
             if (jvmRootWatch == null) {
                 jvmRootWatch = PathWatcher("hopi-desktop-watch-jvm", { jvmWatchDirectories(root) }, notifyOnStart = true) {
-                    run { _discovery.value = Discovery(nonJvm() + jvmBridges(root), _discovery.value.notes) }
+                    onWorker { _discovery.value = Discovery(nonJvm() + jvmBridges(root), _discovery.value.notes) }
                 }
             }
         } else {
@@ -266,7 +266,11 @@ internal class Viewer(
         }
     }
 
-    private fun run(task: () -> Unit) {
+    /**
+     * Runs [task] on the worker. Not named `run`: inside a lambda with a receiver (a coroutine's,
+     * say) the stdlib's `T.run` takes that call and runs the task in place, off the worker.
+     */
+    private fun onWorker(task: () -> Unit) {
         if (closed) return
         try {
             worker.execute(task)
@@ -347,21 +351,21 @@ internal class Viewer(
 
     private fun watchBridgeFile(file: Path): AutoCloseable =
         PathWatcher("hopi-desktop-watch-bridge", { PathWatcher.nearestExisting(file) }, notifyOnStart = true) {
-            run { if (waiting()) settle() }
+            onWorker { if (waiting()) settle() }
         }
 
     private fun trackProcesses(serial: String): AutoCloseable? = if (closed) null else try {
         targets.trackDebuggableProcesses(
             serial,
             onChange = {
-                run {
+                onWorker {
                     // A process started or ended: its bridge may have come or gone in the picker too.
                     discoverNow()
                     if (waiting()) settle()
                 }
             },
             // The device went away; track-devices restarts this when it is back.
-            onEnd = { run { if ((target?.device as? AndroidDevice)?.serial == serial) targetWatch = null } },
+            onEnd = { onWorker { if ((target?.device as? AndroidDevice)?.serial == serial) targetWatch = null } },
         )
     } catch (_: CliException) {
         null
@@ -375,9 +379,9 @@ internal class Viewer(
             targets.trackAndroidDevices(
                 onDevices = { list ->
                     received = true
-                    run { onDevices(list) }
+                    onWorker { onDevices(list) }
                 },
-                onEnd = { run { if (restartOnEnd || received) startDeviceTracking(restartOnEnd = false) } },
+                onEnd = { onWorker { if (restartOnEnd || received) startDeviceTracking(restartOnEnd = false) } },
             )
         } catch (_: CliException) {
             null

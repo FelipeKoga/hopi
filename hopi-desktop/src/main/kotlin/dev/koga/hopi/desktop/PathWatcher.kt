@@ -11,11 +11,13 @@ import java.nio.file.StandardWatchEventKinds.ENTRY_DELETE
 import java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY
 import java.nio.file.WatchKey
 import java.nio.file.WatchService
+import java.util.concurrent.TimeUnit
 
 /**
  * Calls [onChange] when anything changes in the [directories] (recomputed after every event, so a
  * directory that appears later is watched from then on), on one thread blocked in
- * [WatchService.take]. Also called when the set of watched directories changes after the start,
+ * [WatchService.take], or looking again every 2 seconds while a wanted directory is not registered
+ * or none exists, since no event can come then. Also called when the set of watched directories changes after the start,
  * since a file may have been written into a directory before it was watched, and, with
  * [notifyOnStart], once as soon as the first directories are watched: whatever changed before
  * then is looked at, so nothing written between a caller's last look and the watch is missed.
@@ -35,6 +37,9 @@ internal class PathWatcher(
     private val service: WatchService = FileSystems.getDefault().newWatchService()
     private val keys = HashMap<Path, WatchKey>()
 
+    /** False while a wanted directory is not registered, or none is: no event can then report it. */
+    private var complete = false
+
     init {
         Thread(::run, name).apply { isDaemon = true }.start()
     }
@@ -44,10 +49,13 @@ internal class PathWatcher(
             sync(initial = true)
             if (notifyOnStart) onChange()
             while (true) {
-                val key = service.take()
-                key.pollEvents()
-                if (!key.reset()) keys.values.remove(key)
-                if (!sync()) onChange()
+                // Incomplete, the directories are looked at again every poll interval instead.
+                val key = if (complete) service.take() else service.poll(POLL_SECONDS, TimeUnit.SECONDS)
+                if (key != null) {
+                    key.pollEvents()
+                    if (!key.reset()) keys.values.remove(key)
+                }
+                if (!sync() && key != null) onChange()
             }
         } catch (_: ClosedWatchServiceException) {
             // Closed.
@@ -68,15 +76,29 @@ internal class PathWatcher(
             }
         }
         for (path in wanted - keys.keys) {
-            try {
-                keys[path] = path.register(service, KINDS, SensitivityWatchEventModifier.HIGH)
-                changed = true
-            } catch (_: IOException) {
-                // Gone again; the next event recomputes.
-            }
+            val key = register(path) ?: continue
+            keys[path] = key
+            changed = true
         }
+        complete = keys.isNotEmpty() && keys.keys.containsAll(wanted)
         if (changed && !initial) onChange()
         return changed
+    }
+
+    /**
+     * Registers [path], or null when it is gone. The polling service lists the directory, then reads
+     * each entry's time, so a file deleted in between (an app's `bridge.json` as it exits) fails the
+     * registration of a directory that still exists: that is tried again.
+     */
+    private fun register(path: Path): WatchKey? {
+        repeat(REGISTER_ATTEMPTS) {
+            try {
+                return path.register(service, KINDS, SensitivityWatchEventModifier.HIGH)
+            } catch (_: IOException) {
+                if (!Files.isDirectory(path)) return null
+            }
+        }
+        return null
     }
 
     override fun close() {
@@ -89,6 +111,10 @@ internal class PathWatcher(
 
     companion object {
         private val KINDS = arrayOf(ENTRY_CREATE, ENTRY_MODIFY, ENTRY_DELETE)
+        private const val REGISTER_ATTEMPTS = 3
+
+        /** The `HIGH` sensitivity's interval, for the looks of an incomplete watch. */
+        private const val POLL_SECONDS = 2L
 
         /** The nearest existing directory of [file]'s parent and its ancestors, up to [levels] up. */
         fun nearestExisting(file: Path, levels: Int = 3): List<Path> {
