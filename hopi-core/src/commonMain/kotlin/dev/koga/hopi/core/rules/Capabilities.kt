@@ -19,7 +19,8 @@ public object Capabilities {
         "body edits apply to HTTPBody and upload-from-data tasks only on URLSession; file and stream uploads keep their body " +
             "(the rule's other edits still apply)"
     public const val NOT_FOLLOWED: String =
-        "a mocked 3xx, 401 or 407 reaches the app as the final response on this source; the client does not follow it"
+        "a mocked 3xx, 401 or 407 reaches the client as the final response on this source: OkHttp, HttpURLConnection " +
+            "and URLSession do not follow it; a client above them (Ktor's HttpRedirect, Auth) still does"
 
     /**
      * Every entry for [spec] on the sources its match names; when it names none, on the sources that

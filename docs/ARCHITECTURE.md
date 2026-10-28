@@ -1003,10 +1003,10 @@ Restarting the app clears every rule.
 **Observable differences while a rule applies**, stated rather than hidden: `task.originalRequest`
 is the edited request; `configuration.protocolClasses` lists Hopi's class; a delayed URLSession
 task reads `Suspended` during the delay and its timeouts start after it; an OkHttp mock has no
-handshake and skips the cache and network interceptors; a mocked 3xx, 401 or 407 is the final
-response on OkHttp, `HttpURLConnection` and URLSession (their follow-up logic is below Hopi) and
-is followed on Ktor (above it); an `HttpURLConnection` mock has no certificates; a mocked
-URLSession upload reports no send progress.
+handshake and skips the cache and network interceptors; a mocked 3xx, 401 or 407 is not
+followed by OkHttp, `HttpURLConnection` or URLSession themselves (their follow-up logic is below
+Hopi) and is followed by a Ktor client on any source (Ktor's is above it); an `HttpURLConnection`
+mock has no certificates; a mocked URLSession upload reports no send progress.
 
 **Switch.** Each recorder has `rules: Boolean = true` (`HopiConfig`, `HopiUrlSessionConfig`, the
 Gradle DSL's `hopi { rules = … }`, generated into `HopiGeneratedConfig`). False means that

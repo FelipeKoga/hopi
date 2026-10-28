@@ -380,11 +380,11 @@ through the app's own client or session, with its TLS, certificate pins, `Hostna
 and challenge delegate. The scheme cannot change, an edit to another host or port drops
 `Authorization`, `Cookie` and the redacted headers unless it sets them itself, a mock may not set a
 cookie, and no mocked or edited response enters an HTTP cache. What a source cannot do that way is
-unsupported there, and the rule says so when it is added. A mocked 3xx, 401 or 407 is the final
-response on OkHttp, `HttpURLConnection` and URLSession (their follow-up logic sits below Hopi); the
-Ktor plugin's sits above it, so Ktor follows them. Every recorder has a switch, `rules = false`
-(`install(Hopi) { }`, `HopiUrlSession.start { }`, `hopi { }`), that keeps it from ever reading the
-rule state; the app's `hello` then tells the CLI that rules are off.
+unsupported there, and the rule says so when it is added. A mocked 3xx, 401 or 407 is not
+followed by OkHttp, `HttpURLConnection` or URLSession themselves (their follow-up logic sits below
+Hopi); Ktor's sits above Hopi on every source, so a Ktor client follows them. Every recorder has a
+switch, `rules = false` (`install(Hopi) { }`, `HopiUrlSession.start { }`, `hopi { }`), that keeps
+it from ever reading the rule state; the app's `hello` then tells the CLI that rules are off.
 
 ## Performance monitors: frames, hangs, CPU, memory
 

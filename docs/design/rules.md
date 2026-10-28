@@ -180,9 +180,13 @@ follow-up logic above that position sees it: on Ktor, `HttpRedirect`, `HttpReque
 act on a mocked 3xx, 5xx or 401 (they run per hop above the send pipeline), and the follow-up hop
 is a request of its own (real unless a rule matches it). On OkHttp, `HttpURLConnection` and
 URLSession the redirect, `Authenticator` and challenge logic is below Hopi or inside the system
-loader: a mocked 3xx, 401 or 407 reaches the app as the final response, never followed. `rules.add`
-returns this as an `unsupported` note for a 3xx, 401 or 407 mock on those sources (the rule still
-applies).
+loader: the stack never follows a mocked 3xx, 401 or 407. A client above the stack still sees the
+mocked status and acts on it. Ktor's engines turn the stack's own redirects off
+(`followRedirects(false)` on OkHttp, `instanceFollowRedirects = false` on `HttpURLConnection`, one
+task per hop on URLSession), so a Ktor client's `HttpRedirect` follows a mocked 3xx on these sources
+too (GET and HEAD with a `Location`), as on the Ktor source, and its `Auth` answers a mocked 401;
+the follow-up hop is a request of its own. `rules.add` returns this as an `unsupported` note for a
+3xx, 401 or 407 mock on those sources (the rule still applies).
 
 **Fail**: one of `timeout`, `reset` (connection reset), `unknown-host` (DNS-like), `cancel`. Thrown
 or reported as each stack's own exception or `NSError` (table below), with the platform's own
@@ -734,7 +738,7 @@ object adds `id`, `hits`, `exhausted`, and `unsupported` (a list of `{"source","
 for every source in the rule's `sources` that cannot apply all or part of its action, from the
 capability table, so the CLI warns at once instead of the rule silently never matching there).
 `applies` is false for an exclusion (the source never gets the rule: a response edit on URLSession)
-and true for a stated difference (a mocked 3xx not followed). A rule that names no sources is
+and true for a stated difference (a mocked 3xx the stack does not follow). A rule that names no sources is
 checked against the sources that can record on the app's platform (`platformSources`, an
 expect/actual set beside `Capabilities`: Ktor, OkHttp and `HttpURLConnection` on Android; Ktor and
 URLSession on iOS; Ktor on a plain JVM),
@@ -1094,8 +1098,8 @@ Features first, end to end, then one review and hardening pass at the end:
    the edited request; `configuration.protocolClasses` lists Hopi's class; a delayed URLSession task
    reads `Suspended` during the delay and its timeouts start after it; an OkHttp mock has no
    handshake and bypasses the cache and network interceptors; a mocked 3xx, 401 or 407 is not
-   followed on OkHttp, `HttpURLConnection` and URLSession; an `HttpURLConnection` mock has no
-   certificates; a Ktor mock or edit on a client with `HttpCache` carries `Cache-Control:
+   followed by OkHttp, `HttpURLConnection` or URLSession themselves (a Ktor client above them still
+   follows it); an `HttpURLConnection` mock has no certificates; a Ktor mock or edit on a client with `HttpCache` carries `Cache-Control:
    no-store`; a mocked URLSession upload reports no send progress.
 4. **Two matchers** (Kotlin and C) can drift; the shared vectors fail the build when they do.
 5. **The OkHttp delay wait** checks for cancel every 50 ms because OkHttp has no cancel callback; a
