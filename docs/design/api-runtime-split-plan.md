@@ -2146,8 +2146,8 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | Stage | Status | Commit |
 | --- | --- | --- |
 | 0. Preflight | done: owner decisions recorded, baseline green | `e1ef40a` |
-| 1. Evaluation and re-plan | done: E1 to E8 and the cross-check in `docs/design/runtime-split-evaluation/`; sections 3.9, 6 to 10 rewritten | (this commit) |
-| 2. Contract documents (after a separate fix commit) | | |
+| 1. Evaluation and re-plan | done: E1 to E8 and the cross-check in `docs/design/runtime-split-evaluation/`; sections 3.9, 6 to 10 rewritten | `27b1714` |
+| 2. Contract documents (after a separate fix commit) | done: the redirect wording fixed (`:hopi-core:jvmTest` and `:hopi-ui:jvmTest` green; `PerfUiTest` timed out once waiting 5 s for the PSS line and passed on two reruns, a timing flake in a test stage 5 deletes); ARCHITECTURE principle 1, the migration note and the Modules table's stages; ROADMAP's rule for every new tool and its surfaces; the old proposal's status line | `2e9cce0` (fix), (this commit) |
 | 3. The API module | | |
 | 4. Start sequence and tools in core | | |
 | 5. Remove the in-app UI | | |

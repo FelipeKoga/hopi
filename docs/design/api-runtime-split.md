@@ -1,8 +1,8 @@
 # Design: one public API and a pluggable runtime, instead of noop twins
 
 Status: superseded (2026-10-27) by `docs/design/api-runtime-split-plan.md` wherever the two differ:
-the plan deletes the Ktor plugin and the public `HopiUrlSession` that this proposal kept. Kept for
-its reasoning (why twins, options considered).
+the plan removes the public `HopiUrlSession` that this proposal kept, and keeps a thin Ktor plugin
+(owner decision D2', 2026-10-28). Kept for its reasoning (why twins, options considered).
 
 Former status: proposal (2026-10-27). Nothing built. It changes principle 1 of `docs/ARCHITECTURE.md`
 ("every consumer-facing artifact has a `-noop` twin"), so the architecture doc is changed with the

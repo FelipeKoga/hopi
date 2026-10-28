@@ -6,16 +6,18 @@ explored and designed before it is built.
 
 ## Rule for every new tool
 
-Each tool is its own module with its own `-noop` twin, **off by default**, and opt-in individually.
-(Proposed: replace the twins with one API module and pluggable runtimes,
-`docs/design/api-runtime-split.md`.)
+Each tool is its own runtime module, **off by default**, and opt-in individually. The API an app
+calls lives in the optional `hopi-api`, which does nothing alone; the runtime is linked into debug
+builds only; the Gradle plugin's DSL turns the tool on. (The noop twins this replaces go stage by
+stage: `docs/design/api-runtime-split-plan.md`.)
 Its cost when off is zero, its cost when on is stated in its design doc and measured on the sample
 app before it ships. Prefer platform-provided signals the OS already computes over sampling loops
 that wake threads. Anything that has to sample states its interval and its overhead. This is the
 line between Hopi and DebugSwift, which slows apps down by running every monitor at once.
 
-Every tool exposes its data on all three surfaces: the in-app screen, the realtime log line, and
-the bridge/CLI for AI agents.
+Every tool exposes its data on three surfaces: the realtime log line, the bridge/CLI for AI agents,
+and the desktop viewer. There is no in-app screen (decided 2026-10-28; the in-app UI goes in the
+plan's stage 5).
 
 ## Backlog
 
@@ -76,7 +78,8 @@ Explore. An inspector for the analytics events the app emits, with validation ag
 per-provider constraints, so bad events are caught in debug instead of silently dropped in prod.
 - **Capture.** A tiny `hopi-analytics` API the app's own analytics wrapper calls
   (`HopiAnalytics.track(provider, name, params)`), plus optional adapters for common KMP
-  analytics SDKs. No swizzling, no interception of vendor SDK internals. Noop twin, as always.
+  analytics SDKs. No swizzling, no interception of vendor SDK internals. The API in `hopi-api`,
+  the runtime a module of its own.
 - **Constraints.** Declarative rule sets, built in for common providers and user-definable:
   max event name length, allowed name pattern (e.g. `^[a-zA-Z][a-zA-Z0-9_]*$`), reserved names and
   prefixes, max params per event, max param key / string value length, allowed value types,
@@ -95,7 +98,8 @@ Explore. A Redux-DevTools-style timeline for MVI/MVVM screens: every action (use
 ViewModel receives, every UiState it emits, and every one-off event (navigation, toast, effect).
 - **Capture.** Explicit, no reflection or bytecode tricks: `HopiState.track(scope, name, flow)`
   for a `StateFlow<UiState>`, plus `action(name, payload)` / `event(name, payload)` calls (or thin
-  helpers for common patterns like `Channel`/`SharedFlow` events). Noop twin.
+  helpers for common patterns like `Channel`/`SharedFlow` events). The API in `hopi-api`, the
+  runtime a module of its own.
 - **Timeline.** Per screen/ViewModel: action, then the state transition it caused, then any
   events, linked by order and timestamp. State shown as a diff against the previous state, not a
   full dump, with the full value one tap away. HTTP transactions started during an action can be

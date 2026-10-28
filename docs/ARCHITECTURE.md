@@ -11,12 +11,22 @@ screen, and an AI coding agent reading the same data from a terminal.
 
 This document is the contract every module is built against. Change it before changing code.
 
+**Migration in progress (2026-10-28).** `docs/design/api-runtime-split-plan.md` replaces the noop
+twins with an optional `hopi-api` and per-tool runtimes that only debug builds link, removes the
+in-app UI (the desktop viewer and the CLI are the surfaces) and keeps a thin Ktor plugin. Principle
+1 states the target, and the Modules table names the stage of the plan that changes each row; the
+other sections describe what is built until their stage lands.
+
 ## Non-negotiable principles
 
-1. **Zero production impact by default.** Every consumer-facing artifact has a `-noop` twin with an
-   identical public API and no dependencies beyond what the API itself names. Shipping the real
-   artifact in a release build is a deliberate, visible choice in the consumer's Gradle file, never
-   an accident.
+1. **Zero production impact by default.** Hopi leaves a release build by not being linked, never by
+   `#if DEBUG`. Each tool is a runtime module that only debug builds link. The API an app calls
+   (`hopi-api`: rules, perf) is optional and does nothing alone; a release build may link it and
+   the thin Ktor plugin `hopi-ktor`, nothing else. A runtime in a release build fails the build (the
+   Gradle plugin's guard on Android, the release guard on iOS), and the Android runtime refuses to
+   start in an app that is not debuggable. Until the plan's stages land, the `-noop` twins give the
+   same guarantee: every consumer-facing artifact has one, with an identical public API, and only
+   debuggable variants get the real artifact.
 2. **The caller's request path stays fast.** On the request coroutine Hopi only copies headers
    and a bounded slice of body bytes, then hands off. It never suspends the caller on its own work,
    never applies backpressure, never consumes a body the app needs, and never buffers an unbounded
@@ -34,26 +44,29 @@ This document is the contract every module is built against. Change it before ch
 
 ## Modules
 
-| Module                | Depends on                           | Purpose                                                    |
-| --------------------- | ------------------------------------ | ---------------------------------------------------------- |
-| `hopi-core`      | kotlinx-coroutines                   | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server |
-| `hopi-ktor`      | core, ktor-client-core               | The Ktor client plugin                                     |
-| `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          |
-| `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       |
-| `hopi-ui-noop`   | compose-runtime, compose-ui          | Same public API as `hopi-ui`, renders nothing         |
-| `hopi-urlsession` | core                                | Automatic URLSession capture on iOS (`HopiUrlSession.start()`); does nothing on Android and the JVM |
-| `hopi-urlsession-noop` | nothing                        | Same public API as `hopi-urlsession`, does nothing; no dependency at all |
-| `hopi-android`   | core (Android only)                  | Automatic OkHttp and `HttpURLConnection` capture on Android; added by the Gradle plugin to debuggable variants, started by its manifest's provider |
-| `hopi-android-noop` | nothing                           | Same public API as `hopi-android` (`HopiAndroid`), does nothing; what non-debuggable variants get |
-| `hopi-rules`     | core                                 | `HopiRules`, the in-process API over core's rule engine (mock, fail, delay, edit; docs/design/rules.md) |
-| `hopi-rules-noop` | nothing                             | Same public API as `hopi-rules`, does nothing; no dependency at all |
-| `hopi-perf`      | core                                 | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory; docs/design/perf-monitors.md); each off by default. Android and iOS monitors built |
-| `hopi-perf-noop` | nothing                              | Same public API as `hopi-perf`, does nothing; no dependency at all |
-| `gradle-plugin/` (included build) | AGP API and ASM at build time only | `hopi-instrument` (the bytecode rewriter and `DexReader`) and `hopi-gradle-plugin` (`dev.koga.hopi`); never a runtime dependency |
-| `hopi-connect`   | core (JVM), kotlinx-serialization    | Host side of the bridge: targets, `bridge.json`, bridge client (all `@HopiInternalApi`) |
-| `hopi-cli`       | connect, core (JVM)                  | Host CLI for developers and AI agents                      |
-| `hopi-desktop`   | connect, ui (JVM), core (JVM), Compose Desktop | Desktop viewer app (macOS `.dmg`); never a dependency of an app |
-| `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests; `sample/fakesdk` is a Java library that stands in for a third-party SDK and knows nothing of Hopi |
+| Module                | Depends on                           | Purpose                                                    | Runtime-split plan stage |
+| --------------------- | ------------------------------------ | ---------------------------------------------------------- | --- |
+| `hopi-core`      | kotlinx-coroutines                   | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server | 3: depends on `hopi-api`; 4: start sequence, Android provider; 7: rules runtime |
+| `hopi-ktor`      | core, ktor-client-core               | The Ktor client plugin                                     | 10: thin, over `hopi-api`; its recorder moves to `hopi-network` |
+| `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          | goes in 10 |
+| `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       | 5: the desktop viewer's screens only (JVM, unpublished) |
+| `hopi-ui-noop`   | compose-runtime, compose-ui          | Same public API as `hopi-ui`, renders nothing         | goes in 5 |
+| `hopi-urlsession` | core                                | Automatic URLSession capture on iOS (`HopiUrlSession.start()`); does nothing on Android and the JVM | 6: its start moves to `hopi-start`; 9: merged into `hopi-network` |
+| `hopi-urlsession-noop` | nothing                        | Same public API as `hopi-urlsession`, does nothing; no dependency at all | goes in 9 |
+| `hopi-android`   | core (Android only)                  | Automatic OkHttp and `HttpURLConnection` capture on Android; added by the Gradle plugin to debuggable variants, started by its manifest's provider | 4: the provider moves to core; 9: merged into `hopi-network` |
+| `hopi-android-noop` | nothing                           | Same public API as `hopi-android` (`HopiAndroid`), does nothing; what non-debuggable variants get | goes in 9 |
+| `hopi-rules`     | core                                 | `HopiRules`, the in-process API over core's rule engine (mock, fail, delay, edit; docs/design/rules.md) | 7: the API moves to `hopi-api`, the runtime to core; the module goes |
+| `hopi-rules-noop` | nothing                             | Same public API as `hopi-rules`, does nothing; no dependency at all | goes in 7 |
+| `hopi-perf`      | core                                 | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory; docs/design/perf-monitors.md); each off by default. Android and iOS monitors built | 8: its API moves to `hopi-api`; a runtime started as a tool |
+| `hopi-perf-noop` | nothing                              | Same public API as `hopi-perf`, does nothing; no dependency at all | goes in 8 |
+| `gradle-plugin/` (included build) | AGP API and ASM at build time only | `hopi-instrument` (the bytecode rewriter and `DexReader`) and `hopi-gradle-plugin` (`dev.koga.hopi`); never a runtime dependency | 4: generates the tool list; 9: release guard; 11: no twin selection |
+| `hopi-connect`   | core (JVM), kotlinx-serialization    | Host side of the bridge: targets, `bridge.json`, bridge client (all `@HopiInternalApi`) | 12: iPhones over USB |
+| `hopi-cli`       | connect, core (JVM)                  | Host CLI for developers and AI agents                      |  |
+| `hopi-desktop`   | connect, ui (JVM), core (JVM), Compose Desktop | Desktop viewer app (macOS `.dmg`); never a dependency of an app |  |
+| `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests; `sample/fakesdk` is a Java library that stands in for a third-party SDK and knows nothing of Hopi | every stage |
+| `hopi-api` (planned)  | nothing                              | The API an app calls (rules, perf), `@HopiInternalApi` and the runtime registry; does nothing alone; the only Hopi module a release build links besides `hopi-ktor` | 3 (rules: 7, perf: 8) |
+| `hopi-start` (planned) | core, network, perf                | `Hopi.start { }`, the iOS entry (exported by Debug frameworks) and the JVM entry | 6 (JVM: 10) |
+| `hopi-network` (planned) | core                             | Android and iOS network capture and the Ktor adapter; replaces `hopi-android` and `hopi-urlsession` | 9 (Ktor adapter: 10) |
 
 Targets for every KMP library module: `android`, `iosArm64`, `iosSimulatorArm64`, and `jvm` (the JVM
 target exists so logic tests run on the host in seconds; it is also a legitimate desktop target).
@@ -71,7 +84,7 @@ Consumers only ever touch the API of `hopi-ktor`, `hopi-ui`, `hopi-urlsession`, 
 binding of the same kind: its iOS monitors' native library in `dev.koga.hopi.perf.internal.native`
 (only its own `hopi_perf_*` C functions, constants and one struct; no Objective-C class).
 
-## Consumer API (what the noop twins mirror)
+## Consumer API
 
 `hopi-ktor`:
 
