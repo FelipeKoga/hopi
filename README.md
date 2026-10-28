@@ -4,7 +4,6 @@ Hopi is a set of real-time devtools for Kotlin Multiplatform and Compose Multipl
 Android and iOS. Each tool is a module of its own, off until you opt in, and shows what it sees in
 the same places:
 
-- an in-app screen behind a small floating button,
 - one NDJSON line per event in logcat or the iOS unified log,
 - a host CLI, `hopi`, whose `--json` output is a stable contract for AI coding agents,
 - a desktop viewer (Compose Desktop, macOS first) that shows the same data on your screen.
@@ -14,7 +13,7 @@ The tools so far:
 - **Network**: every HTTP request of the app, from the Ktor client plugin or recorded
   automatically, third-party SDKs included: every URLSession request of an iOS process, and every
   OkHttp and `HttpURLConnection` request of an Android app (one Gradle plugin line, no code). List,
-  detail, cURL, share, HAR export.
+  detail, cURL, HAR export.
 - **Rules**: change what a request does while you debug: a made-up response (**mock**), a failure
   the platform's own way (**fail**), a **delay**, or a rewritten request or response (**edit**).
   They live in the app's memory for the session only, apply on every source to the extent each can
@@ -77,18 +76,15 @@ older ones are not tested):
   module) with `compileSdk = 37` or higher, since the AARs declare `minCompileSdk=37` and AGP
   refuses a lower one, and `minSdk = 24` or higher. A KMP shared module uses
   `com.android.kotlin.multiplatform.library`, with the same `compileSdk` in its `android { }` block.
-- **Ktor 3.5.2** for `hopi-ktor`, and **Compose Multiplatform 1.12.0** (with the Compose compiler
-  plugin of your Kotlin) for `hopi-ui`.
+- **Ktor 3.5.2** for `hopi-ktor`.
 
 | Artifact              | What it is                                              |
 | --------------------- | ------------------------------------------------------- |
 | `hopi-ktor`      | The Ktor client plugin                                  |
-| `hopi-ui`        | `HopiScreen` and `HopiLauncher` (Compose MP)  |
 | `hopi-ktor-noop` | Same public API as `hopi-ktor`, does nothing       |
-| `hopi-ui-noop`   | Same public API as `hopi-ui`, renders nothing      |
 | `hopi-urlsession` | Automatic capture of every URLSession request on iOS (`HopiUrlSession.start()`) |
 | `hopi-urlsession-noop` | Same public API as `hopi-urlsession`, does nothing |
-| `hopi-rules`     | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus); the CLI, desktop and in-app screen need no dependency for rules |
+| `hopi-rules`     | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus); the CLI and the desktop viewer need no dependency for rules |
 | `hopi-rules-noop` | Same public API as `hopi-rules`, does nothing |
 | `hopi-perf`      | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory), each off until started |
 | `hopi-perf-noop` | Same public API as `hopi-perf`, does nothing |
@@ -113,7 +109,6 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(if (hopiEnabled) "dev.koga.hopi:hopi-ktor:$v" else "dev.koga.hopi:hopi-ktor-noop:$v")
-            implementation(if (hopiEnabled) "dev.koga.hopi:hopi-ui:$v" else "dev.koga.hopi:hopi-ui-noop:$v")
             // only to call HopiRules from code
             implementation(if (hopiEnabled) "dev.koga.hopi:hopi-rules:$v" else "dev.koga.hopi:hopi-rules-noop:$v")
         }
@@ -174,8 +169,8 @@ recorded once, by the capture (`"source":"okhttp"`), not also by the plugin. It 
 changes, and bodies are copied as your code reads them, up to `maxBodyBytes`, never read ahead.
 
 Release (non-debuggable) variants are not instrumented at all and get `hopi-android-noop`; with the
-plugin, the Ktor plugin and UI modules are also resolved per variant (real in debug, noop in
-release), so an Android app needs no `-Phopi.enabled`. Optional settings:
+plugin, the Ktor plugin, `hopi-rules` and `hopi-perf` are also resolved per variant (real in debug,
+noop in release), so an Android app needs no `-Phopi.enabled`. Optional settings:
 
 ```kotlin
 hopi {
@@ -229,20 +224,14 @@ a stream or a file are recorded as skipped (they are single-use, Hopi never read
 by their size. WebSocket and stream tasks, AVPlayer and WKWebView traffic are not recorded. On
 Android and the JVM `start()` does nothing.
 
-Wrap the app's content to get the floating button, or show the screen yourself:
-
-```kotlin
-HopiLauncher {
-    App()
-}
-// or
-HopiScreen(onClose = { showInspector = false })
-```
+There is no in-app screen: `HopiScreen`, `HopiLauncher` with its floating button, and the perf HUD
+were removed in stage 5 of the runtime-split plan (D7', `docs/design/api-runtime-split-plan.md`).
+The app's records are read with the [CLI](#for-ai-agents) and the [desktop viewer](#desktop-viewer).
 
 A Debug Kotlin/Native framework links every wrapper of each platform library it uses, built
 against the SDK Xcode builds with, so a symbol newer than your deployment target becomes a strong
 import. Built with Xcode 27.1, the sample's Debug app aborted in dyld before `main` on iOS 18.2:
-first `_kCGAdaptiveMaximumBitDepth` (CoreGraphics, which `hopi-ui` uses), then libresolv's
+first `_kCGAdaptiveMaximumBitDepth` (CoreGraphics, which `hopi-ui` then used), then libresolv's
 `___res_9_p_cert_syms`. If yours does, weak-link the library dyld names in the app target's
 `OTHER_LDFLAGS`, as `sample/iosApp/project.yml` does (`-weak_framework CoreGraphics -weak-lresolv`).
 A weak-linked symbol is NULL on the older runtime, so Kotlin code must check the OS version
@@ -288,8 +277,8 @@ Secrets are redacted on every channel; the `--json` line shapes are specified in
 
 ## Desktop viewer
 
-`hopi-desktop` shows a running app's traffic in a window on your Mac: the in-app list and
-detail side by side, over the same bridge as the CLI (`agentBridge = true`, debug builds). The app
+`hopi-desktop` shows a running app's traffic in a window on your Mac: the list and detail side by
+side, over the same bridge as the CLI (`agentBridge = true`, debug builds). The app
 needs nothing new, and a connected viewer costs it what a connected `hopi tail` does. Run it
 from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime):
 
@@ -349,10 +338,9 @@ apply is printed as `hopi: warning: …` when it is added. `hopi list` marks a r
 
 In the desktop viewer, ⌘L (or the Rules menu) opens the Rules panel: every rule with its switch,
 hits and warnings, forms for mock, fail, delay and edit (headers as a table, a body from a file),
-and on a selected request "Mock this response". In the app, the inspector's "Rules" button lists
-the rules (on/off, remove, remove all), and a request's detail offers "Mock this response" (with
-Undo). There is no rule editor on the phone. Replay (Hopi re-sending a recorded request) is not
-part of the product; it is in the backlog with no priority ([`docs/ROADMAP.md`](docs/ROADMAP.md)).
+and on a selected request "Mock this response". The in-app rules list and its "Mock this response"
+were removed with the in-app UI in stage 5 (D7'). Replay (Hopi re-sending a recorded request) is
+not part of the product; it is in the backlog with no priority ([`docs/ROADMAP.md`](docs/ROADMAP.md)).
 
 From code, for tests and debug menus (`hopi-rules`; its noop twin does nothing and returns `-1`):
 
@@ -403,8 +391,8 @@ with what is measured so far under "As built"). Nothing is persisted or sent any
 lives in bounded rings in memory.
 
 Android, with the `dev.koga.hopi` plugin: `perf { enabled = true }` adds `hopi-perf` to debug
-builds (`hopi-perf-noop` to release builds) and registers it, so the CLI, the desktop viewer and the
-in-app Perf tab can start monitors with no code. `autoStart` starts some at launch:
+builds (`hopi-perf-noop` to release builds) and registers it, so the CLI and the desktop viewer can
+start monitors with no code. `autoStart` starts some at launch:
 
 ```kotlin
 hopi {
@@ -458,10 +446,8 @@ to a dialog's, bottom sheet's or popup's own window is not bracketed (no public 
 a click that blocks there is caught only with `hangHeartbeat = true` (`perf.status` says
 `"inputWindows":"activities only"`).
 
-In the app, the inspector's list gains a Perf button (monitor switches, summaries, trend charts,
-the thread list, hangs with stacks), and a long press on the launcher button shows a small HUD
-("58 fps · 4 jank · CPU 12% · 142 MB") that redraws at most once a second and not at all while
-the app is idle. The desktop viewer has a Perf panel (⌘P) with charts of FPS, CPU and memory.
+The desktop viewer has a Perf panel (⌘P) with charts of FPS, CPU and memory. The in-app Perf tab
+and HUD were removed with the in-app UI in stage 5 (D7').
 
 The sample's perf lab injects known jank, hangs, CPU burn and allocations and checks Hopi's record
 against them; see [Sample app](#sample-app) and `benchmark/perf/`.
@@ -501,6 +487,8 @@ Measured so far (the methods and caveats are in the architecture doc):
 
 The first idle and the 300 KB body figures were taken with the earlier, Android-only version of
 the sample; the rest in the phase 3 device acceptance. Physical devices have not been measured yet.
+The rows on the launcher, the inspector screen and its detail on a device measured the in-app UI,
+removed in stage 5 (D7'); they stay as its record.
 
 ## Sample app
 
@@ -561,7 +549,7 @@ the noop parity check (a real module and its twin must have exactly the same pub
 publication check. The base check, one Gradle invocation:
 
 ```bash
-./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
+./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
   :hopi-perf:jvmTest :hopi-perf-noop:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \
@@ -577,7 +565,8 @@ and no archive holds this repository's absolute path (the klibs store source pat
 `hopi.version` is set in `gradle.properties` only: the plugin's build reads that file, so the root
 build refuses a `-Phopi.version` that differs from it. The
 artifacts and the plugin are published by `gradle/publishing.gradle.kts`, which each published
-module applies; `hopi-connect`, the CLI, the desktop viewer and the sample are not published.
+module applies; `hopi-connect`, the CLI, the desktop viewer with its screens (`hopi-ui`) and the
+sample are not published.
 The giant-body benchmarks are opt-in and slow (minutes): run one module at a time with
 `./gradlew :hopi-ktor:jvmGiantBodyBenchmark` (also `:hopi-core:` and `:hopi-ui:`)
 or `./gradlew :hopi-cli:testGiantBodyBenchmark`; tables land in `<module>/build/giant-body/`.

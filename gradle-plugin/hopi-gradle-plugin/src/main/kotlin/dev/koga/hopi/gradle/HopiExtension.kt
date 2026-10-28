@@ -21,8 +21,9 @@ public abstract class HopiExtension {
     public abstract val urlConnection: Property<Boolean>
 
     /**
-     * Gives debuggable variants the real `hopi-ktor`/`hopi-ui` and the others their noop twins,
-     * whichever of the two the app's modules name, so no `-Phopi.enabled` is needed on Android.
+     * Gives debuggable variants the real `hopi-ktor`/`hopi-rules`/`hopi-perf` and the others their
+     * noop twins, whichever of the two the app's modules name, so no `-Phopi.enabled` is needed on
+     * Android.
      */
     public abstract val selectTwins: Property<Boolean>
 

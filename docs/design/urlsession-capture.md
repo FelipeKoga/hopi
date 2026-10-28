@@ -4,8 +4,9 @@ Status: built (2026-10-24); the deviations from the design below are listed at t
 "As built". Part of the owner requirement "capture every HTTP request the app
 makes, including third-party SDKs, with no per-client configuration". This document covers the
 iOS part (URLSession); the Android part (OkHttp, `HttpURLConnection`) has its own design. Both
-write into the existing `HopiStore`, so the in-app screen, the NDJSON log line, the bridge/CLI and
-the desktop viewer show the new records with no change beyond the `source` field below.
+write into the existing `HopiStore`, so the NDJSON log line, the bridge/CLI and the desktop viewer
+(and the in-app screen, until the runtime-split plan's stage 5 removed it) show the new records
+with no change beyond the `source` field below.
 
 ## Goals and non-goals
 
@@ -288,7 +289,7 @@ defers.**
   missed the same way; the window is `hopi_us_start`'s own time.
 - What of the withdrawn record has already gone out decides what the store publishes. The summary
   log line is written only at a record's end (`Completed`), so the log never had it. A bridge
-  `tail` (and the in-app list) shows a start as soon as a pass applies it while a viewer is
+  `tail` shows a start as soon as a pass applies it while a viewer is
   attached, and `RemoteSession` then holds it pending (`pending`, `highestSeen`). So the store drops
   the entry and every later snapshot of its id, and publishes the plugin's last snapshot (failed,
   `"withdrawn: platform capture started during this request"`) as its end only when an earlier

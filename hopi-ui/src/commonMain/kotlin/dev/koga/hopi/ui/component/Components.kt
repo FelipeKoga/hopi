@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -155,34 +154,6 @@ internal fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing:
         if (trailing != null) {
             Spacer(Modifier.width(8.dp))
             BasicText(trailing, style = HopiType.meta.copy(color = colors.textFaint), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-/**
- * An on/off switch in monochrome: a filled track with the knob at the end when on, an outlined one
- * at the start when off. [description] names what it switches, for screen readers and tests.
- */
-@Composable
-internal fun Switch(checked: Boolean, description: String, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalHopiColors.current
-    val track = RoundedCornerShape(50)
-    Box(
-        modifier = modifier
-            .size(TouchTarget)
-            .semantics { contentDescription = description }
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier
-                .size(width = 36.dp, height = 20.dp)
-                .clip(track)
-                .then(if (checked) Modifier.background(colors.text) else Modifier.border(1.5.dp, colors.textFaint, track))
-                .padding(3.dp),
-            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-        ) {
-            Box(Modifier.size(14.dp).clip(CircleShape).background(if (checked) colors.onText else colors.textFaint))
         }
     }
 }

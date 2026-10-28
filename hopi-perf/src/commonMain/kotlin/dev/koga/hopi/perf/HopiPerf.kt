@@ -8,7 +8,7 @@ import dev.koga.hopi.perf.internal.PerfRuntime
  * and opt-in on its own, and a monitor that is off costs nothing: no thread, no listener, no timer,
  * no class of its own loaded. A monitor that is on states its cost in the design's budget table.
  * Data stays in memory, in bounded rings, and is never persisted or sent anywhere; it reaches the
- * realtime log (`HopiPerf` lines), the bridge (`hopi perf …`) and, later, the in-app screen.
+ * realtime log (`HopiPerf` lines) and the bridge (`hopi perf …`, the desktop viewer's Perf panel).
  *
  * [install] registers the monitors for remote control (the bridge's `perf.start`) and starts
  * nothing; [start] installs and starts the monitors its block sets true. Invalid values write a

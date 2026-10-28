@@ -6,16 +6,16 @@ tools built so far: the network inspector (the Ktor client plugin, plus automati
 URLSession request of an iOS process and of every OkHttp and `HttpURLConnection` request of an
 Android app, third-party SDKs included, see "URLSession capture" and "Android capture"), rules
 that mock, fail, delay or edit those requests (see "Rules"), and the performance monitors (see
-"Performance monitors"). It is built for two audiences at once: a developer looking at an in-app
-screen, and an AI coding agent reading the same data from a terminal.
+"Performance monitors"). It is built for two audiences at once: a developer looking at the desktop
+viewer, and an AI coding agent reading the same data from a terminal.
 
 This document is the contract every module is built against. Change it before changing code.
 
 **Migration in progress (2026-10-28).** `docs/design/api-runtime-split-plan.md` replaces the noop
-twins with an optional `hopi-api` and per-tool runtimes that only debug builds link, removes the
-in-app UI (the desktop viewer and the CLI are the surfaces) and keeps a thin Ktor plugin. Principle
-1 states the target, and the Modules table names the stage of the plan that changes each row; the
-other sections describe what is built until their stage lands.
+twins with an optional `hopi-api` and per-tool runtimes that only debug builds link, and keeps a
+thin Ktor plugin; its stage 5 removed the in-app UI (D7': the desktop viewer and the CLI are the
+surfaces). Principle 1 states the target, and the Modules table names the stage of the plan that
+changes each row; the other sections describe what is built until their stage lands.
 
 ## Non-negotiable principles
 
@@ -49,8 +49,7 @@ other sections describe what is built until their stage lands.
 | `hopi-core`      | hopi-api, kotlinx-coroutines         | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server; the start sequence (`HopiStart`) and, on Android, the provider that runs it | 3: depends on `hopi-api`; 4: start sequence, Android provider (built); 7: rules runtime |
 | `hopi-ktor`      | core, ktor-client-core               | The Ktor client plugin                                     | 10: thin, over `hopi-api`; its recorder moves to `hopi-network` |
 | `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          | goes in 10 |
-| `hopi-ui`        | core, Compose Multiplatform          | In-app inspector screen and launcher                       | 5: the desktop viewer's screens only (JVM, unpublished) |
-| `hopi-ui-noop`   | compose-runtime, compose-ui          | Same public API as `hopi-ui`, renders nothing         | goes in 5 |
+| `hopi-ui`        | core, Compose Multiplatform          | The desktop viewer's screens (`HopiPanes`: list, detail and their theme); JVM only, unpublished | 5: the in-app screen, launcher and HUD removed, `hopi-ui-noop` deleted (built) |
 | `hopi-urlsession` | core                                | Automatic URLSession capture on iOS (`HopiUrlSession.start()`); does nothing on Android and the JVM | 6: its start moves to `hopi-start`; 9: merged into `hopi-network` |
 | `hopi-urlsession-noop` | nothing                        | Same public API as `hopi-urlsession`, does nothing; no dependency at all | goes in 9 |
 | `hopi-android`   | core (Android only)                  | Automatic OkHttp and `HttpURLConnection` capture on Android; added by the Gradle plugin to debuggable variants, started as the network tool of core's start sequence | 4: the provider moved to core (built); 9: merged into `hopi-network` |
@@ -70,6 +69,7 @@ other sections describe what is built until their stage lands.
 
 Targets for every KMP library module: `android`, `iosArm64`, `iosSimulatorArm64`, and `jvm` (the JVM
 target exists so logic tests run on the host in seconds; it is also a legitimate desktop target).
+`hopi-ui`, the desktop viewer's screens, has `jvm` only.
 
 `hopi-core` is public so the other Hopi modules can use it, but every declaration that is
 not part of the consumer API is annotated `@HopiInternalApi` (`dev.koga.hopi.api.HopiInternalApi`,
@@ -79,8 +79,8 @@ The exceptions are the two iOS cinterop bindings, which cinterop cannot annotate
 (no os/log.h declarations are re-exported), and the URLSession capture library (see URLSession
 capture) lives in `dev.koga.hopi.core.internal.urlsession` and binds only its own `hopi_us_*` C
 functions and constants (no Objective-C class).
-Consumers only ever touch the API of `hopi-ktor`, `hopi-ui`, `hopi-urlsession`, `hopi-android`,
-`hopi-rules` and `hopi-perf`, which is what the noop twins mirror. The os_log shim also binds
+Consumers only ever touch the API of `hopi-ktor`, `hopi-urlsession`, `hopi-android`, `hopi-rules`
+and `hopi-perf`, which is what the noop twins mirror. The os_log shim also binds
 `hopi_os_log_perf_line` (category `perf`, see "Performance monitors"). `hopi-perf` has a third
 binding of the same kind: its iOS monitors' native library in `dev.koga.hopi.perf.internal.native`
 (only its own `hopi_perf_*` C functions, constants and one struct; no Objective-C class).
@@ -126,12 +126,9 @@ platform bridge; `register` replaces it (tests do, to observe the request withou
 socket). The first request starts it, once per process, on a background thread: the install path
 only spawns that thread. `agentBridge = false` never touches the hook.
 
-`hopi-ui`:
-
-```kotlin
-@Composable fun HopiScreen(onClose: () -> Unit, modifier: Modifier = Modifier)
-@Composable fun HopiLauncher(content: @Composable () -> Unit)   // wraps app content, adds a floating button
-```
+`hopi-ui` has no consumer API: `HopiScreen` and `HopiLauncher` were removed with the in-app UI in
+the runtime-split plan's stage 5 (D7'), and what is left, the desktop viewer's screens, is
+`@HopiInternalApi` (see "UI").
 
 `hopi-urlsession` (call once, first thing at startup, in debug builds; Swift:
 `HopiUrlSession.shared.start()` or `HopiUrlSession.shared.start { $0.agentBridge = true }`):
@@ -172,7 +169,7 @@ hopi {                                       // optional; the store settings of 
     enabled = true                           // false: every variant gets the noops, nothing is instrumented
     okhttp = true                            // rewrite OkHttp's RealCall
     urlConnection = true                     // rewrite java.net.URL connection call sites
-    selectTwins = true                       // real hopi-ktor/hopi-ui in debuggable variants, noops elsewhere
+    selectTwins = true                       // real hopi-ktor/hopi-rules/hopi-perf in debuggable variants, noops elsewhere
     agentBridge = false                      // plus maxEntries, maxTotalBytes, maxBodyBytes, redact…, summaryLog
     rules = true                             // false: the interceptor and the wrappers never read the rule state
 }
@@ -208,19 +205,10 @@ switch of each recorder is accepted and ignored by its noop, with the same defau
 The noop twins expose exactly these declarations with the same signatures. `HopiConfig` in
 the noop accepts every setter and ignores it (a property reads back what was set, with the same
 defaults); `Hopi` is a `createClientPlugin("Hopi", ::HopiConfig) {}` that registers
-no hook. `HopiScreen` in the noop renders nothing; `HopiLauncher` in the noop renders
-`content()` and nothing else, laid out exactly as the real launcher lays it out (one compose-ui
-`Layout` with the same measure policy: every root child of `content` gets the launcher's own
-constraints unchanged and is placed at the top start, and the launcher is as large as its largest
-child), so a release build has the layout tested in debug. `LauncherLayoutTest`, the same file in
-both modules' JVM tests, checks it. `hopi-ktor-noop` depends on ktor-client-core only (the API names
-`ClientPlugin`). `hopi-ui-noop` depends on compose-runtime and compose-ui and applies only the
-Compose compiler plugin (for the `@Composable` calling convention), not the Compose Multiplatform
-Gradle plugin: compose-ui is there because `HopiScreen`'s `modifier` parameter is
-`androidx.compose.ui.Modifier`, which lives in compose-ui (it brings ui-graphics, ui-text and
-ui-unit, no foundation and no Material). Neither noop depends on `hopi-core`; each noop's JVM
-tests assert that its test runtime classpath holds no `hopi-core` and that core's classes
-cannot be loaded, and `hopi-api`'s JVM tests assert the same of `hopi-api`.
+no hook. `hopi-ktor-noop` depends on ktor-client-core only (the API names `ClientPlugin`), not on
+`hopi-core`; its JVM tests assert that its test runtime classpath holds no `hopi-core` and that
+core's classes cannot be loaded, and `hopi-api`'s JVM tests assert the same of `hopi-api`. The
+UI's twin, `hopi-ui-noop`, was deleted with the in-app UI in the runtime-split plan's stage 5.
 
 **Parity is checked mechanically.** The real and noop modules enable the Kotlin Gradle plugin's built-in ABI
 validation (`kotlin { abiValidation { … } }`, KGP 2.4.20, `@ExperimentalAbiValidation`), which
@@ -230,23 +218,18 @@ The root task `:checkNoopParity` (part of the root `check`) runs every `checkKot
 sides, then compares each real module's dumps with its twin's file by file, line by line; the only
 normalisation is the module's own name in the dump file names and in the klib dump's
 `// Library unique name:` line. A declaration on one side only, a different signature, or a
-missing target fails the build with the differing lines. The two UI modules exclude the same
-Compose compiler output from their dumps (`**.ComposableSingletons.*` lambda holders and the
-`$stableprop`/`$stableprop_getter` stability markers of internal classes): it is public in the
-binary but no declaration of ours, and the noop has none of it. Both also exclude the package
-`dev.koga.hopi.ui.desktop` (jvm only): the desktop viewer's entry point, `HopiPanes`, is
-`@HopiInternalApi` and names core's `HopiStore`, so it is Hopi-internal rather than
-consumer API, and a noop that must not depend on core could not declare it (the theme accessors
-for the viewer's own chrome live there too, for the same reason). A change to the consumer API is
-therefore made in both modules and both dumps together
-(`./gradlew :hopi-ktor:updateKotlinAbi :hopi-ktor-noop:updateKotlinAbi`, and the same
-for the UI). `hopi-android` excludes its package `dev.koga.hopi.android.internal` from its dump:
-the hooks the rewritten bytecode calls, the interceptor, the wrappers and the network tool the
-generated configuration names are public in the binary (`@HopiInternalApi`) but no consumer API,
-and the noop has no hook (the manifest's provider is `hopi-core`'s since the runtime-split plan's
-stage 4, in the same package). Because the Gradle plugin swaps twins under code compiled against
-the other side (below), the parity task also fails on an `inline` function or a `const` in any
-parity-checked dump: its body would be copied from the side the caller was compiled against.
+missing target fails the build with the differing lines. `hopi-ui` has no dump since the
+runtime-split plan's stage 5: it holds only the desktop viewer's screens, JVM only and
+unpublished, and no consumer compiles against it. A change to the consumer API is therefore made
+in both modules and both dumps together
+(`./gradlew :hopi-ktor:updateKotlinAbi :hopi-ktor-noop:updateKotlinAbi`). `hopi-android` excludes
+its package `dev.koga.hopi.android.internal` from its dump: the hooks the rewritten bytecode
+calls, the interceptor, the wrappers and the network tool the generated configuration names are
+public in the binary (`@HopiInternalApi`) but no consumer API, and the noop has no hook (the
+manifest's provider is `hopi-core`'s since the runtime-split plan's stage 4, in the same package).
+Because the Gradle plugin swaps twins under code compiled against the other side (below), the
+parity task also fails on an `inline` function or a `const` in any parity-checked dump: its body
+would be copied from the side the caller was compiled against.
 
 The dumps hold signatures, not initializers, so they cannot see a default that changed on one
 side (the noop cannot take core's constants: it copies them). `DefaultsParityTest` in
@@ -288,11 +271,12 @@ must not: the shared module already brings one of the two, and real and noop dec
 classes. `sample/androidApp` therefore names neither and takes whatever `sample/shared` selected.
 
 **An Android application with the `dev.koga.hopi` plugin needs no property.** The plugin resolves
-`hopi-ktor`/`hopi-ui` per variant, whichever of the two the app's modules name: the real module in
-debuggable variants, the noop twin in the others (a dependency substitution on each variant's
-compile and runtime configurations, for this repository's projects and for the `dev.koga.hopi`
-coordinates), and it adds `hopi-android` with `hopi-core`, or `hopi-android-noop`, the same way
-(`hopi-core` because javac compiles the generated configuration against core's types). A KMP
+`hopi-ktor`/`hopi-rules`/`hopi-perf` per variant, whichever of the two the app's modules name: the
+real module in debuggable variants, the noop twin in the others (a dependency substitution on each
+variant's compile and runtime configurations, for this repository's projects and for the
+`dev.koga.hopi` coordinates), and it adds `hopi-android` with `hopi-core`, or `hopi-android-noop`,
+the same way (`hopi-core` because javac compiles the generated configuration against core's
+types). A KMP
 shared module compiled against either twin links against the other because the two have the same
 ABI with no inlined body (`:checkNoopParity`). So a debug build is real and a release build is
 noop whatever `-Phopi.enabled` says; to ship the real modules in a release, a developer must
@@ -307,8 +291,8 @@ lines say what the plugin selected.)
 The sample checks the switch mechanically. `:sample:androidApp:verifyReleaseUsesNoop` reads the
 release APK's dex files with the plugin's `DexReader` (class definitions, every referenced type and
 method, and each class's `invoke-*` instructions) and its merged manifest, and fails unless the
-release runtime classpath holds exactly `:hopi-ktor-noop`, `:hopi-ui-noop` and
-`:hopi-android-noop`, its Hopi classes (outside `dev.koga.hopi.sample`, D8's
+release runtime classpath holds exactly `:hopi-ktor-noop`, `:hopi-rules-noop`, `:hopi-android-noop`
+and `:hopi-perf-noop`, its Hopi classes (outside `dev.koga.hopi.sample`, D8's
 `$$ExternalSynthetic…` classes counted as their owner's) are exactly those the noop twins' jars
 hold, no type of `dev.koga.hopi.core`, `dev.koga.hopi.android.internal` or
 `dev.koga.hopi.android.generated` is defined or even referenced, no class calls a Hopi hook, and the
@@ -319,7 +303,8 @@ reaches the release APK. `:sample:androidApp:verifyDebugCapture` (also in `check
 control on the debug APK: `RealCall` calls `HopiOkHttpHooks.interceptors` and no longer the getter,
 no class outside the runtime opens a `URL` connection directly, the fake SDK and
 `kotlin.io.TextStreamsKt` call the URL hooks, the provider is in the merged manifest, and the
-debug runtime classpath holds `:hopi-android`, `:hopi-core`, `:hopi-ktor` and `:hopi-ui`.
+debug runtime classpath holds `:hopi-android`, `:hopi-core`, `:hopi-ktor`, `:hopi-rules` and
+`:hopi-perf`, and no `-noop` project.
 Measured on this change: the release APK has 13 Hopi classes, 0 referenced core or capture types and
 0 classes calling a hook; the debug APK has 6 classes calling a URL hook (the fake SDK, the stdlib,
 Ktor's `URIFileContent`, kotlinx-coroutines' `FastServiceLoader`, Okio's `ResourceFileSystem`, and
@@ -389,7 +374,7 @@ plugin (teed, saved and decoded bodies), URLSession capture (a task that ends wi
 its response), OkHttp and `HttpURLConnection`. A failure before any response stays as it was
 (`code` null, no response). On the wire nothing new is needed: a failed summary line now has its
 `code` and a non-zero `resBytes`, the detail its response headers and body, fields every reader
-already decodes. The in-app and desktop detail read "Failed after 200 OK" and "Response received
+already decodes. The desktop detail reads "Failed after 200 OK" and "Response received
 … (partial)"; `hopi get` titles the body "Response (partial)"; `hopi list` keeps `ERR` in the code
 column and writes `(HTTP 200, then <error>)`. An older CLI parses these lines but shows them
 differently: its code column prefers a present `code` over the state, so it prints `200` where the
@@ -403,7 +388,7 @@ like the URL and marked `"finalUrlTruncated":true` when it was; the detail carri
 whole after `"url"` and `"source"` after `"state"`), decoded as null when absent, so an older app
 and an older viewer keep working. A host viewer therefore knows where a redirect ended from the
 summary alone: its list row reads `host → final-host` (`→ redirected` on the same host) and a
-search matches the final URL too; the CLI's `list`/`tail` text appends `  -> <final URL>`. The in-app detail and the desktop viewer (the same composables) show a
+search matches the final URL too; the CLI's `list`/`tail` text appends `  -> <final URL>`. The desktop viewer's detail shows a
 "Source" row (`Ktor`, `URLSession`, …) and a "Final URL" row when set; a list row's second line
 ends with the source when it is not the Ktor plugin; a platform-captured duration reads
 "… (network)"; HAR export adds `_source` and `_finalUrl` to an entry; the CLI's `list`/`tail` text
@@ -431,8 +416,8 @@ their own of capacity 4096 that never drops silently. The consumer is a thread o
 many devices, the background cpu cgroup; iOS utility QoS), that
 blocks on a semaphore with no timeout while nothing is queued (`WakeSignal`: a producer that finds
 it awake pays one atomic exchange, and only one that finds it asleep pays the semaphore release).
-While a viewer is attached (`attachViewer()`: each bridge session for its lifetime, the in-app and
-desktop list while composed) every write wakes it, so a request shows the moment it starts and the
+While a viewer is attached (`attachViewer()`: each bridge session for its lifetime, the desktop
+viewer's list while composed) every write wakes it, so a request shows the moment it starts and the
 moment it ends. While none is, a pending write wakes nothing, and a terminal write wakes the
 consumer only when it sleeps with no timer: after each pass the consumer dozes for
 `batchWindowMillis` (50 ms), and the terminal writes that arrive meanwhile only mark the work (one
@@ -865,8 +850,8 @@ class inside the app and it names core's types; generates the optional `hopi { }
 variant as a Java class whose constructor passes the global settings and the tool list, each tool
 constructed with its own settings (`NetworkTool(okhttp, urlConnection, rules)`, with
 `perf { enabled = true }` also `PerfEntry(autoStart, hangThresholdMs, hangHeartbeat)`), which the
-provider reads with one lookup; and resolves the Ktor and UI twins per variant (see "Selecting
-real vs noop").
+provider reads with one lookup; and resolves the Ktor, rules and perf twins per variant (see
+"Selecting real vs noop").
 
 **Start.** `hopi-core`'s manifest declares `HopiInitProvider` (`initOrder` the highest, so it runs
 before other SDKs' providers; `hopi-android`'s until the runtime-split plan's stage 4, with the
@@ -886,7 +871,7 @@ request, on its thread, unless `agentBridge` made it at start on the `hopi-start
 parts: `android capture started (<notes>, <total> us; config <n> us, network <n> us, perf <n> us)`,
 the notes being the tools' (`okhttp instrumented`).
 
-Every real module (`hopi-ktor`, `hopi-ui`, `hopi-rules`, `hopi-perf`) takes `hopi-core` as
+Every real module (`hopi-ktor`, `hopi-rules`, `hopi-perf`) takes `hopi-core` as
 `implementation`, so an Android app that links one without the plugin (README, "Install": the
 build-type selection) merges this provider too, an accepted consequence of moving it to core: each
 launch of its debug build pays that one failed `Class.forName` on the main thread (a
@@ -1082,7 +1067,8 @@ URLSession protocol answers with `NSURLCacheStorageNotAllowed`; on Ktor a ruled 
 `Cache-Control: no-store` when the client has `HttpCache`). Rules, bodies and blobs live in memory
 only: nothing is written to a file, preferences, `NSUserDefaults`, the proof file or `bridge.json`,
 and no rule comes from a file, an intent, a deep link, a launch argument or an environment
-variable; the only ways in are the authenticated bridge, `HopiRules` and the in-app screen.
+variable; the only ways in are the authenticated bridge and `HopiRules` (the in-app screen was one
+until the runtime-split plan's stage 5).
 Restarting the app clears every rule.
 
 **Observable differences while a rule applies**, stated rather than hidden: `task.originalRequest`
@@ -1101,7 +1087,8 @@ off, and the bridge then answers rule commands `UNSUPPORTED`.
 
 **Surfaces.** Bridge commands (Agent access, "Wire protocol"); the CLI's `mock|fail|delay|edit add`,
 `rules ls|rm|clear|enable|disable|reset` (Agent access, "CLI"); `HopiRules` (Consumer API); the
-desktop viewer's Rules panel (Desktop viewer); the in-app rules list and "Mock this response" (UI).
+desktop viewer's Rules panel and "Mock this response" (Desktop viewer, UI). The in-app rules list
+and its "Mock this response" were removed with the in-app UI in the runtime-split plan's stage 5.
 
 **Compatibility.** The bridge's `"protocol"` stays 1, so a current CLI keeps working with a new
 app and the other way round. A new host sends rule commands only to an app whose `hello` said
@@ -1126,7 +1113,8 @@ requires them with it. `:checkNoopParity` covers the `hopi-rules` pair.
 
 Design: docs/design/perf-monitors.md. Built: the core model, its JSON and bridge commands, the log
 lines, `hopi-perf`/`hopi-perf-noop` with the Kotlin API, the Android monitors, the iOS monitors,
-the surfaces (CLI, `hopi-connect`, the desktop Perf panel, the in-app HUD and Perf tab), and the
+the surfaces (CLI, `hopi-connect`, the desktop Perf panel; the in-app HUD and Perf tab until the
+runtime-split plan's stage 5), and the
 sample's perf lab and bench (see "Sample app"), verified on the Android emulator and the iOS
 simulator. Measured costs (emulator, debug build; design, "As built", stage 4): nothing started is
 identical to the noop build (0 CPU, 0 wakes idle); frames add nothing measurable on the main
@@ -1217,12 +1205,10 @@ wakes once per interval at about 1 ms of CPU per tick.
   or `Looper.setMessageLogging`; `verifyDebugCapture` requires `PerfEntry` and both calls.
   `:checkNoopParity` covers the pair.
 - **Surfaces.** `hopi perf start|stop|status|snapshot|tail` and `hopi hangs` (see "CLI");
-  `hopi-connect`'s `PerfClient`, decoders and `RemotePerf` (see "Desktop viewer"); in the app, a
-  Perf tab in `HopiScreen` and a HUD in `HopiLauncher` (see "UI"). Each reads the model only while
-  shown: a listener registered while composed or streaming, removed after, and no timer anywhere
-  (the HUD and the tab update when the model hands out a closed second, a sample or an event; both
-  also when the running set changes, which `PerfController.addRunningListener` reports, so a
-  stopped monitor's figures go at once and with none running the HUD reads "perf: off").
+  `hopi-connect`'s `PerfClient`, decoders and `RemotePerf` (see "Desktop viewer"). Each reads the
+  model only while shown: a listener registered while streaming, removed after, and no timer
+  anywhere. The in-app Perf tab and HUD were removed with the in-app UI in the runtime-split
+  plan's stage 5 (D7').
   The per-thread scan is counted across viewers (`watchThreads`), like the iOS cadence.
 
 ## cURL export
@@ -1868,8 +1854,9 @@ A Compose Multiplatform app for Android and iOS that makes real requests to a de
 host, so the inspector, the log stream and the CLI can be exercised (and measured) end to end.
 
 - **`sample/shared`** (KMP: `android`, `iosArm64`, `iosSimulatorArm64`; foundation only, no
-  Material) holds everything both apps share. It selects `hopi-ktor`/`hopi-ui` or their
-  noop twins with the `hopi.enabled` property exactly as in "Selecting real vs noop", and
+  Material) holds everything both apps share. It selects `hopi-ktor`, `hopi-rules`, `hopi-perf`
+  and, on iOS, `hopi-urlsession`, or their noop twins, with the `hopi.enabled` property exactly as
+  in "Selecting real vs noop", and
   generates `HOPI_ENABLED` from the same property, so the iOS app says which one it was built
   with. On Android the plugin selects per variant whatever the property says, so the activity sets
   `SampleBuild.androidCaptureStarted` from `HopiAndroid.isStarted` before the UI; the Diagnostics
@@ -1877,16 +1864,17 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   `"real"` of the rules self-test's `done` line) read `SampleBuild` on both platforms. One
   process-wide Ktor client (`SampleHttp`; OkHttp on Android, Darwin on iOS,
   `ContentNegotiation` with kotlinx-serialization JSON) installs Hopi with
-  `logSink = Summary` and `agentBridge = true`. The UI, wrapped in `HopiLauncher`, is a small
-  shop with three tabs: **Items** (`GET /items`, a lazy list keyed by id, then `GET /items/{id}`
-  for the detail), **New item** (a validated form that POSTs JSON to `/items` with an
+  `logSink = Summary` and `agentBridge = true`. The UI is a small shop with three tabs:
+  **Items** (`GET /items`, a lazy list keyed by id, then `GET /items/{id}` for the detail),
+  **New item** (a validated form that POSTs JSON to `/items` with an
   `Authorization` header and opens the created item), and **Diagnostics**, whose "Fire requests"
   sends, one after the other, a GET returning JSON, a POST with a JSON body and an `Authorization`
   header, a 404, a GET to an unresolvable `.invalid` host, a response larger than 256 KB and a
   chunked response. Two more buttons serve the device checks: "Slow request (60 s)" (`GET /slow`,
   a transaction that stays pending for a minute) and "Create 500 items" (500 `POST /items`, 8 at a
   time), which fills the store to its default 500 entries and gives the app's own item list as
-  many rows, so scrolling the inspector and scrolling the app can be compared. "Giant JSON
+  many rows (until the runtime-split plan's stage 5, the in-app inspector's scrolling was compared
+  with the app's). "Giant JSON
   (1, 5, 20 MB)" and "Giant JSON (8 MB)" fetch `/giant` and parse each body into a `JsonElement`
   with `body<JsonElement>()` on `Dispatchers.Default`, as an app would, logging one JSON line per
   run (fetch and parse times, on Android ART's GC counters and heap, and the main thread's frame
@@ -2039,7 +2027,12 @@ reaches an external network.
 
 ## UI (`hopi-ui`)
 
-Compose Multiplatform, no Material dependency (foundation only), monochrome, dense, fast:
+The desktop viewer's screens: the list and the detail that `hopi-desktop` composes through
+`HopiPanes`, JVM only and unpublished. Compose Multiplatform, no Material dependency (foundation
+only), monochrome, dense, fast. The in-app UI (`HopiScreen`, `HopiLauncher` and its floating button,
+the in-app rules list, the Perf tab and the HUD) and its twin `hopi-ui-noop` were removed in the
+runtime-split plan's stage 5 (D7'): the desktop viewer and the CLI are the surfaces, and nothing of
+Hopi draws in the app's window.
 
 - **List:** newest first; method, status code, host + path, duration, size; Pending/Failed visible at
   a glance. Search by URL substring, filter by status class (2xx, 3xx, 4xx, 5xx, failed, pending,
@@ -2051,12 +2044,12 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   they are. Rows that replace the list's instead of adding to them start at the top: after a Clear
   (the emptied list asks for it) and, in the desktop viewer, with the store of another app process
   (`HopiPanes` keeps a position per store). `transactions` is collected only while
-  `HopiScreen` is composed (a `produceState`, not `collectAsState`, so that the mapping runs
+  the panes are composed (a `produceState`, not `collectAsState`, so that the mapping runs
   off the main thread): each emission goes through a row cache on `Dispatchers.Default` that keeps
   one precomputed row (every string the row shows) per id and rebuilds it only when that id maps
   to a different snapshot instance (the store replaces, never mutates; `HttpTransaction.equals`
   compares body bytes, so identity is the cheap and exact test), then through the search and
-  filter. Composing a row formats nothing. URLs shown, searched, copied and shared are the store
+  filter. Composing a row formats nothing. URLs shown, searched and copied are the store
   `redactor`'s, which masks the userinfo (`https://<redacted>@host/…`), so a password in a URL is
   never shown, found by search or copied; only `unsafeDisableRedaction()` on every installation
   shows it. The row's host line drops the userinfo in any case.
@@ -2074,112 +2067,46 @@ Compose Multiplatform, no Material dependency (foundation only), monochrome, den
   text. A truncated body is printed only when it ends a container (`}` or `]`), else it is split
   raw without a wasted attempt. The pieces are the only copy of the text a
   view keeps (with one flag per piece for the newline it dropped); copy rebuilds the text from
-  them off the main thread. The cache lives only while the screen is composed. A detail is
+  them off the main thread. The cache lives only while the panes are composed. A detail is
   formatted again when its transaction's snapshot or the store's `redactor` changes (the redactor
   grows when another client installs the plugin; the store's `redactors` flow emits it, so the open
   detail and the list follow it at once, not at the next request). Truncation and skip reasons visible. Text is selectable
   (within the pieces on screen).
 - **Actions:** copy cURL (core's `toCurl` with the store's `redactor`), copy URL, copy response
-  body, share, clear. Copy cURL, copy URL and share read the store's `redactor` when they run, not
-  the one the detail was formatted with, so what leaves the screen never lags a redactor that grew
-  while the detail was open. Copy uses Compose's text clipboard. A clip crosses the same binder
-  limit as an intent (past about 1 MB `setPrimaryClip` throws in the app), so copied text is cut at
-  100 000 chars too, at a code point boundary, and the confirmation says so ("Response body
-  copied (first 100k characters)"); a clipboard that still throws shows "… could not be copied"
-  instead of crashing the app. The confirmation is a polite live region, so TalkBack and VoiceOver
-  announce it. Share is the platform sheet (`Intent.ACTION_SEND` on Android,
-  `UIActivityViewController` on iOS) with the method, URL, status, duration and cURL, cut at
-  100 000 chars (the Android binder limit); the JVM has no share sheet, so the action is absent
-  there.
-- **Perf (with `hopi-perf`; docs/design/perf-monitors.md, "In-app"):** `HopiScreen` and
-  `HopiLauncher` read core's `PerfHook` once; without a controller neither shows anything new. With
-  one, the list's top bar gains a Perf button opening the Perf tab: a switch per monitor (started
-  as code, `PerfOwner.Code`), the HUD's switch (and on iOS the cadence's), summaries, sparklines
-  of the last 60 points, the per-thread list (`watchThreads` while shown), "Measure PSS" (off the
-  main thread), memory events and the hangs with their stacks. The tab rebuilds its model on
-  `Dispatchers.Default` when the model hands its listener a closed second, a sample, a hang, a
-  stall or a memory event (never a frame or a jank event), when the running set changes (a CLI,
-  a bridge or app code started or stopped a monitor), and after its own actions; nothing while
-  the app is idle. While `HopiScreen` is composed, `PerfData.inspectorOpen` is set, so
-  frames drawn under it are left out. The HUD is one line over the app ("58 fps · 4 jank · CPU 12%
-  · 142 MB"; iOS: "worst stall 84 ms · 3 stalls/10 s", or "cadence 120/s" with the cadence on),
-  toggled by a long press on the launcher button or the tab; its text is computed on the writer's
-  thread (`HudMeter`) and published only when it changed, so it draws at most once a second and
-  not at all while the app is idle; it drops a stopped monitor's figures at once (the controller's
-  running set, `PerfController.addRunningListener`), and with none running it reads "perf: off";
-  it takes no touch and never recomposes the button. On
-  Android, a launcher composed with a controller registered stores its activity in core's
-  `PerfLauncher` (a weak reference, cleared on dispose), as core's start does with the resumed
-  activity (see Performance monitors), and a frames or hangs start attaches to that window at once
-  with one main-thread message. `hopi-ui-noop` is unchanged: the noop launcher
-  has no button, so nothing to long-press.
+  body, clear (the caller's: the viewer clears the app's store and its own). Copy cURL and copy URL
+  read the store's `redactor` when they run, not the one the detail was formatted with, so what
+  leaves the panes never lags a redactor that grew while the detail was open. Copy uses Compose's
+  text clipboard and cuts the copied text at 100 000 chars, at a code point boundary (the limit of
+  an Android clip, which the in-app UI had to respect), and the confirmation says so ("Response
+  body copied (first 100k characters)"); a clipboard that throws shows "… could not be copied"
+  instead of failing. The confirmation is a polite live region, so screen readers announce it.
+  The JVM has no share sheet, so there is no share action (the Android and iOS sheets went with
+  the in-app UI).
 - **Desktop panes:** `HopiPanes(store, onSelected, onClear, …)` in the jvm-only package
   `dev.koga.hopi.ui.desktop` (`@HopiInternalApi`) reuses the list and detail panes, the
   row cache, the detail formatter and the actions over any store: side by side from 720 dp wide
-  (the selected row marked), one at a time below. It has no close button, back handler or system
-  bar handling (the window owns those), reports every selection so the caller fetches its body,
-  and leaves clearing to the caller (the app's store too). `HopiPanesState` carries the
-  selection and the keyboard moves over the rows as shown. `HopiScreen` composes the same
-  list, detail and actions helpers and is otherwise unchanged. `HopiDesktopTheme`,
-  `hopiDesktopColors` and `HopiDesktopType` (same package, same exclusion from the
-  parity surface) give the desktop window's own chrome the monochrome palette and text styles.
-- **Launcher:** a small draggable floating button over the app content opening the screen full
-  screen. It never touches the store (resolving `HopiStore.default` only when the screen
-  opens), recomposes only when tapped (dragging moves it in the layout phase), keeps its position
-  with `rememberSaveable` as fractions of the safe area and settles on the nearer side edge. The
-  content is laid out as by the noop (see Consumer API): its constraints pass through unchanged,
-  and the button and the screen cover exactly the content's area, which is the window when the
-  app's root fills it (wrap the app's root, as the sample does). While the screen is open the
-  app's content is hidden from accessibility services, cannot hold or take focus (opening clears
-  focus, so a focused field of the app drops the keyboard and stops receiving keys; a focus group
-  cancels any focus entering it), and, once the enter transition has ended, is not drawn: the
-  launcher skips drawing it (`drawWithContent`, reading the transition state in the draw phase
-  only), so the opaque screen is not drawn over a full-window layer of the app on every frame. The
-  app stays composed, so its state survives, and draws again as soon as the screen starts to
-  leave.
-- **Back:** the system back gesture (ui-backhandler `BackHandler`) leaves a detail, then calls
-  `onClose`.
-- **System bars:** the screen covers the host window's bar areas, so while it is composed it sets
-  the bars' icons dark over its light background and light over its dark one, on Android
-  (`WindowInsetsController.setSystemBarsAppearance` on API 30+, the `SYSTEM_UI_FLAG_LIGHT_*` flags
-  below; no androidx.core), and restores the host's appearance when it leaves. API 30 reads an
-  appearance of 0 until the app itself called `setSystemBarsAppearance`, even when its theme
-  made the bars light, so on API 30 the screen first calls `setSystemBarsAppearance(0, 0)`, which
-  makes the controller own the appearance the window derived from the theme and legacy flags, and
-  reads it then (androidx's `WindowInsetsControllerCompat` does the same). Not run on an API 30
-  device yet. Without it, a host
-  with light icons (any app not calling `enableEdgeToEdge`, the sample before this change) showed
-  white icons on the light inspector. iOS asks the view controller for the status bar style, which
-  follows the system appearance there, so iOS does nothing.
+  (the selected row marked), one at a time below. It has no close button and no back handler (the
+  window owns those), reports every selection so the caller fetches its body, and leaves clearing
+  to the caller (the app's store too). `HopiPanesState` carries the
+  selection and the keyboard moves over the rows as shown. `HopiDesktopTheme`,
+  `hopiDesktopColors` and `HopiDesktopType` (same package) give the desktop window's own chrome the
+  monochrome palette and text styles.
 - **Design:** foundation only, no Material; monochrome greys, light or dark following the system;
-  the platform's default and monospace fonts; touch targets of at least 48 dp; content
-  descriptions on icon-only controls and on the status badges; containers that hold text have
-  minimum sizes, never fixed ones, so a large font scale (200% on Android, accessibility Dynamic
-  Type on iOS) grows them instead of clipping their text, and a status badge widens rather than
-  wrapping its code; a binary body's hex dump scrolls sideways; safe-drawing insets respected;
-  short transitions only on open, close and list/detail navigation.
+  the platform's default and monospace fonts; controls of at least 48 dp; content descriptions on
+  icon-only controls and on the status badges; containers that hold text have minimum sizes,
+  never fixed ones, so a large font scale grows them instead of clipping their text, and a status
+  badge widens rather than wrapping its code; a binary body's hex dump scrolls sideways; nothing
+  animates but the confirmation's fade.
 
-**Rules.** A "Rules" button in the top bar opens a list read from `RuleEngine` only while it is
-composed (it refreshes when the rule set or the store changes): one row per rule with its match
-(header values redacted), action and hits, an on/off switch, remove, and "Remove all". A source
-that will not apply the rule has a line of its own ("not applied on urlsession: …", full contrast),
-a stated difference stays a muted warning, and a rule whose every named source excludes it reads
-"inactive" after its hits (its switch stays as set); with no sources named, only the sources this
-platform can have are checked. A list row of
-a ruled record shows one badge, the strongest action first (`MOCK`, `FAIL`, `EDIT`, `DELAY`); the
-overview shows "Rule: #3: delay, mock". The detail adds "Mock this response" (an enabled rule
-matching the record's exact method, scheme, host, port and path, built in the app from the record
-with `fromTransaction` off the main thread (it may decode the body), `times` unset, Undo offered
-for 4 s), disabled with the reason when the
-response body is not held in full, is held in an encoding a mock does not decode (an OkHttp or
-`HttpURLConnection` record under br, zstd or stacked codings; gzip and deflate are decoded), or when
-every recorder has `rules = false`. There is no rule editor on the phone. `HopiScreen`, `HopiLauncher` and
-`hopi-ui-noop` are unchanged. `HopiPanes` gained `HopiPanesRules`, callbacks the desktop connects
-to the bridge, so the desktop's panes never use the desktop process's own engine.
-
-Opening the screen before any client installed the plugin creates the default store with default
-caps (`HopiStore.default` creates it on first access); a later installation's caps then do not
-apply. Install the plugin when the app starts.
+**Rules.** A list row of a ruled record shows one badge, the strongest action first (`MOCK`,
+`FAIL`, `EDIT`, `DELAY`); the overview shows "Rule: #3: delay, mock". With `HopiPanesRules`,
+callbacks the desktop connects to the bridge (so the panes never use the desktop process's own
+engine), the detail adds "Mock this response" (Desktop viewer: a mock form prefilled from the
+record), disabled with the reason when the response body is not held in full, is held in an
+encoding a mock does not decode (an OkHttp or `HttpURLConnection` record under br, zstd or stacked
+codings; gzip and deflate are decoded), or when the app's Hopi does not support rules. The in-app
+rules list and the in-app "Mock this response" went with the in-app UI in the runtime-split plan's
+stage 5.
 
 ## Performance budget
 
@@ -2263,7 +2190,10 @@ and Kotlin/Native builders take 2, so device figures are measured separately bel
 
 Measured on device (2026-10-23, sample debug builds, API 35 emulator and an
 iPhone 16 simulator on iOS 18.2; raw data and scripts in `build/evidence/giant-json/` and, for the
-second round, `build/evidence/giant-json-fixes/`; the scripts are kept in `benchmark/device/scripts/`).
+second round, `build/evidence/giant-json-fixes/`; the scripts are kept in `benchmark/device/scripts/`,
+except those that drove the in-app inspector (`ab.sh`, `inspector.sh`, `post.sh` and `reopen.sh`,
+which tapped "Open Hopi", and `ios_hold.sh` with its `ios_hold_table.py`, which tapped it by
+coordinates), removed with it in the runtime-split plan's stage 5).
 Metrics are named as measured: *settle* is tap to the last frame drawn (gfxinfo framestats);
 *UI thread* is one frame's `Vsync` to `SyncQueued`; *frame gap* is the longest time between two
 frames while the sample's frame ticker draws every vsync, so only there does a gap mean a blocked
@@ -2340,10 +2270,10 @@ Hopi rejects each of them:
 | Many monitors on by default (FPS, CPU, memory, leaks, UI tree)   | One tool, HTTP only, and only on the clients the developer installs it on      |
 | Polling timers sampling the app continuously                     | **No timers, no polling, no periodic work anywhere.** Everything is event-driven |
 | Global interception that re-sends every request through a `URLProtocol` | Observe only, unless a rule the developer added applies: a rule's `URLProtocol` claims only the requests a mock or fail rule matches and answers them itself, re-issuing nothing, and with no rule a task of a session created after `start()` costs one `canInitWithTask:` answer; every other recorder pays one volatile read. The OkHttp before-response wait checks for cancel every 50 ms only while a delayed request waits. Global capture exists, but only after an explicit `HopiUrlSession.start()` in a debug build, never in release (noop twin, checked). It re-issues nothing, replaces method implementations only on `NSURLSessionTask`, `NSURLSession`'s upload factories (with rules on, also its session factory, and its task factories once an edit or delay rule was added) and CFNetwork's connection class (never an app or SDK class), adds no method, copies no bytes on the app's threads, and wakes nothing while no request runs. On Android, global capture exists only in debuggable variants of an app that applies `dev.koga.hopi`: it rewrites at build time one call inside OkHttp's `RealCall` and the `java.net.URL` connection call sites, adds no method, field or interface to any class (one annotation on `RealCall`), changes no list or object the app reads except the delegating bodies and connection wrappers it hands on, and wakes nothing while no request runs |
-| UI/overlay work on the main thread while the app runs            | The launcher is one static composable: no recomposition unless dragged or tapped, no observation of the store |
+| UI/overlay work on the main thread while the app runs            | No Hopi UI in the app (the in-app screen and launcher were removed in the runtime-split plan's stage 5): the desktop viewer and the CLI run on the developer's machine |
 | Formatting and storing everything eagerly                        | Capture raw bytes only; decode, pretty-print, encode only when a screen, log line, or agent asks |
 
-Concretely, when nothing is looking (screen closed, no agent connected, log sink off):
+Concretely, when nothing is looking (no viewer or agent connected, log sink off):
 
 - the only per-request work is header copy, bounded byte copy, one `trySend`;
 - the store's consumer thread (`hopi-store`) is blocked on its semaphore, with no timeout, between
@@ -2354,7 +2284,8 @@ Concretely, when nothing is looking (screen closed, no agent connected, log sink
   blocked on a semaphore: no coroutine event loop on either (Kotlin/Native's `runBlocking` loop
   re-armed a keep-alive timer on the writer, about 0.35 ms of CPU a second), checked by
   `IdleWakeupTest` on the JVM and the iOS simulator (0 wakes in 1.5 s, one per event);
-- the UI collects nothing: `transactions` is collected only while `HopiScreen` is composed;
+- nothing in the app collects `transactions`: there is no Hopi UI there, and a bridge session
+  reads the store only while it is connected;
 - no thread wakes up on its own. A CPU profile of an idle app with Hopi installed must be
   indistinguishable from one without it.
 
@@ -2366,12 +2297,13 @@ own: one deadline in a perf thread's timed wait, or one `dispatch_after` when iO
 alone). The Android heartbeat (`hangHeartbeat`) and iOS tier 2's display link (only while a viewer
 asks for it) are the two that wake while the app is idle.
 
-When the screen is open, the list renders only visible rows (lazy, keyed, precomputed row strings
+In the desktop viewer the list renders only visible rows (lazy, keyed, precomputed row strings
 built once per transaction), detail formatting runs on `Dispatchers.Default`, and nothing animates
 continuously. These rules are reviewed in every phase and measured in the sample app.
 
 Measured on device (phase 3 acceptance, sample debug builds, API 35 emulator and an
-iPhone 16 simulator on iOS 18.2):
+iPhone 16 simulator on iOS 18.2). The launcher, scrolling and opening figures measured the in-app
+UI, removed in the runtime-split plan's stage 5; they stay as its record:
 
 - **Idle, launcher visible, screen closed, 60 s** (`/proc/<pid>/stat` and every
   `/proc/<pid>/task/*/stat`): the real build and the noop build both use 0 CPU ticks once ART's

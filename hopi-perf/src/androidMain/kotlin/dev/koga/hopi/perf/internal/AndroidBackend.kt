@@ -68,7 +68,7 @@ internal class AndroidBackend private constructor() : MonitorBackend {
                 if (autoStarting || attachLauncherActivity()) {
                     null
                 } else {
-                    "frames attach when an activity next starts (single-activity app: send it to the background and back, or open the Hopi launcher)"
+                    "frames attach when an activity next starts"
                 }
             }
             PerfMonitor.HANGS -> {
@@ -182,11 +182,10 @@ internal class AndroidBackend private constructor() : MonitorBackend {
     override fun measurePss(): PerfPss = pss.measure()
 
     /**
-     * The resumed activity, if any (core's [PerfLauncher], written by core's start and by
-     * `HopiLauncher`): frames and the input bracket attach to it at once, with one main-thread
-     * message, instead of at its next start (a single-activity app would otherwise wait for a
-     * return from the background). The lifecycle callbacks' own attach at a later start skips a
-     * window already attached.
+     * The resumed activity, if any (core's [PerfLauncher], written by core's start): frames and
+     * the input bracket attach to it at once, with one main-thread message, instead of at its next
+     * start (a single-activity app would otherwise wait for a return from the background). The
+     * lifecycle callbacks' own attach at a later start skips a window already attached.
      */
     private fun attachLauncherActivity(): Boolean {
         val activity = PerfLauncher.activity ?: return false

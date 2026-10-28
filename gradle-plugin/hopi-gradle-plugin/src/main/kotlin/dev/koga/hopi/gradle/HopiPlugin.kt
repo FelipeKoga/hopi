@@ -19,8 +19,8 @@ import org.gradle.api.artifacts.Configuration
  *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
  *   `hopi { }` block generated into it as the start configuration and its tool list; other
  *   variants are not instrumented at all;
- * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-ui`/`hopi-rules`/`hopi-perf` to the
- *   real module when debuggable and to the noop twin otherwise, whichever the app's modules name;
+ * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-rules`/`hopi-perf` to the real
+ *   module when debuggable and to the noop twin otherwise, whichever the app's modules name;
  * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others `hopi-perf-noop`)
  *   and the tool list names its tool, which starts the `autoStart` monitors (docs/design/perf-monitors.md).
  *
@@ -171,6 +171,6 @@ public class HopiPlugin : Plugin<Project> {
         const val RUNTIME_NOOP = "hopi-android-noop"
         const val PERF = "hopi-perf"
         const val PERF_NOOP = "hopi-perf-noop"
-        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", "hopi-ui" to "hopi-ui-noop", "hopi-rules" to "hopi-rules-noop", PERF to PERF_NOOP)
+        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", "hopi-rules" to "hopi-rules-noop", PERF to PERF_NOOP)
     }
 }

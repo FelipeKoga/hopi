@@ -92,7 +92,6 @@ kotlin {
             kotlin.srcDir(generateSampleBuildInfo.flatMap { it.outputDirectory })
             dependencies {
                 implementation(if (hopiEnabled) project(":hopi-ktor") else project(":hopi-ktor-noop"))
-                implementation(if (hopiEnabled) project(":hopi-ui") else project(":hopi-ui-noop"))
                 // api: the Android app's rules scenarios name HopiRules too, and the iOS framework exports it.
                 api(rulesModule)
                 // api: the iOS framework exports it (HopiPerf.shared from Swift).

@@ -16,8 +16,8 @@ that wake threads. Anything that has to sample states its interval and its overh
 line between Hopi and DebugSwift, which slows apps down by running every monitor at once.
 
 Every tool exposes its data on three surfaces: the realtime log line, the bridge/CLI for AI agents,
-and the desktop viewer. There is no in-app screen (decided 2026-10-28; the in-app UI goes in the
-plan's stage 5).
+and the desktop viewer. There is no in-app screen (decided 2026-10-28; the in-app UI was removed in
+the plan's stage 5).
 
 ## Backlog
 
@@ -35,7 +35,8 @@ cost stated per monitor). Built in four stages: the core model, bridge `perf.*`,
 (FrameMetrics, the Looper printer with an input bracket or a heartbeat, one sampler); the iOS
 monitors (run-loop observers and stack capture in C, stalls, display-link cadence on request,
 `task_info` CPU and footprint, memory warnings); the surfaces (CLI `hopi perf …` and `hopi hangs`,
-`hopi-connect`, the desktop Perf panel, the in-app HUD and Perf tab); and the sample's perf lab and
+`hopi-connect`, the desktop Perf panel; the in-app HUD and Perf tab until the runtime-split plan's
+stage 5 removed them); and the sample's perf lab and
 bench with `benchmark/perf/`. Verified on the Android emulator (28 of 28 checks: jank, hangs
 including one inside a Compose `onClick`, a dialog, CPU, heaps, trim levels) and on the iOS
 simulator (21 of 21 since stage 5, which fixed a leased hang watchdog that missed hangs, CPU's
@@ -60,7 +61,7 @@ bound; 4 each before it); design, "As built", stage 4). Open:
   reaches the window); only `hangHeartbeat` sees a block there.
 - `dumpsys meminfo` does not show the lab's 64 MB of bitmap pixels as Native Heap, while
   `mallinfo` and RSS do.
-- The CMP `MTLDrawable` spike; the HUD's redraw cost on a device; a frozen process mid-hang.
+- The CMP `MTLDrawable` spike; a frozen process mid-hang.
 
 The original sketch, kept for the record:
 - **Jank / frame timing.** Event-driven, not polled: Android `FrameMetrics` / `JankStats`, iOS
@@ -85,7 +86,7 @@ per-provider constraints, so bad events are caught in debug instead of silently 
   prefixes, max params per event, max param key / string value length, allowed value types,
   required params per event, max user properties. Example: Firebase limits event names to 40 chars,
   params to 25 per event, and string values to 100 chars.
-- **Output.** Each event is shown with violations highlighted in the in-app screen, emitted as an
+- **Output.** Each event is shown with violations highlighted in the desktop viewer, emitted as an
   NDJSON log line (`"violations":[…]`), and available through the bridge/CLI
   (`hopi events --violations --json`) so an AI agent can audit tracking in a test run.
 - **Cost.** Validation runs off the caller's thread, only for events Hopi receives; bounded ring
@@ -155,8 +156,9 @@ so the app pays no extra cost.
   line below the fold of the Diagnostics tab; it now counts them in `<evidence>/devserver.ndjson`
   and reads the line from logcat. Its adb reset accepts a server that another adb client started
   first. 18 of 18 pass with figures.
-- Open questions: whether the in-app screen becomes optional (noop-by-default UI artifact, with the
-  desktop as the main viewer); physical iOS devices (no bridge in v1).
+- Open questions: physical iOS devices (no bridge in v1). (Whether the in-app screen becomes
+  optional is settled: it was removed in the runtime-split plan's stage 5, and the desktop viewer
+  is the main viewer.)
 
 ### Automatic platform capture (every request, third-party SDKs included)
 - **iOS, URLSession (built).** `hopi-urlsession` / `-noop`: `HopiUrlSession.start()` records every
@@ -200,7 +202,8 @@ so the app pays no extra cost.
   when a rule is added (URLSession: response edits, a before-response delay on a real request, body
   edits of file and stream uploads, background sessions, sessions created before `start()` other
   than `shared`). A rule that names no sources is checked against the platform's own sources only,
-  so an Android app hears nothing of URLSession; the desktop panel and the in-app list show a source
+  so an Android app hears nothing of URLSession; the desktop panel (and the in-app list, until the
+  runtime-split plan's stage 5) show a source
   that never applies a rule as "not applied on <source>: …" and a rule as "inactive" when every
   source it is checked against (the named ones, or the platform's when it names none) excludes it;
   Ktor, on every platform, excludes nothing, so a rule naming none never reads "inactive". First
@@ -214,8 +217,9 @@ so the app pays no extra cost.
 - Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
   bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
   `rules ls|rm|clear|enable|disable|reset`, exit code 4); `HopiRules` (Kotlin, Swift
-  `HopiRules.shared`); the desktop Rules panel (⌘L), "Mock this response"; the in-app rules list,
-  "Mock this response". The sample's rules self-test and
+  `HopiRules.shared`); the desktop Rules panel (⌘L), "Mock this response"; the in-app rules list
+  and "Mock this response" (removed with the in-app UI in the runtime-split plan's stage 5). The
+  sample's rules self-test and
   host targets (`--es rulesVerify all`, `-verifyRules`) drive every action on every source.
 - Open:
   - Device verification ran on the API 35 emulator and the iPhone 17 (iOS 27.0) and

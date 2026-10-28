@@ -123,7 +123,7 @@ class HopiPerfTest {
         assertEquals(emptySet(), HopiPerf.running)
     }
 
-    /** What the HUD learns a stop from: no item says it, so the controller does. */
+    /** What a viewer of the figures learns a stop from: no item says it, so the controller does. */
     @Test
     fun everyChangeOfTheRunningSetIsAnnouncedOnceInOrder() {
         HopiPerf.install { summaryLog = false }

@@ -70,8 +70,8 @@ hopi {
 }
 
 dependencies {
-    // Hopi's Ktor plugin and UI come with the shared module, which names the real modules or the
-    // noop twins by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs
+    // Hopi's Ktor plugin, HopiRules and HopiPerf come with the shared module, which names the real
+    // modules or the noop twins by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs
     // noop"). The dev.koga.hopi plugin then resolves them per variant: real in debug, noop in
     // release, whatever the property said, so the two are never both packaged. It also adds the
     // capture runtime (hopi-android, or hopi-android-noop in release).
@@ -128,7 +128,7 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val problems = mutableListOf<String>()
 
         val projects = hopiProjects.get()
-        val expectedProjects = setOf(":hopi-ktor-noop", ":hopi-ui-noop", ":hopi-rules-noop", ":hopi-android-noop", ":hopi-perf-noop")
+        val expectedProjects = setOf(":hopi-ktor-noop", ":hopi-rules-noop", ":hopi-android-noop", ":hopi-perf-noop")
         if (projects != expectedProjects) {
             problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
         }
@@ -231,7 +231,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val dex = DexReader.ofApk(apk)
         val problems = mutableListOf<String>()
         val projects = hopiProjects.get()
-        val required = setOf(":hopi-android", ":hopi-core", ":hopi-ktor", ":hopi-ui", ":hopi-rules", ":hopi-perf")
+        val required = setOf(":hopi-android", ":hopi-core", ":hopi-ktor", ":hopi-rules", ":hopi-perf")
         if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
 
         val hookCallers = dex.callersOf(OKHTTP_HOOK)

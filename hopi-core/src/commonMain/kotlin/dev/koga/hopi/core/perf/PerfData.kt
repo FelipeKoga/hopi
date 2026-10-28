@@ -22,8 +22,8 @@ public fun interface PerfListener {
  * The perf model (docs/design/perf-monitors.md, "Data model"): bounded series of primitive
  * arrays, one event ring per kind, and summaries since start in constant memory. Written straight
  * from each monitor's thread (no hop); a write wakes nothing unless a listener is registered (a
- * bridge `perf.tail`, the HUD), and per-frame writes never reach listeners: only closed seconds,
- * samples and events do. In memory only, never persisted. Nothing here starts a thread.
+ * bridge `perf.tail`), and per-frame writes never reach listeners: only closed seconds, samples and
+ * events do. In memory only, never persisted. Nothing here starts a thread.
  */
 @HopiInternalApi
 public class PerfData {
@@ -78,7 +78,11 @@ public class PerfData {
     private val app = AtomicReference<String?>(null)
     private val activity = AtomicReference<String?>(null)
 
-    /** Set while the in-app inspector (`HopiScreen`) is open: frames are flagged `inspector` and left out. */
+    /**
+     * When set, frames are flagged `inspector` and left out. The in-app inspector set it while it
+     * was open; nothing sets it since the in-app UI went (the runtime-split plan's stage 5), so it
+     * stays false.
+     */
     private val inspector = AtomicReference(false)
 
     public val seconds: FrameSeconds = FrameSeconds { closed -> writeSecond(closed) }

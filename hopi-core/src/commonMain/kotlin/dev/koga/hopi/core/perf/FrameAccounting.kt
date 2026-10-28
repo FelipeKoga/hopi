@@ -69,7 +69,8 @@ public class FrameSeconds(private val onClosed: (FrameSecond) -> Unit) {
 
     /**
      * Adds one frame of epoch second [atSecond]. [klass] is its classification; [firstFrame], the
-     * first frame of a window; [exclude], left out of the figures (inspector open, Hopi pause).
+     * first frame of a window; [exclude], left out of the figures (a Hopi pause; the inspector flag
+     * is kept but unset since the runtime-split plan's stage 5).
      */
     public fun add(atSecond: Long, totalNs: Long, klass: FrameClass, firstFrame: Boolean, missedVsyncs: Int, metricsLost: Int, exclude: Boolean, screen: String?) {
         val closed = lock.locked {

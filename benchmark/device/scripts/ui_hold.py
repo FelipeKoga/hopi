@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tells a blocked main thread from an idle one while the inspector is driven on the emulator.
+"""Tells a blocked main thread from an idle one while the sample is driven on the emulator.
 
 Launches the sample with a giant spec plus `hold=<seconds>;window=1`, so its frame ticker draws on
 every vsync and logs one line per second with the longest gap between two frames. After the runs,

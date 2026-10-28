@@ -23,7 +23,7 @@ internal class HopiColors(
     val text: Color,
     val textMuted: Color,
     val textFaint: Color,
-    /** Text drawn on [text]-colored fills (filled badges, the launcher button). */
+    /** Text drawn on [text]-colored fills (filled badges, the toast). */
     val onText: Color,
     val scrim: Color,
 )

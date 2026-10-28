@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Records every exchange of the client it is installed in into the process-wide Hopi store,
- * for the in-app screen, the platform log and the agent bridge.
+ * for the platform log and the agent bridge (the CLI and the desktop viewer).
  */
 public val Hopi: ClientPlugin<HopiConfig> = createClientPlugin("Hopi", ::HopiConfig) {
     val config = pluginConfig

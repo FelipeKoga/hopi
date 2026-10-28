@@ -5,8 +5,9 @@ Status: built (2026-10-24); what changed while building it, and the device measu
 "capture every HTTP request the app makes, including third-party SDKs, with no per-client
 configuration". The iOS part (URLSession) is built, see `docs/design/urlsession-capture.md`. This
 design reuses its `source` field, its store semantics (`CaptureInstallation`) and its Ktor dedupe
-rule (`PlatformCapture`). Records go into the existing `HopiStore`, so the in-app screen, the NDJSON
-log line, the bridge/CLI and the desktop viewer show them with no change: `TransactionSource.OKHTTP`
+rule (`PlatformCapture`). Records go into the existing `HopiStore`, so the NDJSON log line, the
+bridge/CLI and the desktop viewer (and the in-app screen, until the runtime-split plan's stage 5
+removed it) show them with no change: `TransactionSource.OKHTTP`
 (`"okhttp"`) and `TransactionSource.URL_CONNECTION` (`"urlconnection"`) already exist in core, on
 the wire, in `BridgeDecoder` and in the UI's `sourceLabel` (`OkHttp`, `HttpURLConnection`).
 
@@ -499,8 +500,9 @@ public object HopiAndroid {
 Nothing else is public. `HopiInitProvider`, the hooks, the interceptor and the wrappers are in
 `dev.koga.hopi.android.internal`. They are internal Kotlin declarations, or `@HopiInternalApi`
 where a class must be public for the manifest. `HopiInitProvider` is a public class. Its package
-is excluded from the ABI dumps the same way `hopi-ui` excludes `dev.koga.hopi.ui.desktop`, with the
-reason recorded in the build script: the class is the manifest's, and the noop has no manifest. The
+is excluded from the ABI dumps the same way `hopi-ui` excluded `dev.koga.hopi.ui.desktop` (until
+the runtime-split plan's stage 5 left `hopi-ui` without a dump), with the reason recorded in the
+build script: the class is the manifest's, and the noop has no manifest. The
 pair is added to `noopTwins` in the root build, so `:checkNoopParity` covers it, with a
 `DefaultsParityTest`-style check that both `isStarted` and `okHttpInstrumented` read false in the
 noop. (Since the runtime-split plan's stage 4, 2026-10-28, `HopiInitProvider`, its manifest entry,
@@ -578,7 +580,8 @@ with `variant.sources.java?.addGeneratedSourceDirectory(…)`; the design's
 
 With `selectTwins = true` (the default), the plugin adds a dependency substitution to each
 variant's `compileConfiguration` and `runtimeConfiguration`. Debuggable variants get
-`hopi-ktor-noop`→`hopi-ktor` and `hopi-ui-noop`→`hopi-ui`. The other variants get the reverse.
+`hopi-ktor-noop`→`hopi-ktor` and `hopi-ui-noop`→`hopi-ui` (the `hopi-ui` pair went in the
+runtime-split plan's stage 5). The other variants get the reverse.
 This applies to Maven coordinates in group `dev.koga.hopi` and to this repository's project
 paths. A KMP shared module compiled against either twin links against the other, because the ABI
 is the same (`:checkNoopParity`) and no public declaration of either side is `inline` or `const`
@@ -601,7 +604,8 @@ architecture doc's sample section changes accordingly.
 - `hopi-android-noop`: the public API above, both values false, no manifest, no resources, no
   dependency. ABI dump, in `:checkNoopParity`.
 - `:sample:androidApp:verifyReleaseUsesNoop` (exists): the expected release classpath becomes
-  `{:hopi-ktor-noop, :hopi-ui-noop, :hopi-android-noop}`. The dex reader is extended from
+  `{:hopi-ktor-noop, :hopi-ui-noop, :hopi-android-noop}` (`:hopi-ui-noop` until the runtime-split
+  plan's stage 5 deleted it). The dex reader is extended from
   `class_defs` to `type_ids` and `method_ids`. The release APK must have no type in
   `Ldev/koga/hopi/android/internal/` or `Ldev/koga/hopi/core/` (a reference in instrumented
   bytecode would show up there even though no such class is packaged). It must have no provider
@@ -618,8 +622,8 @@ architecture doc's sample section changes accordingly.
   that the fake SDK's classes, the sample's own classes and `kotlin.io.TextStreamsKt` invoke
   `HopiUrlHooks.*`. The stdlib class is a valid check because the sample calls `URL.readText()`
   from its Diagnostics and the debug build has no R8 to remove it. It requires the provider in the
-  merged manifest. The debug classpath must hold `:hopi-android`, `:hopi-core`, `:hopi-ktor` and
-  `:hopi-ui`.
+  merged manifest. The debug classpath must hold `:hopi-android`, `:hopi-core`, `:hopi-ktor` and,
+  until the runtime-split plan's stage 5, `:hopi-ui`.
 - `verifyHopiSelection` keeps its role for the `-Phopi.enabled` direction. With the plugin applied
   it checks the plugin's rule (release is always noop) instead of the property.
 

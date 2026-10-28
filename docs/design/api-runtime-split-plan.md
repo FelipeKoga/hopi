@@ -1807,9 +1807,10 @@ Steps:
    `selectTwins()` PLG:113-131 and `TWINS` PLG:166 go; KDoc PLG:12-25 (verified). FT: the test
    `publishedCoordinatesAreSwappedPerVariant` swaps nothing any more: rename it (provisional
    `publishedCoordinatesArePerVariant`) and reword `:20-31` and `:141-148` (verified).
-3. **Benchmarks** (cross-check problem 13, E7 4): in the 17 live scripts
+3. **Benchmarks** (cross-check problem 13, E7 4): in the 16 live scripts (`ios_hold.sh` went with
+   the in-app inspector in stage 5)
    (`benchmark/android-capture/{run.py,abtable.py,e2e/check.py,e2e/run.sh}`,
-   `benchmark/device/scripts/{ios-ab.sh,ios-matrix.sh,ios.py,ios_hold.sh,matrix.sh,matrix2.sh,paired.py}`,
+   `benchmark/device/scripts/{ios-ab.sh,ios-matrix.sh,ios.py,matrix.sh,matrix2.sh,paired.py}`,
    `benchmark/perf/{bench,idle}.py`, `benchmark/urlsession/e2e/{ab.sh,abtable.py,check.py,run.sh}`,
    verified) the noop arm becomes the no-runtime arm, label `nohopi` and install suffix `.nohopi`
    (provisional: `off` is taken, it means "runtime linked, nothing started" in
@@ -1952,7 +1953,7 @@ Kept equal to the base check of `README.md` ("Building"); a stage that adds, del
 task path edits both (rule 5). As of stage 3:
 
 ```bash
-./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest :hopi-ui-noop:jvmTest \
+./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
   :hopi-perf:jvmTest :hopi-perf-noop:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \
@@ -2195,6 +2196,34 @@ Stage 4 (2026-10-28; "before" at `d26907d`, "after" with the stage's edits; emul
   resumed before start recorded) with the host 2.8 GB into swap; with fresh daemons the rerun was
   green, those five included.
 
+Stage 5 (2026-10-28, the stage's edits on `32fbbd5`; emulator `Hopi_API_35`, API 35;
+simulator `iPhone 17`, iOS 27.0):
+
+- **P5 on the single-activity sample**: launched with no extras, then `hopi perf start --frames`
+  1, 2 and 4 s after `am start -W` returned: each reply shows frames attached, with no launcher
+  left to write `PerfLauncher`. Three start, stop and start cycles in one process: 1.5 s after each
+  start frames are attached, and they count frames (4, 2 janky, after a swipe and a tap). The reply
+  to the start itself said "not attached" in 2 of the 3 restarts. The start posts the attach to the
+  main thread, and the reply is read before that message runs, so the CLI and the desktop show the
+  "frames attach when an activity next starts" hint for an attach that is a message away (stage 8:
+  make the reply wait briefly for it, or not show the hint while one is pending). A temporary log in
+  core's callbacks showed one `onActivityResumed` and no pause in that window, so `PerfLauncher`
+  held the activity all along.
+- **Perf lab**: `python3 benchmark/perf/verify.py` on Android: 28 of 28 on a second run. The first
+  missed "jank 20 ms x30: slow, not janky" with 5 janky frames where at most 3 are allowed (3 in
+  stage 4's run, 2 in the rerun): a timing check on a loaded emulator.
+- **Desktop viewer against the emulator**: `DeviceViewerUiTest` 18 of 18 (500 `POST /items`: 2692,
+  2570 and 2613 ms connected against 2743, 2738 and 2723 ms disconnected). `DevicePerfPanelUiTest`,
+  after the lab and `hopi hangs --json`: 15 of 15 checks (one informational line), the live click
+  burn included (hang #84, 601 ms, its stack naming `PerfLab.clickBurn`), now that the test brings
+  the app back to the front first; in stage 4 that step found no button.
+- **Perf lab on iOS**: `python3 benchmark/perf/verify.py --platform ios` on the Debug build: 21 of
+  21 once the freshly erased simulator's first-boot services had settled. The run made while they
+  still took the host's CPU missed "jank 20 ms x30: no stall" (8 stalls) and "cpu 2 threads x 5
+  s" (57.6 % for 200 %).
+- **The rest**: `:sample:shared:compileKotlinIosSimulatorArm64 -Phopi.enabled=true` compiles; the
+  base check is green.
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2242,8 +2271,8 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 1. Evaluation and re-plan | done: E1 to E8 and the cross-check in `docs/design/runtime-split-evaluation/`; sections 3.9, 6 to 10 rewritten | `27b1714` |
 | 2. Contract documents (after a separate fix commit) | done: the redirect wording fixed (`:hopi-core:jvmTest` and `:hopi-ui:jvmTest` green; `PerfUiTest` timed out once waiting 5 s for the PSS line and passed on two reruns, a timing flake in a test stage 5 deletes); ARCHITECTURE principle 1, the migration note and the Modules table's stages; ROADMAP's rule for every new tool and its surfaces; the old proposal's status line | `2e9cce0` (fix), `a6be8e8` |
 | 3. The API module | done: `hopi-api` (registry `HopiRuntimes` with the Ktor hooks' slot; no dependency; four targets; published); `@HopiInternalApi` renamed in 91 files (P2); E7 X1 to X3 and E4 X1 in section 9 | `d26907d` |
-| 4. Start sequence and tools in core | done: `HopiStart` in core (`StartConfig`, tools with their own settings, the caps preset without creating the store, the installation on a `hopi-start` thread with `agentBridge`); P4's provider in core with D9's run-time check and no start without the generated class; P5's current-activity callbacks; `NetworkTool` and `PerfEntry` as tools; the plugin adds `hopi-core` to debuggable build types and generates the tool list; the sample's caps are build properties (E3's 5 MB check passes); [run] results in section 9 | (this commit) |
-| 5. Remove the in-app UI | | |
+| 4. Start sequence and tools in core | done: `HopiStart` in core (`StartConfig`, tools with their own settings, the caps preset without creating the store, the installation on a `hopi-start` thread with `agentBridge`); P4's provider in core with D9's run-time check and no start without the generated class; P5's current-activity callbacks; `NetworkTool` and `PerfEntry` as tools; the plugin adds `hopi-core` to debuggable build types and generates the tool list; the sample's caps are build properties (E3's 5 MB check passes); [run] results in section 9 | `32fbbd5` |
+| 5. Remove the in-app UI | done: `hopi-ui` holds only the desktop viewer's screens (JVM, unpublished, no ABI dump); `hopi-ui-noop`, the launcher, `HopiScreen`, the HUD and the in-app perf and rules panes deleted; shared-code tests retargeted to `HopiPanes`; the scripts that drove the in-app inspector deleted; P5 shown on the emulator; [run] results in section 9 | (this commit) |
 | 6. iOS entry | | |
 | 7. Rules into the API | | |
 | 8. Perf into API and runtime | | |
@@ -2278,8 +2307,20 @@ Stage 4 leaves for later stages:
   the provider creates no function value on the main thread.
 - Stage 5 (its perf checks): `benchmark/perf/verify.py` passes 28 of 28 on this stage's build, and
   `DevicePerfPanelUiTest` after it passes every check but the live click burn: the script's memory
-  step leaves the app in the background, so the test's tap finds no button. Bring the app to the
-  front first (an `am start` of the running task keeps the lab's state).
+  step leaves the app in the background, so the test's tap finds no button. Done in stage 5: the
+  test brings the running task back to the front first.
+
+Stage 5 leaves for later stages:
+
+- Stage 8: the reply to `hopi perf start --frames` can say "not attached", and the CLI and the
+  desktop then show the "frames attach when an activity next starts" hint, while the attach is one
+  main-thread message away (section 9). Make the reply wait briefly for that message, or leave the
+  hint out while an attach is pending.
+- Stage 8: `PerfLauncher` keeps its name though no launcher writes it any more (core's
+  current-activity callbacks do), and `PerfData.inspectorOpen` stays, always false; rename the one
+  and drop the other with the perf API move.
+- `hopi-ui`'s `HopiScreen.kt` now holds only the state helpers the desktop panes share; a rename
+  can come with any later change there.
 
 ---
 

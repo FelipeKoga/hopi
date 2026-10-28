@@ -240,7 +240,7 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
 
     override fun threads(limit: Int): List<PerfThread>? = backend.threads(limit)
 
-    /** Viewers of the per-thread list (tail sessions, the in-app Perf tab): the scan runs while one is left. */
+    /** Viewers of the per-thread list (tail sessions): the scan runs while one is left. */
     private var threadWatchers = 0
 
     override fun watchThreads(watching: Boolean) {

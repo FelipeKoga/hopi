@@ -148,6 +148,8 @@ class DevicePerfPanelUiTest {
         note("the CPU figure is on screen", cpuShown, "${last?.cpu}")
 
         if (platform == "android") {
+            // verify.py's memory step left the app in the background; its own component-only intent brings the task back, lab and all (a launcher intent would start a second MainActivity).
+            run(adb, "shell", "am", "start", "-W", "-n", "$PKG/.MainActivity")
             val before = session.perf.view.value.hangs.map { it.seq }.toSet()
             val tapped = tapClickBurn()
             record("live: click burn tapped through input dispatch", tapped, "uiautomator found the button")

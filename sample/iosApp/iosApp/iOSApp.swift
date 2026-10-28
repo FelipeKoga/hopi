@@ -15,9 +15,9 @@ struct IOSApp: App {
             if let value = launchArgument("-maxBodyBytes").flatMap(Int64.init) { config.maxBodyBytes = value }
             if let value = launchArgument("-maxTotalBytes").flatMap(Int64.init) { config.maxTotalBytes = value }
         }
-        // The performance monitors: registered for the bridge (`hopi perf start`), the in-app Perf tab
-        // and HUD, none started (each costs nothing until one is). Before the UI, so the launcher sees
-        // the controller when it first appears. `-hopiPerf frames,hangs` starts monitors at launch.
+        // The performance monitors: registered for the bridge (`hopi perf start`, the desktop viewer's
+        // Perf panel), none started (each costs nothing until one is). `-hopiPerf frames,hangs` starts
+        // monitors at launch.
         // In a Release build this is hopi-perf-noop and does nothing.
         HopiPerf.shared.install { config in
             config.agentBridge = true

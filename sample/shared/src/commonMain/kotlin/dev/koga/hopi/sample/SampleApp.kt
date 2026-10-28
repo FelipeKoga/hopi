@@ -44,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.koga.hopi.ui.HopiLauncher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -78,20 +77,18 @@ public object SampleBuild {
 }
 
 /**
- * The sample app both platforms host, wrapped in [HopiLauncher]: a small shop (item list,
- * item detail, a form that POSTs a new item) against the dev server, and a diagnostics tab that
- * fires one request of each kind the inspector must handle and opens the perf lab. [platformActions]
- * add buttons to the diagnostics tab; [launchAction] runs once at launch and opens that tab with its
- * result. [perfVerify] (`all` or a comma list of the lab's steps) opens the perf lab at launch and
- * runs those injections once ([PerfLabRun]).
+ * The sample app both platforms host: a small shop (item list, item detail, a form that POSTs a
+ * new item) against the dev server, and a diagnostics tab that fires one request of each kind the
+ * inspector must handle and opens the perf lab. [platformActions] add buttons to the diagnostics
+ * tab; [launchAction] runs once at launch and opens that tab with its result. [perfVerify] (`all`
+ * or a comma list of the lab's steps) opens the perf lab at launch and runs those injections once
+ * ([PerfLabRun]).
  */
 @Composable
 public fun SampleApp(platformActions: List<PlatformAction> = emptyList(), launchAction: PlatformAction? = null, perfVerify: String? = null) {
     SampleTheme {
-        HopiLauncher {
-            Box(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()) {
-                SampleContent(platformActions, launchAction, perfVerify?.let(::parsePerfLabSteps))
-            }
+        Box(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()) {
+            SampleContent(platformActions, launchAction, perfVerify?.let(::parsePerfLabSteps))
         }
     }
 }

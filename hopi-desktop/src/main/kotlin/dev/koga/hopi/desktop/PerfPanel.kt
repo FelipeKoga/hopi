@@ -196,7 +196,7 @@ private fun Monitors(view: RemotePerfView, onToggle: (String, Boolean) -> Unit) 
         }
         val notes = buildList {
             if (!view.control) add("This app refuses remote starts and stops (remoteControl = false).")
-            if (status?.monitor("frames")?.unattached == true) add("Frames attach when an activity next starts (single-activity app: send it to the background and back, or open the Hopi launcher).")
+            if (status?.monitor("frames")?.unattached == true) add("Frames attach when an activity next starts.")
             addAll(status?.notices.orEmpty())
             add("A monitor switched on here runs while this panel is open; off stops it for every client.")
         }

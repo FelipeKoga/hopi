@@ -37,7 +37,8 @@ Goals:
 - **One rule per request, one application per request.** First match wins, and exactly one layer
   (the one that records the request) applies it.
 - **Every surface.** Bridge commands, the CLI, an in-process Kotlin API for tests and debug menus,
-  a rules panel in the desktop viewer, a rules list and "Mock this response" in the in-app screen.
+  a rules panel in the desktop viewer (the in-app screen's rules list and "Mock this response" were
+  removed with the in-app UI; see "In-app screen (removed)").
 
 Non-goals (v1):
 
@@ -332,8 +333,8 @@ On the wire, like `source` and `finalUrl`: the summary line, the bridge summary 
 decoded as null when absent. They count toward the line budget as fixed fields: at most 72 bytes
 together with a worst-case id (`"rule":` with 19 digits, `"applied"` with its longest value
 `delay,edit-request,edit-response`), reserved inside every platform's budget (iOS's 1000
-included). HAR export adds `_rule` and `_ruleApplied` to an entry. The in-app and desktop list rows
-show a badge (`MOCK`, `EDIT`, `DELAY`, `FAIL`), the detail an overview row "Rule #3: delay, mock".
+included). HAR export adds `_rule` and `_ruleApplied` to an entry. The desktop list rows show a
+badge (`MOCK`, `EDIT`, `DELAY`, `FAIL`), the detail an overview row "Rule #3: delay, mock".
 `hopi list`/`tail` text appends `[mock #3]`; `hopi get` shows the row; `--json` passes the lines
 through. An app built before replay was removed may still send `"replayOf"`; every reader ignores
 it.
@@ -847,25 +848,13 @@ and its switch as set; a rule naming none never does, since the line does not sa
 the app's platform has. All of it goes through `hopi-connect`, which gains the commands, the blob
 upload and `BridgeDecoder` support for the rule line and the new fields.
 
-### In-app screen (`hopi-ui`)
+### In-app screen (removed)
 
-A "Rules" entry in the inspector's top bar opens a list: one row per rule (match, action, hits,
-an enable switch), remove per row, "Remove all". Each `unsupported` entry shows under the row as
-in the desktop panel (an exclusion as "not applied on urlsession: …" in full contrast, a stated
-difference as a muted warning), and a rule that every source it is checked against excludes (the
-named ones, or the platform's when it names none: `Capabilities.appliesNowhere`) reads "inactive".
-That is not every rule that never applies: on iOS with URLSession capture, a response edit or a
-before-response delay that names no sources reads active (Ktor is one of the platform's sources and
-excludes nothing, though its plugin defers to URLSession for the Darwin engine), its "not applied
-on urlsession" line the only sign; a rule naming only sources the platform lacks (okhttp on iOS)
-gets no line at all. The detail screen gains "Mock this response"
-(creates an enabled rule from the record, exact method, scheme, host and path, `times` unset, with
-a confirmation that offers Undo; disabled with the reason when the body is not held in full or is
-held in an encoding a mock does not decode, see Mock). There is no rule editor in the app: phones are a
-poor place to type globs and headers; the CLI and the desktop panel are. The list is read from
-`RuleEngine` only while the screen is composed (a `revision` flow the engine emits on publish), so
-the closed screen costs nothing. No public API change: `HopiScreen` and `HopiLauncher` are
-unchanged, so `hopi-ui-noop` is unchanged.
+The in-app screen's rules list (match, action and hits per rule, an enable switch, remove, "Remove
+all") and its "Mock this response" (an enabled rule from the record, with Undo) were built with the
+rules and removed with the whole in-app UI in stage 5 of docs/design/api-runtime-split-plan.md
+(D7'). The desktop viewer's Rules panel and "Mock this response" (above) and the CLI are the
+surfaces.
 
 ## Configuration switch
 
@@ -887,7 +876,7 @@ rebuild first fails the agent use case; the switch exists for the app whose code
 | `hopi-rules` (new) | `HopiRules` and its builders over `RuleEngine`; depends on core; targets android, iosArm64, iosSimulatorArm64, jvm |
 | `hopi-rules-noop` (new) | The same public API, no dependency at all; every call returns `-1`, `false` or an empty list and stores nothing |
 | `hopi-ktor`, `hopi-android`, `hopi-urlsession` | The per-source application above; the ObjC protocol, factory hooks and C matcher live in core's ObjC library next to the capture code |
-| `hopi-connect`, `hopi-cli`, `hopi-desktop`, `hopi-ui` | Surfaces |
+| `hopi-connect`, `hopi-cli`, `hopi-desktop`, `hopi-ui` | Surfaces (`hopi-ui`: the desktop viewer's screens since the runtime-split plan's stage 5) |
 
 Knock-ons, all part of the change:
 
@@ -903,13 +892,15 @@ Knock-ons, all part of the change:
   engine. `verifyDebugCapture` adds a positive control (`RuleEngine` reachable in the debug APK).
 - `:sample:shared:verifyIosReleaseExcludesCapture` also fails on any `HopiUSRuleProtocol` class
   symbol and any `_hopi_us_rule` symbol without the flag, and requires them with it.
-- `hopi-ktor-noop`, `hopi-ui-noop`, `hopi-android-noop`, `hopi-urlsession-noop` change only by the
-  `rules` property where their real twin gains it.
+- `hopi-ktor-noop`, `hopi-android-noop`, `hopi-urlsession-noop` (and `hopi-ui-noop`, until the
+  runtime-split plan's stage 5 deleted it) change only by the `rules` property where their real
+  twin gains it.
 
 **Persistence: none.** No rule, body or blob is written to a file, preferences, `NSUserDefaults`,
 the proof file or `bridge.json`. There is no import from a file, an intent, a broadcast, a deep link,
-a launch argument or an environment variable: the only ways in are the authenticated bridge, the
-in-process API and the in-app screen. Restarting the app clears every rule; the CLI then lists none. `hopi clear` (the store) leaves
+a launch argument or an environment variable: the only ways in are the authenticated bridge and the
+in-process API (and the in-app screen, until it was removed). Restarting the app clears every rule;
+the CLI then lists none. `hopi clear` (the store) leaves
 rules in place; `hopi rules clear` removes them.
 
 ## Security summary
@@ -1013,8 +1004,8 @@ Base check (every item runs in it unless marked):
 - **Desktop and UI** (`:hopi-desktop:test`, `:hopi-ui:jvmTest`): the panel's list, toggle, add,
   remove, exclusion lines and hit counts against a JVM bridge (`:hopi-connect:test` holds the
   counts to the engine's: a hit a list already counted, a marked backlog on connect, a mark that
-  comes only with the end, a burst with a list in the middle); the in-app rules list and "Mock this
-  response".
+  comes only with the end, a burst with a list in the middle); "Mock this response" in the panes
+  (the in-app rules list's tests went with it in the runtime-split plan's stage 5).
 
 ## Device verification plan
 
@@ -1104,5 +1095,5 @@ Features first, end to end, then one review and hardening pass at the end:
 4. **Two matchers** (Kotlin and C) can drift; the shared vectors fail the build when they do.
 5. **The OkHttp delay wait** checks for cancel every 50 ms because OkHttp has no cancel callback; a
    cancel is noticed up to 50 ms late, only for requests a delay rule holds.
-6. **Sessions created before `start()`** (an SDK's `+load`) cannot be mocked; documented, and the
-   in-app rules list cannot detect it.
+6. **Sessions created before `start()`** (an SDK's `+load`) cannot be mocked; documented, and no
+   rules list can detect it.

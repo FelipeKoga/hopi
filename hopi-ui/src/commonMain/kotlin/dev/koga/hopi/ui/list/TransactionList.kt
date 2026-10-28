@@ -60,10 +60,7 @@ import dev.koga.hopi.ui.theme.LocalHopiColors
 /** Accessibility descriptions of the list's controls; the UI tests find controls by them too. */
 internal object ListTags {
     const val SEARCH = "Search URL"
-    const val CLOSE = "Close Hopi"
     const val CLEAR = "Clear all requests"
-    const val RULES = "Rules"
-    const val PERF = "Performance"
 }
 
 @Composable
@@ -75,15 +72,9 @@ internal fun TransactionListPane(
     listState: LazyListState,
     onOpen: (Long) -> Unit,
     onClear: () -> Unit,
-    /** Null hides the close button (the desktop window closes itself). */
-    onClose: (() -> Unit)?,
-    /** The row shown beside the list (desktop panes); null in the full-screen list. */
+    /** The row shown beside the list; null while the panes take turns. */
     selectedId: Long? = null,
     searchFocus: FocusRequester? = null,
-    /** Opens the rules list (the in-app screen); null hides the button. */
-    onRules: (() -> Unit)? = null,
-    /** Opens the Perf tab (the in-app screen, with a perf controller registered); null hides the button. */
-    onPerf: (() -> Unit)? = null,
 ) {
     val colors = LocalHopiColors.current
     Column(Modifier.fillMaxSize()) {
@@ -99,10 +90,7 @@ internal fun TransactionListPane(
                 BasicText(model.total.toString(), style = HopiType.meta.copy(color = colors.textFaint))
             }
             Spacer(Modifier.weight(1f))
-            if (onPerf != null) IconButton(HopiIcons.Perf, ListTags.PERF, onPerf)
-            if (onRules != null) IconButton(HopiIcons.Rules, ListTags.RULES, onRules)
             IconButton(HopiIcons.Trash, ListTags.CLEAR, onClear, enabled = model != null && model.total > 0)
-            if (onClose != null) IconButton(HopiIcons.Close, ListTags.CLOSE, onClose)
         }
         SearchField(query, searchFocus)
         Row(

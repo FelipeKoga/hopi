@@ -1,57 +1,29 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
-
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose.multiplatform)
 }
 
-description = "HopiScreen and HopiLauncher, the in-app devtools screen (Compose Multiplatform)."
-apply(from = rootProject.file("gradle/publishing.gradle.kts"))
+description = "The desktop viewer's screens (JVM only, unpublished)."
 
 kotlin {
     explicitApi()
-
-    // The public API dump that :checkNoopParity compares with the noop twin's.
-    @OptIn(ExperimentalAbiValidation::class)
-    abiValidation {
-        // Compose compiler output that is public in the binary but no declaration of ours:
-        // lambda holders for composable lambdas and stability markers of internal classes.
-        // byNames matches a `$` in a JVM class name as `.`, hence `ComposableSingletons.*`.
-        filters {
-            exclude.byNames.addAll("**.ComposableSingletons.*", "**\$stableprop", "**\$stableprop_getter")
-            // The desktop viewer's entry point (jvm only, @HopiInternalApi, names core's
-            // HopiStore): Hopi-internal, not consumer API, so it has no noop twin.
-            exclude.byNames.add("dev.koga.hopi.ui.desktop.**")
-        }
-    }
 
     compilerOptions {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
         optIn.add("androidx.compose.ui.ExperimentalComposeUiApi")
     }
 
-    android {
-        namespace = "dev.koga.hopi.ui"
-        compileSdk = libs.versions.android.compileSdk.get().toInt()
-        minSdk = libs.versions.android.minSdk.get().toInt()
-        compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
-    }
-    // Host target so logic and Compose UI tests run in seconds.
+    // The only target: hopi-desktop composes these screens, and the UI tests run on the host in seconds.
     jvm()
-    iosArm64()
-    iosSimulatorArm64()
 
     sourceSets {
         commonMain.dependencies {
-            // The consumer API names only Compose runtime and ui types; core stays internal.
+            // HopiPanes' signature names Compose runtime and ui types; the desktop viewer brings core itself.
             api(libs.compose.runtime)
             api(libs.compose.ui)
             implementation(libs.compose.foundation)
             implementation(libs.compose.animation)
-            implementation(libs.compose.ui.backhandler)
             implementation(project(":hopi-core"))
         }
         commonTest.dependencies {

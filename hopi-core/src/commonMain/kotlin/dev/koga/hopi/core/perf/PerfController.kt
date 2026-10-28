@@ -169,11 +169,11 @@ public interface PerfController {
 
     /**
      * Calls [listener] with the monitors running, at once and then each time that set changes (a
-     * start, a stop, a lease's expiry, a tail session's end), so a viewer of their figures (the
-     * HUD) drops a stopped monitor's. It runs on the changing thread under the controller's lock,
-     * before a started monitor writes and after a stopped one was told to stop, so it must only
-     * hand the set off and never call the controller. Returns the function that removes it. A
-     * controller that does not report the set never calls it.
+     * start, a stop, a lease's expiry, a tail session's end), so a viewer of their figures drops a
+     * stopped monitor's. It runs on the changing thread under the controller's lock, before a
+     * started monitor writes and after a stopped one was told to stop, so it must only hand the set
+     * off and never call the controller. Returns the function that removes it. A controller that
+     * does not report the set never calls it.
      */
     public fun addRunningListener(listener: (Set<PerfMonitor>) -> Unit): () -> Unit = {}
 
@@ -188,10 +188,10 @@ public interface PerfController {
     public fun measurePss(): PerfPss
 
     /**
-     * iOS frames tier 2: a viewer (a `perf.tail` with `"fps":true`, the HUD's cadence toggle)
-     * asks for the display-link cadence while frames runs. Counted: each true is matched by one
-     * false, and the display link exists only while the count is above 0. Nothing elsewhere
-     * (Android's FrameMetrics already gives every frame).
+     * iOS frames tier 2: a viewer (a `perf.tail` with `"fps":true`) asks for the display-link
+     * cadence while frames runs. Counted: each true is matched by one false, and the display link
+     * exists only while the count is above 0. Nothing elsewhere (Android's FrameMetrics already
+     * gives every frame).
      */
     public fun watchCadence(watching: Boolean) {}
 }
