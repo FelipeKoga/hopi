@@ -803,6 +803,62 @@ with `benchmark/perf/verify.py`; the iOS Debug build with `xcodebuild`, `-thirdP
 To be filled in stage 1, one subsection per E item, with paths and line numbers, and "unverified,
 because …" where needed.
 
+## 10. Progress (kept by the executing agent)
+
+Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
+`docs/emulator-figures-2026-10-27` merged). The owner asked to proceed without stopping, so where
+the owner has not answered, the recommendations of section 5 are taken as provisional decisions;
+the owner can override any of them, and a stage built on one names it.
+
+Owner decisions of 2026-10-28, which replace parts of sections 2 and 3:
+
+| # | Decision |
+| --- | --- |
+| D2' | **The Ktor plugin stays**, optional. Automatic capture remains the mobile path: an Android or iOS app installs nothing per client. `hopi-ktor` becomes a thin plugin that links into every build and holds no recording logic; it installs its hooks only when the network runtime registered a Ktor recorder (debug builds), so release builds pay nothing. On Android it keeps deferring to platform capture (one record per request), keeps the requests Ktor decodes itself and the `HttpCache` guard; on the JVM (Compose Desktop) it is the recorder; on iOS the Darwin engine stays with URLSession capture. The `ktor` source stays. `hopi-ktor-noop` goes with the other twins. |
+| D7' | **No in-app UI.** The desktop viewer and the CLI are the surfaces: no launcher, no `HopiScreen`, no HUD, no `HopiInspector`. `hopi-ui` stays only as the desktop viewer's screens (JVM). |
+| D10 | **Physical devices without in-app UI.** Android already connects over `adb` (USB or wireless), to verify on hardware. iPhone over USB: `hopi-connect` reaches the app's loopback bridge through `usbmuxd` and reads its `bridge.json` with `devicectl`; a stage of its own. |
+
+Provisional, taken by the executing agent:
+
+| # | Provisional decision |
+| --- | --- |
+| Q2 | `hopi-api`, `hopi-core`, `hopi-network`, `hopi-perf`, plus the thin `hopi-ktor`; `hopi-ui` unpublished (D7') |
+| O1 | A: one exported iOS entry module (`Hopi.start { }`) over the network and perf runtimes, its configuration a type of its own; D (a Debug-only file in the consumer's module) waits for the plugin to generate it (O8) |
+| O3, O4, O5 | settled by D2': `"ktor"` stays, the plugin keeps decoding what Ktor decodes, JVM apps record through it |
+| O6 | void (D7') |
+| O7 | ABI validation on every published module, no parity check |
+| O8 | yes, later: stage 10 is not part of this pass |
+| E4.4 | no pending queue in `hopi-api`: a call before a runtime registered returns `-1`, `false` or an empty list; the runtime writes one notice line with the count when it registers |
+| D9 | strict as written: no opt-in for non-debuggable variants or iOS Release configurations |
+
+Stage 0 baseline (2026-10-27 and 28, `e8583b8`): the base check of section 7 is green. The first
+full run took 43.5 min and stopped only at `:sample:shared:linkReleaseFrameworkIosSimulatorArm64`
+with `ENOSPC` (499 MB left on the disk; with about 2 GB free it links). The rerun then failed in
+the plugin's functional tests: their teardown sent `SIGTERM` to every pid named by the ~90 daemon
+logs that earlier runs left in the TestKit directory, one of them by then `osanalyticshelper`, and
+timed out waiting for it. The teardown now stops only daemons whose log appeared during the test and
+whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon left behind.
+
+| Stage | Status | Commit |
+| --- | --- | --- |
+| 0. Preflight | done: owner decisions recorded, baseline green | (this commit) |
+| 1. Evaluation | in progress | |
+| 2. Contract documents | | |
+| 3. Remove the Ktor plugin | | |
+| 4. The API module | | |
+| 5. Rules into the API | | |
+| 6. Perf into API and runtime | | |
+| 7. Network runtime and the start sequence | | |
+| 8. UI runtime and the automatic launcher | | |
+| 9. Remove the remaining twin machinery | | |
+| 10. Plugin on KMP modules | deferred (O8) | |
+| 11. Documentation pass | | |
+| 12. Final verification and report | | |
+
+Carried in from before the plan: `DeviceViewerUiTest` on Android is partly stale (ROADMAP,
+"Desktop viewer"); its 5 MB check needs the sample's body cap to reach OkHttp capture, which stage 3
+has to solve anyway once `SampleHttp` loses `install(Hopi)`.
+
 ---
 
 ## Appendix A. Inventory already found (2026-10-27, narrow greps; re-grep in E1.1)

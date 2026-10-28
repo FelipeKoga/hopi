@@ -4,6 +4,8 @@ import dev.koga.hopi.instrument.DexReader
 import dev.koga.hopi.instrument.DexReader.MethodRef
 import dev.koga.hopi.instrument.HookDescriptors
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -31,12 +33,20 @@ class HopiPluginFunctionalTest {
     private val fixtures = File(System.getProperty("hopi.fixturesDir"))
     private val testKit = File(System.getProperty("hopi.testKitDir"))
 
+    /** One instance per test: a fixture daemon this test started logs after this. */
+    private val started = System.currentTimeMillis()
+
     @AfterTest
     fun stopTheFixtureDaemon() {
-        // The TestKit directory's daemons only, never the developer's: their logs name their pids.
-        val pids = testKit.walkTopDown().filter { it.isFile }.mapNotNull { DAEMON_LOG.matchEntire(it.name)?.groupValues?.get(1)?.toLong() }.toSet()
+        // The daemons this test started in the TestKit directory, never the developer's: their logs name
+        // their pids. Logs of earlier runs stay there and the system reuses pids, so a log counts only when
+        // it was created during this test and its pid is still a Gradle daemon.
+        val pids = testKit.walkTopDown()
+            .filter { it.isFile && it.createdMillis() >= started - 1_000 }
+            .mapNotNull { DAEMON_LOG.matchEntire(it.name)?.groupValues?.get(1)?.toLong() }
+            .toSet()
         for (pid in pids) {
-            ProcessHandle.of(pid).ifPresent { handle ->
+            ProcessHandle.of(pid).filter { it.isGradleDaemon() }.ifPresent { handle ->
                 handle.destroy()
                 handle.onExit().get(30, TimeUnit.SECONDS)
             }
@@ -512,6 +522,12 @@ class HopiPluginFunctionalTest {
 
     private companion object {
         val DAEMON_LOG = Regex("daemon-(\\d+)\\.out\\.log")
+        const val DAEMON_MAIN = "org.gradle.launcher.daemon.bootstrap.GradleDaemon"
+
+        fun File.createdMillis(): Long = Files.readAttributes(toPath(), BasicFileAttributes::class.java).creationTime().toMillis()
+
+        /** A JVM running Gradle's daemon entry point; false when the arguments cannot be read. */
+        fun ProcessHandle.isGradleDaemon(): Boolean = info().arguments().map { DAEMON_MAIN in it }.orElse(false)
         const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
 
         /** The runtime's base class of the generated configuration, with its constructor. */
