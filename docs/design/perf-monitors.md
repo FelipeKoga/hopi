@@ -65,7 +65,7 @@ Non-goals (v1):
 | Module | Content |
 | --- | --- |
 | `hopi-core`, package `dev.koga.hopi.core.perf` (all `@HopiInternalApi`) | The model (rings, events, histograms, summaries), its JSON (bridge replies, log lines), the `perf.*` bridge commands, the rate-limited log sink, and `PerfHook`: a registry holding at most one `PerfController` (start, stop, status) that `hopi-perf` registers. Nothing here starts a thread. |
-| `hopi-perf` (new) | `HopiPerf`, its config and enums (consumer API); the monitors in `dev.koga.hopi.perf.internal`; the iOS native library (`src/nativeInterop/objc`, as built: run-loop observers, main-thread stack walk, `task_info`/`thread_info` reads, the display link); depends on core; targets android, iosArm64, iosSimulatorArm64, jvm |
+| `hopi-perf` (new) | `HopiPerf`, its config and enums (consumer API); the monitors in `dev.koga.hopi.perf.internal`, with the start sequence's perf tool `PerfEntry` (Android and, since the runtime-split plan's stage 6, iOS); the iOS native library (`src/nativeInterop/objc`, as built: run-loop observers, main-thread stack walk, `task_info`/`thread_info` reads, the display link); depends on core; targets android, iosArm64, iosSimulatorArm64, jvm |
 | `hopi-perf-noop` (new) | The same public API, no dependency at all; every call does nothing, `running` is empty |
 | `hopi-ui` | Nothing since the runtime-split plan's stage 5: its HUD and Perf tab went with the in-app UI (see "In-app (removed)") |
 | `hopi-connect`, `hopi-cli`, `hopi-desktop` | `PerfClient` and decoders, `hopi perf …` / `hopi hangs`, the Perf panel |
@@ -106,9 +106,11 @@ public class HopiPerfConfig internal constructor() {
 public fun HopiPerf.install(application: android.app.Application, block: HopiPerfConfig.() -> Unit = {})
 ```
 
-Swift: `HopiPerf.shared.start { $0.frames = true; $0.hangs = true }`. Invalid values write a
-notice line and start nothing, as `HopiUrlSession.start` does (Swift cannot catch). No `inline`,
-no `const` (the parity ban). `DefaultsParityTest` gains `HopiPerfConfig`.
+Swift: `HopiPerf.shared.start { $0.frames = true; $0.hangs = true }` where the framework exports
+`hopi-perf`; since the runtime-split plan's stage 6 an iOS app registers the monitors with
+`hopi-start`'s `Hopi.shared.start { … }` instead of `HopiPerf.shared.install` (below). Invalid
+values write a notice line and start nothing, as `HopiUrlSession.start` does (Swift cannot catch).
+No `inline`, no `const` (the parity ban). `DefaultsParityTest` gains `HopiPerfConfig`.
 
 **How the monitors find the app.** `install` registers a `PerfController` in core's `PerfHook`
 (one object, no thread). On Android, perf's tool `PerfEntry` registers it when the plugin put
@@ -130,10 +132,13 @@ without the Android `install(application)`, `start` on Android starts hangs (pri
 memory events as unavailable with a notice; never `ActivityThread` reflection. The androidMain-only `install(application)` is mirrored
 in `hopi-perf-noop`'s androidMain and in both Android ABI dumps, as `hopi-android-noop` does for its
 platform API. On iOS nothing runs until Swift or Kotlin calls `install` or `start` (from any thread;
-the few UIKit reads hop to the main queue once); a launch argument `-hopiPerf frames,hangs` is read
-by `install` (one `NSProcessInfo` lookup) so an agent can measure a cold start:
-`xcrun simctl launch <udid> <id> -hopiPerf hangs`. Work before `install` runs (pre-main, `+load`,
-static initializers, the start of `didFinishLaunching`) is not covered.
+the few UIKit reads hop to the main queue once), or, since the runtime-split plan's stage 6, until
+`hopi-start`'s `Hopi.start` starts perf's iOS tool `PerfEntry` (listed unless its `perf` is false),
+which makes the same install with the default settings and no bridge of its own (the start's
+`agentBridge` starts it), never through `HopiPerf.install`; a launch argument
+`-hopiPerf frames,hangs` is read by the first install (one `NSProcessInfo` lookup) so an agent can
+measure a cold start: `xcrun simctl launch <udid> <id> -hopiPerf hangs`. Work before the install
+runs (pre-main, `+load`, static initializers, the start of `didFinishLaunching`) is not covered.
 
 **Gradle DSL** (Android, generated into the app's configuration class like the other settings, as
 the perf tool's constructor arguments; all false by default):

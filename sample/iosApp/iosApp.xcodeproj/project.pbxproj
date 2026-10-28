@@ -163,7 +163,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Debug links the real Hopi modules; any other configuration their noop twins\n# (docs/ARCHITECTURE.md, \"Selecting real vs noop\"). The build setting HOPI_ENABLED=false\n# (`xcodebuild ... HOPI_ENABLED=false`) builds a Debug app with the noop twins, for A/B runs\n# against the same optimisation level.\nset -eu\ncd \"$SRCROOT/../..\"\nif [ \"$CONFIGURATION\" = \"Debug\" ] && [ \"${HOPI_ENABLED:-true}\" != \"false\" ]; then\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true\nelse\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode\nfi\n";
+			shellScript = "# Debug links the real Hopi modules and hopi-start, which Swift starts Hopi with (behind\n# `#if HOPI`); any other configuration their noop twins and no hopi-start\n# (docs/ARCHITECTURE.md, \"Selecting real vs noop\"). Only the HOPI_ENABLED values that set\n# Swift's HOPI, YES and true, link Hopi, so the two never disagree: any other value, or\n# none (which meant on before HOPI existed), builds a Debug app with the noop twins, as\n# `xcodebuild ... HOPI_ENABLED=false` does for A/B runs at the same optimisation level.\nset -eu\ncd \"$SRCROOT/../..\"\ncase \"$CONFIGURATION/${HOPI_ENABLED:-}\" in\n  Debug/YES | Debug/true)\n    ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true\n    ;;\n  *)\n    ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode\n    ;;\nesac\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -332,6 +332,9 @@
 					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
 				);
 				GENERATE_INFOPLIST_FILE = NO;
+				HOPI_ENABLED = YES;
+				HOPI_SWIFT_CONDITION_YES = HOPI;
+				HOPI_SWIFT_CONDITION_true = HOPI;
 				INFOPLIST_FILE = "iosApp/Info-Debug.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -349,6 +352,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample;
 				PRODUCT_NAME = HopiSample;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -364,6 +368,9 @@
 					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HOPI_ENABLED = YES;
+				HOPI_SWIFT_CONDITION_YES = HOPI;
+				HOPI_SWIFT_CONDITION_true = HOPI;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -371,6 +378,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample.capturetests;
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))";
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HopiSample.app/HopiSample";
 			};

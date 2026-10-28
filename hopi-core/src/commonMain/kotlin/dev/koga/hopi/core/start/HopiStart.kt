@@ -39,8 +39,8 @@ public class ToolStart(public val name: String, public val note: String?, public
  * The one start sequence of a debug build (docs/ARCHITECTURE.md, "Start sequence"): the global
  * configuration and a list of tools in, each tool started in list order. On Android the provider
  * runs it with the plugin's generated tool list, on the main thread before `Application.onCreate`;
- * JVM tests call it directly; iOS keeps `HopiUrlSession.start` until the runtime-split plan's
- * stage 6. Once per process: the first valid call wins.
+ * on iOS `hopi-start`'s `Hopi.start`, with the network tool and perf's; JVM tests call it
+ * directly. Once per process: the first valid call wins.
  */
 @HopiInternalApi
 public object HopiStart {

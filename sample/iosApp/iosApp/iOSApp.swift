@@ -5,23 +5,21 @@ import SwiftUI
 struct IOSApp: App {
     init() {
         // One call, first thing: every URLSession request of the process is recorded from here
-        // on, the app's own and those of SDKs it does not own. In a Release build the framework
-        // links hopi-urlsession-noop and this does nothing.
-        HopiUrlSession.shared.start { config in
+        // on, the app's own and those of SDKs it does not own, and the performance monitors are
+        // registered for the bridge (`hopi perf start`, the desktop viewer's Perf panel), none
+        // started (each costs nothing until one is; `-hopiPerf frames,hangs` starts monitors at
+        // launch). HOPI is set only where the framework has Hopi: the Debug configuration, unless
+        // built with HOPI_ENABLED=false (project.yml). A Release framework has no Hopi to call.
+        #if HOPI
+        Hopi.shared.start { config in
             // The same bridge and caps as the sample's Ktor plugin: Ktor's Darwin requests are
-            // recorded here now (the plugin defers to URLSession capture), so the giant-body
-            // launch arguments (-maxBodyBytes N, -maxTotalBytes N) must reach this call too.
+            // recorded by URLSession capture (the plugin defers to it), so the giant-body launch
+            // arguments (-maxBodyBytes N, -maxTotalBytes N) must reach this call too.
             config.agentBridge = true
             if let value = launchArgument("-maxBodyBytes").flatMap(Int64.init) { config.maxBodyBytes = value }
             if let value = launchArgument("-maxTotalBytes").flatMap(Int64.init) { config.maxTotalBytes = value }
         }
-        // The performance monitors: registered for the bridge (`hopi perf start`, the desktop viewer's
-        // Perf panel), none started (each costs nothing until one is). `-hopiPerf frames,hangs` starts
-        // monitors at launch.
-        // In a Release build this is hopi-perf-noop and does nothing.
-        HopiPerf.shared.install { config in
-            config.agentBridge = true
-        }
+        #endif
         if ProcessInfo.processInfo.arguments.contains("-thirdPartySDK") {
             ThirdPartySDK.run()
         }

@@ -14,8 +14,9 @@ This document is the contract every module is built against. Change it before ch
 **Migration in progress (2026-10-28).** `docs/design/api-runtime-split-plan.md` replaces the noop
 twins with an optional `hopi-api` and per-tool runtimes that only debug builds link, and keeps a
 thin Ktor plugin; its stage 5 removed the in-app UI (D7': the desktop viewer and the CLI are the
-surfaces). Principle 1 states the target, and the Modules table names the stage of the plan that
-changes each row; the other sections describe what is built until their stage lands.
+surfaces), and its stage 6 starts iOS with one call, `Hopi.shared.start` (`hopi-start`).
+Principle 1 states the target, and the Modules table names the stage of the plan that changes each
+row; the other sections describe what is built until their stage lands.
 
 ## Non-negotiable principles
 
@@ -46,17 +47,17 @@ changes each row; the other sections describe what is built until their stage la
 
 | Module                | Depends on                           | Purpose                                                    | Runtime-split plan stage |
 | --------------------- | ------------------------------------ | ---------------------------------------------------------- | --- |
-| `hopi-core`      | hopi-api, kotlinx-coroutines         | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server; the start sequence (`HopiStart`) and, on Android, the provider that runs it | 3: depends on `hopi-api`; 4: start sequence, Android provider (built); 7: rules runtime |
+| `hopi-core`      | hopi-api, kotlinx-coroutines         | Models, store, redaction, cURL, JSON writer, event stream, log sink, agent bridge server; the start sequence (`HopiStart`) and, on Android, the provider that runs it; on iOS the network tool `NetworkTool` beside URLSession capture | 3: depends on `hopi-api`; 4: start sequence, Android provider (built); 6: the iOS network tool (built); 7: rules runtime |
 | `hopi-ktor`      | core, ktor-client-core               | The Ktor client plugin                                     | 10: thin, over `hopi-api`; its recorder moves to `hopi-network` |
 | `hopi-ktor-noop` | ktor-client-core                     | Same public API as `hopi-ktor`, does nothing          | goes in 10 |
 | `hopi-ui`        | core, Compose Multiplatform          | The desktop viewer's screens (`HopiPanes`: list, detail and their theme); JVM only, unpublished | 5: the in-app screen, launcher and HUD removed, `hopi-ui-noop` deleted (built) |
-| `hopi-urlsession` | core                                | Automatic URLSession capture on iOS (`HopiUrlSession.start()`); does nothing on Android and the JVM | 6: its start moves to `hopi-start`; 9: merged into `hopi-network` |
+| `hopi-urlsession` | core                                | `HopiUrlSession.start()`, which starts automatic URLSession capture alone on iOS; does nothing on Android and the JVM | 6: the iOS start moved to `hopi-start` (built); 9: merged into `hopi-network` |
 | `hopi-urlsession-noop` | nothing                        | Same public API as `hopi-urlsession`, does nothing; no dependency at all | goes in 9 |
 | `hopi-android`   | core (Android only)                  | Automatic OkHttp and `HttpURLConnection` capture on Android; added by the Gradle plugin to debuggable variants, started as the network tool of core's start sequence | 4: the provider moved to core (built); 9: merged into `hopi-network` |
 | `hopi-android-noop` | nothing                           | Same public API as `hopi-android` (`HopiAndroid`), does nothing; what non-debuggable variants get | goes in 9 |
 | `hopi-rules`     | core                                 | `HopiRules`, the in-process API over core's rule engine (mock, fail, delay, edit; docs/design/rules.md) | 7: the API moves to `hopi-api`, the runtime to core; the module goes |
 | `hopi-rules-noop` | nothing                             | Same public API as `hopi-rules`, does nothing; no dependency at all | goes in 7 |
-| `hopi-perf`      | core                                 | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory; docs/design/perf-monitors.md); each off by default. Android and iOS monitors built | 4: started as a tool on Android (built); 6: on iOS; 8: its API moves to `hopi-api` |
+| `hopi-perf`      | core                                 | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory; docs/design/perf-monitors.md); each off by default. Android and iOS monitors built | 4: started as a tool on Android (built); 6: on iOS (built); 8: its API moves to `hopi-api` |
 | `hopi-perf-noop` | nothing                              | Same public API as `hopi-perf`, does nothing; no dependency at all | goes in 8 |
 | `gradle-plugin/` (included build) | AGP API and ASM at build time only | `hopi-instrument` (the bytecode rewriter and `DexReader`) and `hopi-gradle-plugin` (`dev.koga.hopi`); never a runtime dependency | 4: generates the tool list, adds `hopi-core` (built); 9: release guard; 11: no twin selection |
 | `hopi-connect`   | core (JVM), kotlinx-serialization    | Host side of the bridge: targets, `bridge.json`, bridge client (all `@HopiInternalApi`) | 12: iPhones over USB |
@@ -64,23 +65,31 @@ changes each row; the other sections describe what is built until their stage la
 | `hopi-desktop`   | connect, ui (JVM), core (JVM), Compose Desktop | Desktop viewer app (macOS `.dmg`); never a dependency of an app |  |
 | `sample/*`            | everything                           | CMP demo app (Android + iOS) making real requests; `sample/fakesdk` is a Java library that stands in for a third-party SDK and knows nothing of Hopi | every stage |
 | `hopi-api`       | nothing                              | `@HopiInternalApi` and the runtime registry `HopiRuntimes` (one write-once slot per runtime kind; the Ktor hooks' slot so far); later the API an app calls (rules, perf); does nothing alone; the only Hopi module a release build links besides `hopi-ktor` | 3: built; rules: 7, perf: 8 |
-| `hopi-start` (planned) | core, network, perf                | `Hopi.start { }`, the iOS entry (exported by Debug frameworks) and the JVM entry | 6 (JVM: 10) |
+| `hopi-start`     | core, perf (`implementation`)        | `Hopi.start { }`, the iOS entry: one call runs the start sequence with the network tool and perf's; exported by Debug frameworks only, no noop; its API (`Hopi`, `HopiStartConfig`) names no core or runtime type. iOS targets only | 6: built; 9: over `hopi-network`; 10: the JVM entry |
 | `hopi-network` (planned) | core                             | Android and iOS network capture and the Ktor adapter; replaces `hopi-android` and `hopi-urlsession` | 9 (Ktor adapter: 10) |
 
 Targets for every KMP library module: `android`, `iosArm64`, `iosSimulatorArm64`, and `jvm` (the JVM
 target exists so logic tests run on the host in seconds; it is also a legitimate desktop target).
-`hopi-ui`, the desktop viewer's screens, has `jvm` only.
+`hopi-ui`, the desktop viewer's screens, has `jvm` only; `hopi-start` has `iosArm64` and
+`iosSimulatorArm64` only, until the runtime-split plan's stage 10 adds its JVM entry.
 
 `hopi-core` is public so the other Hopi modules can use it, but every declaration that is
 not part of the consumer API is annotated `@HopiInternalApi` (`dev.koga.hopi.api.HopiInternalApi`,
 a `RequiresOptIn` annotation declared in `hopi-api`, which every module that uses core sees).
+Since the runtime-split plan's stage 6 it is also meta-annotated with Kotlin/Native's
+`HidesFromObjC` (an optional expectation, which the JVM and Android ignore): no declaration it
+marks, in any module, reaches the Objective-C header of a framework that exports a Hopi module,
+and so neither do the core types such a declaration names, which would otherwise follow it into
+the header with all their members, module-prefixed (`Hopi_core…`). `HidesFromObjC` accepts only
+annotations on classes, functions and properties, so those are its only targets.
 The exceptions are the two iOS cinterop bindings, which cinterop cannot annotate: the os_log shim
 (see Agent access) lives in `dev.koga.hopi.core.internal.oslog` and binds only `hopi_os_log_line`
 (no os/log.h declarations are re-exported), and the URLSession capture library (see URLSession
 capture) lives in `dev.koga.hopi.core.internal.urlsession` and binds only its own `hopi_us_*` C
 functions and constants (no Objective-C class).
 Consumers only ever touch the API of `hopi-ktor`, `hopi-urlsession`, `hopi-android`, `hopi-rules`
-and `hopi-perf`, which is what the noop twins mirror. The os_log shim also binds
+and `hopi-perf`, which is what the noop twins mirror, and the iOS entry `hopi-start`'s, which has
+no twin: only a Debug framework links it. The os_log shim also binds
 `hopi_os_log_perf_line` (category `perf`, see "Performance monitors"). `hopi-perf` has a third
 binding of the same kind: its iOS monitors' native library in `dev.koga.hopi.perf.internal.native`
 (only its own `hopi_perf_*` C functions, constants and one struct; no Objective-C class).
@@ -130,8 +139,49 @@ only spawns that thread. `agentBridge = false` never touches the hook.
 the runtime-split plan's stage 5 (D7'), and what is left, the desktop viewer's screens, is
 `@HopiInternalApi` (see "UI").
 
-`hopi-urlsession` (call once, first thing at startup, in debug builds; Swift:
-`HopiUrlSession.shared.start()` or `HopiUrlSession.shared.start { $0.agentBridge = true }`):
+`hopi-start`, the iOS start since the runtime-split plan's stage 6 (call once, first thing at
+startup, in a Debug build; Swift: `Hopi.shared.start()` or
+`Hopi.shared.start { $0.agentBridge = true }`, inside `#if HOPI`, see "Selecting real vs noop"):
+
+```kotlin
+Hopi.start()                                 // idempotent; the first valid call's configuration wins
+Hopi.start {
+    enabled = true                           // false: start() starts nothing and writes nothing
+    maxEntries = 500                         // the store's caps, preset for the process-wide store
+    maxTotalBytes = 16L * 1024 * 1024
+    maxBodyBytes = 256L * 1024               // per-body cap; at most maxTotalBytes / 2
+    redactHeaders("X-Api-Key")
+    redactQueryParameters("token")
+    unsafeDisableRedaction()
+    summaryLog = true                        // the NDJSON line per transaction
+    agentBridge = false                      // true: the bridge starts at start, before any request
+    rules = true                             // the network tool's: false installs no rule hook at all
+    perf = true                              // registers the perf monitors for remote control, starts none
+}
+Hopi.isStarted                               // true once a call started the start sequence
+```
+
+`Hopi.start` maps its configuration to the start sequence's (`StartConfig`, see "Start sequence")
+and starts two tools, in order. First the network tool, `NetworkTool` (core's iosMain, beside
+`UrlSessionCapture`, whose `start` it calls with these settings and its `rules`, so that start's
+order holds: the installation, the store as the callbacks' target, the Ktor Darwin cover, the
+hooks, then the rules' hooks); its note is `urlsession bytes` or `urlsession metadata`. Then,
+unless `perf = false`, perf's, `PerfEntry` (`hopi-perf`'s iosMain): the runtime's install with the
+default settings, so the monitors are registered for remote control and the `-hopiPerf` launch
+argument is read once, with no bridge of perf's own (the start's `agentBridge` starts it). Nothing
+throws, since Swift cannot catch; the start sequence's rules give the notices: `enabled = false`
+writes nothing, invalid caps write `not started, invalid configuration: <problem>` on every call
+without using up the first one, and a later call with a different configuration writes `already
+started; this call's configuration is ignored`. On iOS no start line is written. `HopiStartConfig`
+is the module's own class with primitive members only, and core and perf are `implementation`
+dependencies: a type of another module named in an exported signature would reach Swift's header
+with all its members, module-prefixed (`Hopi_core…`), and pull in the types they name. So the
+header has `Hopi` and `HopiStartConfig` and nothing else of Hopi's start, and `hopi-start`'s ABI
+dump holds exactly those two.
+
+`hopi-urlsession` starts URLSession capture alone, the same capture as `Hopi.start`'s network tool;
+it stays until the runtime-split plan's stage 9 (call once, first thing at startup, in debug builds;
+Swift: `HopiUrlSession.shared.start()` or `HopiUrlSession.shared.start { $0.agentBridge = true }`):
 
 ```kotlin
 HopiUrlSession.start()                       // idempotent; the first call's configuration wins
@@ -147,7 +197,7 @@ HopiUrlSession.start {
     agentBridge = false
     rules = true                             // false: no rule protocol, no factory hook, rules never read
 }
-HopiUrlSession.isStarted                     // true once capture runs (never on Android/JVM, never in the noop)
+HopiUrlSession.isStarted                     // true once a start() here found capture running (never on Android/JVM, never in the noop)
 ```
 
 The store semantics are the plugin's (one helper in core, `CaptureInstallation`, does both): the
@@ -157,9 +207,12 @@ configuration writes a notice line instead of changing anything. Invalid caps (`
 `maxTotalBytes` not positive, `maxBodyBytes` outside `0..Int.MAX_VALUE`) write a notice line and
 start nothing, without using up the first call: `start()` is called from Swift, where an exception
 would abort the app, and the noop twin accepts any value. The Ktor plugin, a Kotlin API, still
-throws on them. The name is not `Hopi` because that is the Ktor plugin, and two `Hopi` declarations
-in one framework collide in the Objective-C export. On Android and the JVM `start()` returns at
-once, so common code can call it.
+throws on them. The name was not `Hopi` because that is the Ktor plugin, and two exported `Hopi`
+declarations collide in the Objective-C export; `hopi-start`'s `Hopi` does not, since a framework
+exports `hopi-start` and never `hopi-ktor`, whose `Hopi` is a top-level property. On Android and
+the JVM `start()` returns at once, so common code can call it. `isStarted` is this object's own: a
+`start()` that started capture, or that found it already started by `Hopi.start`, sets it, so it
+stays false while only `Hopi.start` started capture (`Hopi.isStarted` says that).
 
 Android capture (the app module's `build.gradle.kts`; nothing to call):
 
@@ -252,18 +305,34 @@ commonMain.dependencies {
 }
 ```
 
-To call `HopiUrlSession` from Swift, the shared module also exports it from the framework (an
-Objective-C framework carries only its own declarations and those it exports):
+To start Hopi from Swift, the shared module adds the iOS entry `hopi-start` with the flag only (it
+has no noop twin) and exports it from the framework (an Objective-C framework carries only its own
+declarations and those it exports):
 
 ```kotlin
-val urlSession = if (hopiEnabled) "dev.koga.hopi:hopi-urlsession:$v" else "dev.koga.hopi:hopi-urlsession-noop:$v"
-iosMain.dependencies { api(urlSession) }
-target.binaries.framework { export(urlSession) }
+iosMain.dependencies { if (hopiEnabled) api("dev.koga.hopi:hopi-start:$v") }
+target.binaries.framework { if (hopiEnabled) export("dev.koga.hopi:hopi-start:$v") }
 ```
 
+A framework built without the flag has no `Hopi`, so the Swift call sits inside `#if HOPI`, a
+compilation condition derived from the build setting the Gradle build phase reads, which keeps the
+two in step: in the app target's Debug configuration, and in that of a test target that calls
+`Hopi` (it inherits no app setting), `HOPI_ENABLED = YES`, `HOPI_SWIFT_CONDITION_YES = HOPI` (and
+`HOPI_SWIFT_CONDITION_true = HOPI`, for `HOPI_ENABLED=true` on the command line) and
+`SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))`, set
+on the targets so that `$(inherited)` keeps the project's `DEBUG`. The phase passes the flag only
+when `CONFIGURATION` is `Debug` and `HOPI_ENABLED` is `YES` or `true`, the two values that set
+`HOPI`, so Release and `xcodebuild … HOPI_ENABLED=false` (or any other value) compile without the
+call. Not `#if DEBUG`: it removes nothing from a framework, which links what the flag says (Release
+links Hopi too when the flag is passed, since one framework block serves both build types), and a
+Debug build without the flag has no `Hopi` to call. `sample/iosApp/project.yml` is the reference.
+To call `HopiUrlSession` or `HopiPerf` from Swift as well, the shared module exports that module
+the same way, real or noop (`api` in `iosMain` or `commonMain` plus `export`), until stages 9 and 8
+of the plan replace them.
+
 Debug builds pass `-Phopi.enabled=true` (the Xcode build phase that calls Gradle; on Android the
-`dev.koga.hopi` plugin, below, replaces the flag). Release builds get the noop unless someone
-deliberately passes the flag.
+`dev.koga.hopi` plugin, below, replaces the flag). Release builds get the noops and no `hopi-start`
+unless someone deliberately passes the flag.
 
 An Android-only app module does have build types, so it can select with `debugImplementation`
 (real) and `releaseImplementation` (noop) instead. An app module that consumes a KMP shared module
@@ -318,8 +387,10 @@ symbol (`xcrun nm -m`, an argument array), or the C strings of the capture queue
 private selectors `_didReceiveData:`/`_didFinishWithError:` in its bytes; with
 `-Phopi.enabled=true` it requires all of them (the positive control). Measured: 0, 0, 0 and none
 without the flag; 99 `_hopi_us_` symbols, 36 class symbols, 185 core symbols and all three strings
-with it. `hopi-urlsession` is an iOS-only dependency of the sample, so the Android checks are
-unchanged.
+with it. With the flag the release framework also links `hopi-start`, the start sequence and the
+tools, because one framework block serves both build types; no family counts
+`dev.koga.hopi.start`, and without the flag there is none of it. `hopi-urlsession` and
+`hopi-start` are iOS-only dependencies of the sample, so the Android checks are unchanged.
 
 ## Data model (`hopi-core`)
 
@@ -532,13 +603,17 @@ its own settings in its constructor, a `name` (its word in the start line) and
 `start(context)`, which gets the configuration and the platform object (the Android
 `Application`, null on the JVM and iOS: common code names no Android type) and returns a short
 note for the start line or null. On Android the provider calls it with the generated tool list
-(see Android capture). iOS keeps `HopiUrlSession.start` and `HopiPerf.install` until stage 6, and
-JVM tests call it directly (no JVM entry before stage 10). In order:
+(see Android capture). On iOS `hopi-start`'s `Hopi.start` calls it, since stage 6, with the
+network tool and, unless its `perf` is false, perf's (see Consumer API); `HopiUrlSession.start`
+and `HopiPerf.install` stay, outside it, until stages 9 and 8. JVM tests call it directly (no JVM
+entry before stage 10). In order:
 
 1. Stage 7 puts the rules runtime's registration first.
 2. `enabled = false` does nothing and writes nothing.
 3. Invalid caps (`HopiUrlSession`'s rule) write one notice line whatever `summaryLog` says,
    `not started, invalid configuration: <problem>`, start nothing and do not use up the first call.
+   They are checked on every call, so a call with invalid caps after the start writes this notice,
+   not step 4's (`HopiUrlSession.start` checks them only until a call started).
 4. The first valid call wins. A later call starts nothing; when its configuration differs it
    writes one notice line, with its own `summaryLog`: `already started; this call's configuration
    is ignored`.
@@ -553,11 +628,15 @@ JVM tests call it directly (no JVM entry before stage 10). In order:
    request. Without it no thread starts, and the first recorded request installs, as before. A
    recorder's own installation later finds each part done: each runs once per process.
 7. Each tool starts in list order on the calling thread (Android: the main thread, before
-   `Application.onCreate`, so a tool only sets state and hands work off), timed with the platform's
-   monotonic clock. A tool that throws writes one notice line, `<name> not started: <Class>:
-   <message>`, and the next one still starts. Nothing throws to the caller.
+   `Application.onCreate`, so a tool only sets state and hands work off; iOS: the thread that calls
+   `Hopi.start`, the main thread in `App.init`, where the network tool installs the hooks, as
+   `HopiUrlSession.start` did, and creates the store unless step 6's thread or an earlier recorder
+   already did), timed with the platform's monotonic clock. A tool that throws writes one notice
+   line, `<name> not started: <Class>: <message>`, and the next one still starts. Nothing throws to
+   the caller.
 
-It returns each started tool's name, note and duration, or null when nothing started.
+It returns each started tool's name, note and duration, or null when nothing started. The Android
+provider writes them in its start line; iOS writes no start line.
 
 ## Ktor plugin (`hopi-ktor`)
 
@@ -677,9 +756,11 @@ How the plugin implements this (Ktor 3.5.2):
 
 ## URLSession capture (`hopi-urlsession`)
 
-One call at startup in a debug build, `HopiUrlSession.start()`, records every URLSession request
-of the iOS process into the same store, whoever makes it: the app, a third-party SDK (analytics,
-ads, crash reporting), Ktor's Darwin engine. No session, client or SDK is configured. The full
+One call at startup in a debug build, `Hopi.shared.start` (`hopi-start`, whose network tool starts
+it; see "Consumer API"; `HopiUrlSession.start()` still starts it alone until the runtime-split
+plan's stage 9), records every URLSession request of the iOS process into the same store, whoever
+makes it: the app, a third-party SDK (analytics, ads, crash reporting), Ktor's Darwin engine. No
+session, client or SDK is configured. The full
 design, the spike evidence and the reasons are in `docs/design/urlsession-capture.md`; this is the
 contract.
 
@@ -1079,9 +1160,10 @@ followed by OkHttp, `HttpURLConnection` or URLSession themselves (their follow-u
 Hopi) and is followed by a Ktor client on any source (Ktor's is above it); an `HttpURLConnection`
 mock has no certificates; a mocked URLSession upload reports no send progress.
 
-**Switch.** Each recorder has `rules: Boolean = true` (`HopiConfig`, `HopiUrlSessionConfig`, the
-Gradle DSL's `hopi { rules = … }`, generated into `HopiGeneratedConfig`). False means that
-recorder never reads the rule state and, on iOS, injects no protocol and hooks no factory. The
+**Switch.** Each recorder has `rules: Boolean = true` (`HopiConfig`; on iOS `HopiStartConfig`,
+which hands it to the network tool, and `HopiUrlSessionConfig`; the Gradle DSL's
+`hopi { rules = … }`, generated into `HopiGeneratedConfig`). False means that recorder never reads
+the rule state and, on iOS, injects no protocol and hooks no factory. The
 engine and `HopiRules` stay; `hello` says `"rules":false` when every recorder that started has it
 off, and the bridge then answers rule commands `UNSUPPORTED`.
 
@@ -1126,8 +1208,9 @@ threads at 250 ms (one beat per `threshold / 2`; 7.8 to 7.9 each on the emulator
 wakes once per interval at about 1 ms of CPU per tick.
 
 - **Off is free.** Nothing runs until a monitor starts: no thread, no listener, no lifecycle
-  callback of perf's own, no monitor class loaded. `HopiPerf.install` (or, on Android, perf's tool
-  `PerfEntry`, which the generated tool list names when the plugin has `perf { enabled = true }`)
+  callback of perf's own, no monitor class loaded. `HopiPerf.install` (or perf's tool `PerfEntry`:
+  on Android the generated tool list names it when the plugin has `perf { enabled = true }`, on iOS
+  `hopi-start`'s `Hopi.start` lists it unless its `perf` is false, since stage 6)
   registers one `PerfController` in core's `PerfHook` and allocates the model (about 120 KB of
   primitive rings). An app without `hopi-perf` only ever loads `PerfHook` (the bridge's `hello`
   reads it). On Android the provider also registers core's one `ActivityLifecycleCallbacks`
@@ -1184,7 +1267,8 @@ wakes once per interval at about 1 ms of CPU per tick.
   memory-pressure dispatch source. Frames tier 2, a `CADisplayLink` writing the frames series with
   its callback cadence, runs only while frames runs and a viewer asks for it
   (`PerfController.watchCadence`, counted; `perf.tail` with `"fps":true`). A launch argument
-  `-hopiPerf frames,hangs` is read once by the first `install`. PSS does not exist there.
+  `-hopiPerf frames,hangs` is read once by the first install (`HopiPerf.install` or iOS's perf
+  tool, which calls the same install). PSS does not exist there.
 - **Owners and leases.** A monitor runs while code, a lease (`perf.start`, `ttlSec` 600 by
   default, 0 no expiry) or a `perf.tail` session holds it; a lease's expiry rides an existing perf
   thread's timed wait (or one delayed message on the frames thread when frames runs alone).
@@ -1856,7 +1940,7 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
 - **`sample/shared`** (KMP: `android`, `iosArm64`, `iosSimulatorArm64`; foundation only, no
   Material) holds everything both apps share. It selects `hopi-ktor`, `hopi-rules`, `hopi-perf`
   and, on iOS, `hopi-urlsession`, or their noop twins, with the `hopi.enabled` property exactly as
-  in "Selecting real vs noop", and
+  in "Selecting real vs noop", adds and exports the iOS entry `hopi-start` with the flag only, and
   generates `HOPI_ENABLED` from the same property, so the iOS app says which one it was built
   with. On Android the plugin selects per variant whatever the property says, so the activity sets
   `SampleBuild.androidCaptureStarted` from `HopiAndroid.isStarted` before the UI; the Diagnostics
@@ -1895,8 +1979,8 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   "Device verification plan" and "Performance plan"). `sample/shared` depends on `hopi-perf` or
   its noop in commonMain (api: the iOS framework exports it); on Android the plugin's
   `perf { enabled = true }` resolves it per variant and the start registers its tool, on iOS
-  `iOSApp.init` calls `HopiPerf.shared.install { agentBridge = true }` before the UI. Diagnostics
-  opens the **Perf lab** screen: a full-width "Click burn" button (600 ms of spinning inside
+  `iOSApp.init`'s `Hopi.shared.start` registers it before the UI. Diagnostics opens the **Perf lab**
+  screen: a full-width "Click burn" button (600 ms of spinning inside
   `onClick`, `PerfLab.clickBurn`), one button per step and "Stop every monitor". A run starts every
   monitor as code and injects, in order: 30 frames each blocked 20, 50 and 100 ms inside
   `withFrameNanos` (a state write per frame makes each one draw); main-thread units, each its own
@@ -1963,11 +2047,16 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   that matters, and the sample does not use that name). The simulator build excludes `x86_64`
   (`EXCLUDED_ARCHS[sdk=iphonesimulator*]`), since the framework has only an `iosSimulatorArm64`
   slice and a Release build otherwise builds, and fails on, every architecture.
-  `IOSApp.init` calls `HopiUrlSession.shared.start { … }` first thing (`agentBridge = true`, and the
-  giant-body launch arguments `-maxBodyBytes`/`-maxTotalBytes`, because the Darwin client's requests
-  are now recorded there, not by the plugin); the shared framework exports `hopi-urlsession` (or
-  its noop, so the Release build compiles the same Swift). `ThirdPartySDK.swift` stands in for an
-  SDK the app does not own: plain Swift, no Kotlin import, `URLSession.shared` with a completion
+  `IOSApp.init` calls `Hopi.shared.start { … }` first thing, inside `#if HOPI` (`agentBridge =
+  true`, and the giant-body launch arguments `-maxBodyBytes`/`-maxTotalBytes`, because the Darwin
+  client's requests are recorded by URLSession capture, not by the plugin); it replaced
+  `HopiUrlSession.shared.start` and `HopiPerf.shared.install` in the runtime-split plan's stage 6.
+  The shared framework exports `hopi-start` with the flag only, and `project.yml` derives the Swift
+  condition `HOPI` from the build setting `HOPI_ENABLED` in the Debug configuration of the app and
+  of `iosAppCaptureTests` (see "Selecting real vs noop"), so the Release build and
+  `HOPI_ENABLED=false` compile without the call; `hopi-urlsession`, `hopi-rules` and `hopi-perf` (or
+  their noops) stay exported, `HopiRules.shared` being what Swift still calls of them.
+  `ThirdPartySDK.swift` stands in for an SDK the app does not own: plain Swift, no Kotlin import, `URLSession.shared` with a completion
   handler, an ephemeral session with its own data delegate uploading JSON, and `data(for:)`,
   `upload(for:from:)` and `bytes(for:)`; the launch argument `-thirdPartySDK` runs it
   (`xcrun simctl launch booted dev.koga.hopi.sample -thirdPartySDK`). The XCTest target
@@ -1983,8 +2072,8 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   `CaptureVerification.swift` (launch arguments `-verifyCapture`, `-captureBench <spec>`,
   `-idleCPU S`) and `-ktorVerify` (`KtorVerify.kt`, iosMain) drive the end-to-end check in
   `benchmark/urlsession/e2e/`; the build setting `HOPI_ENABLED=false` (`xcodebuild ...
-  HOPI_ENABLED=false`) builds the Debug app with the noop twins, for A/B runs at the same
-  optimisation level.
+  HOPI_ENABLED=false`) builds the Debug app with the noop twins and without `hopi-start` (its Swift
+  start compiled out), for A/B runs at the same optimisation level.
 - **Rules scenarios.** `sample/shared` depends on `hopi-rules` (or its noop, by `hopi.enabled`,
   as `api` so the Android app names it too; the iOS framework exports it for Swift).
   `RulesVerify.kt` (commonMain) runs the self-test over a list of `RulesTarget`s, each a way of
@@ -2269,7 +2358,7 @@ Hopi rejects each of them:
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Many monitors on by default (FPS, CPU, memory, leaks, UI tree)   | One tool, HTTP only, and only on the clients the developer installs it on      |
 | Polling timers sampling the app continuously                     | **No timers, no polling, no periodic work anywhere.** Everything is event-driven |
-| Global interception that re-sends every request through a `URLProtocol` | Observe only, unless a rule the developer added applies: a rule's `URLProtocol` claims only the requests a mock or fail rule matches and answers them itself, re-issuing nothing, and with no rule a task of a session created after `start()` costs one `canInitWithTask:` answer; every other recorder pays one volatile read. The OkHttp before-response wait checks for cancel every 50 ms only while a delayed request waits. Global capture exists, but only after an explicit `HopiUrlSession.start()` in a debug build, never in release (noop twin, checked). It re-issues nothing, replaces method implementations only on `NSURLSessionTask`, `NSURLSession`'s upload factories (with rules on, also its session factory, and its task factories once an edit or delay rule was added) and CFNetwork's connection class (never an app or SDK class), adds no method, copies no bytes on the app's threads, and wakes nothing while no request runs. On Android, global capture exists only in debuggable variants of an app that applies `dev.koga.hopi`: it rewrites at build time one call inside OkHttp's `RealCall` and the `java.net.URL` connection call sites, adds no method, field or interface to any class (one annotation on `RealCall`), changes no list or object the app reads except the delegating bodies and connection wrappers it hands on, and wakes nothing while no request runs |
+| Global interception that re-sends every request through a `URLProtocol` | Observe only, unless a rule the developer added applies: a rule's `URLProtocol` claims only the requests a mock or fail rule matches and answers them itself, re-issuing nothing, and with no rule a task of a session created after `start()` costs one `canInitWithTask:` answer; every other recorder pays one volatile read. The OkHttp before-response wait checks for cancel every 50 ms only while a delayed request waits. Global capture exists, but only after an explicit start (`Hopi.shared.start`, or `HopiUrlSession.start()`) in a debug build, never in release (no `hopi-start` there and the noop twin, checked). It re-issues nothing, replaces method implementations only on `NSURLSessionTask`, `NSURLSession`'s upload factories (with rules on, also its session factory, and its task factories once an edit or delay rule was added) and CFNetwork's connection class (never an app or SDK class), adds no method, copies no bytes on the app's threads, and wakes nothing while no request runs. On Android, global capture exists only in debuggable variants of an app that applies `dev.koga.hopi`: it rewrites at build time one call inside OkHttp's `RealCall` and the `java.net.URL` connection call sites, adds no method, field or interface to any class (one annotation on `RealCall`), changes no list or object the app reads except the delegating bodies and connection wrappers it hands on, and wakes nothing while no request runs |
 | UI/overlay work on the main thread while the app runs            | No Hopi UI in the app (the in-app screen and launcher were removed in the runtime-split plan's stage 5): the desktop viewer and the CLI run on the developer's machine |
 | Formatting and storing everything eagerly                        | Capture raw bytes only; decode, pretty-print, encode only when a screen, log line, or agent asks |
 

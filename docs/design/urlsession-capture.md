@@ -13,7 +13,9 @@ with no change beyond the `source` field below.
 Goals:
 
 - One call at startup, from Kotlin or Swift, in debug builds: `HopiUrlSession.start()`
-  (`HopiUrlSession.shared.start()` in Swift). No per-session, per-client or per-SDK setup.
+  (`HopiUrlSession.shared.start()` in Swift), and since the runtime-split plan's stage 6
+  (2026-10-28) `hopi-start`'s `Hopi.start()` (`Hopi.shared.start()` in Swift), which also
+  registers the performance monitors. No per-session, per-client or per-SDK setup.
 - Every in-process URLSession request is recorded once: completion-handler, delegate and
   async/await APIs, any delegate shape (custom, partial, nil, `NSProxy`), `URLSession.shared`,
   default and ephemeral configurations, sessions created before `start()`, and the Ktor Darwin
@@ -23,7 +25,8 @@ Goals:
   metrics, `respondsToSelector:` answers, delegate identity, `protocolClasses`.
 - Bounded: the response body is kept up to `maxBodyBytes` and only counted past it. The app's
   threads do no copying; the main thread does no Hopi work at all.
-- Release builds get the noop twin and contain none of this code, checked automatically.
+- Release builds get the noop twin (and, since stage 6, no `hopi-start`) and contain none of this
+  code, checked automatically.
 
 Non-goals (v1): WebSocket frames, `NSURLSessionStreamTask`, AVFoundation media loading, WKWebView,
 `NSURLConnection`, raw CFNetwork/BSD sockets, gRPC or Cronet stacks, physical iOS devices for
@@ -345,6 +348,19 @@ Backward compatible in both directions:
 | `hopi-urlsession` | android, jvm, iosArm64, iosSimulatorArm64 | Public API (`HopiUrlSession`, `HopiUrlSessionConfig`), depends on `hopi-core`. iOS calls `UrlSessionCapture`; Android and JVM do nothing (`start()` returns at once, `isStarted` stays false), so `commonMain` code can call it. ABI-validated. |
 | `hopi-urlsession-noop` | same | Same API, does nothing, depends on nothing. ABI-validated, added to `:checkNoopParity`. |
 
+**Since the runtime-split plan's stage 6 (2026-10-28).** The start moved to `hopi-start`
+(iosArm64 and iosSimulatorArm64; no noop twin, linked and exported by Debug frameworks only):
+`Hopi.start` runs core's start sequence with the network tool `NetworkTool`, which sits in
+`hopi-core`'s iosMain beside `UrlSessionCapture` and calls its `start`, and with perf's tool. The
+tool is public (`@HopiInternalApi`) because `hopi-start` names it; it is not in `hopi-urlsession`,
+whose ABI dump has no filter and is compared with a noop that holds only `HopiUrlSession` and
+`HopiUrlSessionConfig`, and which the sample still exports. `HopiUrlSession` stays until stage 9,
+which is to move the library, `UrlSessionCapture`, `UrlSessionRules` and the tool into
+`hopi-network`, after splitting off the native hit counter that core's rule engine uses (it stays
+in core). The parity reason below for keeping the library in core goes with the twins. The DCE
+claim below is out of date: `HitCounter.ios.kt` also refers to the library, and the test it names
+was never built.
+
 The native code lives in `hopi-core` because a cinterop binding cannot be annotated or filtered
 the same way on both sides of a parity pair; `hopi-core` is not parity-checked and already carries
 the `oslog` precedent. It costs other `hopi-core` consumers nothing: the static library's object
@@ -453,7 +469,11 @@ HopiUrlSession.shared.start()
 ```
 
 The call compiles in both configurations, because the noop exports the same API. The sample
-does this in `iOSApp.swift`.
+did this in `iOSApp.swift` until the runtime-split plan's stage 6. Since then it calls
+`Hopi.shared.start { … }` from `hopi-start` inside `#if HOPI`, a Swift condition that follows the
+same build setting as the Gradle build phase (docs/ARCHITECTURE.md, "Consumer API" and
+"Selecting real vs noop"): `hopi-start` has no noop, so a framework without the flag has no
+`Hopi`, and the call compiles only where it has.
 
 ### Noop twin and release exclusion
 

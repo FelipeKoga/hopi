@@ -59,6 +59,17 @@ targets:
           # The capture tests call the Kotlin framework's test accessor through the host app's
           # binary, which a dead-stripping link would drop as unreferenced.
           DEAD_CODE_STRIPPING: NO
+          # One setting for the build phase below and for Swift: HOPI_ENABLED (on in Debug) makes the
+          # phase build the framework with Hopi and sets the Swift condition HOPI (`#if HOPI` around
+          # Hopi.shared.start, iOSApp.swift), so `xcodebuild ... HOPI_ENABLED=false` compiles
+          # neither. XcodeGen writes a boolean as YES, hence the YES condition; the true one serves
+          # `HOPI_ENABLED=true` on the command line, and the phase links Hopi for these two values
+          # only. Set on this target, not the project, so $(inherited) keeps the project's DEBUG
+          # condition; Release sets none of them.
+          HOPI_ENABLED: "YES"
+          HOPI_SWIFT_CONDITION_YES: HOPI
+          HOPI_SWIFT_CONDITION_true: HOPI
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))"
         Release:
           INFOPLIST_FILE: iosApp/Info-Release.plist
     preBuildScripts:
@@ -66,19 +77,24 @@ targets:
         basedOnDependencyAnalysis: false
         shell: /bin/sh
         script: |
-          # Debug links the real Hopi modules; any other configuration their noop twins
-          # (docs/ARCHITECTURE.md, "Selecting real vs noop"). The build setting HOPI_ENABLED=false
-          # (`xcodebuild ... HOPI_ENABLED=false`) builds a Debug app with the noop twins, for A/B runs
-          # against the same optimisation level.
+          # Debug links the real Hopi modules and hopi-start, which Swift starts Hopi with (behind
+          # `#if HOPI`); any other configuration their noop twins and no hopi-start
+          # (docs/ARCHITECTURE.md, "Selecting real vs noop"). Only the HOPI_ENABLED values that set
+          # Swift's HOPI, YES and true, link Hopi, so the two never disagree: any other value, or
+          # none (which meant on before HOPI existed), builds a Debug app with the noop twins, as
+          # `xcodebuild ... HOPI_ENABLED=false` does for A/B runs at the same optimisation level.
           set -eu
           cd "$SRCROOT/../.."
-          if [ "$CONFIGURATION" = "Debug" ] && [ "${HOPI_ENABLED:-true}" != "false" ]; then
-            ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true
-          else
-            ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode
-          fi
+          case "$CONFIGURATION/${HOPI_ENABLED:-}" in
+            Debug/YES | Debug/true)
+              ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true
+              ;;
+            *)
+              ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode
+              ;;
+          esac
   # Swift concurrency's URLSession APIs under automatic capture (Kotlin/Native cannot call them):
-  # hosted by the app, so they run in its process, after its HopiUrlSession.shared.start().
+  # hosted by the app, so they run in its process, after its Hopi.shared.start { … }.
   iosAppCaptureTests:
     type: bundle.unit-test
     platform: iOS
@@ -98,3 +114,11 @@ targets:
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+      configs:
+        # The app's HOPI condition, which this target's settings do not inherit: without it the
+        # `#if HOPI` in CaptureTests.swift would compile its start assertion out.
+        Debug:
+          HOPI_ENABLED: "YES"
+          HOPI_SWIFT_CONDITION_YES: HOPI
+          HOPI_SWIFT_CONDITION_true: HOPI
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))"

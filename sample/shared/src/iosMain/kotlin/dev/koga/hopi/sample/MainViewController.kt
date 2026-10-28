@@ -24,7 +24,8 @@ public fun MainViewController(): UIViewController {
     fun argument(name: String): String? = arguments.indexOf(name).takeIf { it >= 0 }?.let { arguments.getOrNull(it + 1) }
     argument("-maxBodyBytes")?.toLongOrNull()?.let { SampleHttp.maxBodyBytes = it }
     argument("-maxTotalBytes")?.toLongOrNull()?.let { SampleHttp.maxTotalBytes = it }
-    // Created before the first frame, so the agent bridge is up before the first request.
+    // The client, created before the first frame so the first request does not pay for it. The
+    // agent bridge no longer depends on this: Hopi.start (iOSApp.swift) starts it first thing.
     SampleHttp.start()
     // Ktor's Darwin engine is recorded and ruled by URLSession capture, never by the Ktor plugin.
     val targets = listOf(ktorRulesTarget("ktor-darwin", HopiSource.UrlSession))

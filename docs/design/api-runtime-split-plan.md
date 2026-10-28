@@ -2224,6 +2224,69 @@ simulator `iPhone 17`, iOS 27.0):
 - **The rest**: `:sample:shared:compileKotlinIosSimulatorArm64 -Phopi.enabled=true` compiles; the
   base check is green.
 
+Stage 6 (2026-10-28; "before" at `5d7b45e`, "after" with the stage's edits; simulator `iPhone 17`,
+iOS 27.0):
+
+- **E2.5** (the probe, with `@file:OptIn(dev.koga.hopi.api.HopiInternalApi::class)`): a
+  configuration class the entry's own module declares (`HopiOwnConfig`, one `Boolean`) reaches Swift
+  plainly, and `HopiOwn.shared.start { $0.agentBridge = true }` typechecks. A signature that names
+  another module's type exports that type with its members, module-prefixed
+  (`Hopi_perfHopiPerfConfig` with every property), and more of that module with it
+  (`Hopi_coreHopiStore` brought 11 `Hopi_core` declarations): `hopi-start`'s API names only its
+  own types (P3). The probe's init script now includes the probe only in the root build
+  (`gradle.parent == null`): the included `gradle-plugin` build has no `:hopi-perf`.
+- **E2.4**: with `export(":hopi-perf")` the header holds 38 Hopi names, `PerfRuntimeController`,
+  `MonitorBackend`, `PerfSettings` and 32 `Hopi_core` among them. The `hidden` variant compiles:
+  `@kotlin.native.HidesFromObjC` on an opt-in annotation hides `HiddenRegistry` and `hiddenFun`,
+  and `visible` stays. So `HopiInternalApi` carries it, and its targets shrink to CLASS, FUNCTION
+  and PROPERTY: the compiler refuses `HidesFromObjC` on an annotation with any other target, and no
+  constructor or typealias carried it. From here a constructor cannot be marked (stage 7 builds
+  `HopiRuleInfo` through a marked factory instead).
+- **Shared.h** (the sample's Debug framework, `-Phopi.enabled=true`): before, 32 `Hopi_core`
+  declarations and `PerfRuntimeController`, `MonitorBackend` and `PerfSettings`; after, no
+  `Hopi_core` and no module-prefixed name at all, `Hopi` and `HopiStartConfig` once each, none of
+  the three perf internals. The 56 declarations kept are identical (doc comments aside); no Swift
+  file used any of the 37 removed. No ABI dump changed.
+- **E2.8 step 3**: before, with `-Phopi.enabled=true`, the check passes (the Release framework
+  holds everything): `Shared (real): 180 _hopi_us_ symbols, 40 capture classes, 52 rule symbols,
+  786 core symbols, strings {all true}; 79 _hopi_perf_ symbols, 505 perf Kotlin symbols, 24 perf
+  classes, strings {hopi-perf-hang=true}`; without it `Shared (noop)`, every count 0. After, with
+  the flag: `180 _hopi_us_ symbols, 40 capture classes, 52 rule symbols, 534 core symbols, strings
+  {all true}; 79 _hopi_perf_ symbols, 190 perf Kotlin symbols, 24 perf classes, strings
+  {hopi-perf-hang=true}`; without it every count is still 0. The core and perf Kotlin counts fell
+  rather than rose: the 37 declarations the header no longer exports were roots of the framework's
+  dead-code elimination, so what only they kept is gone, while `hopi-start` adds the start sequence
+  and the tools.
+- **E5 X4**: before, stage 5's Debug build passes `-verifyPerf` 21 of 21. After, launched with
+  `-hopiPerf hangs`, `hopi perf status` reads `remote control on`, hangs on at 250 ms and the other
+  monitors off: `Hopi.start`'s perf tool registered the runtime and read the launch argument.
+  `python3 benchmark/perf/verify.py … --platform ios`: 21 of 21.
+- **E4 X5** (optional; run here because the stage's builds served it): a temporary `println` of
+  `Platform.isDebugBinary` in `MainViewController` printed `true` from the Debug app (built with
+  `HOPI_ENABLED=false`) and `false` from the Release app. Stage 7's iOS line for a forgotten start
+  is viable.
+- **E7 X5**: `xcodebuild … -configuration Debug`, the same with `HOPI_ENABLED=false`, and
+  `-configuration Release` each compile (`-derivedDataPath build/ios-derived`). `-showBuildSettings`
+  resolves `SWIFT_ACTIVE_COMPILATION_CONDITIONS` to `DEBUG HOPI` for `iosApp` and
+  `iosAppCaptureTests` in Debug; Release sets neither setting, and its framework's header declares
+  no `Hopi`. Step 6's "a Release build with `HOPI_ENABLED=true` then fails to compile" does not hold:
+  the settings are the Debug configuration's, so such a build has neither `HOPI` nor `Hopi` and
+  compiles, which is as safe.
+- **On the simulator, after**: the capture end to end (`benchmark/urlsession/e2e/run.sh`,
+  `check.py`) 47 of 47: the Swift shapes, Ktor Darwin and `-thirdPartySDK` (6 records), each request
+  recorded once with `source=urlsession`, the bytes the app read identical between the real and the
+  noop build. `-verifyRules`: both engines `failed 0` (the URLSession shapes in Swift, Ktor Darwin's
+  11 scenarios), 32 of 32 checks. `capture-swift-test.sh`: 6 of 6, so `HOPI` reaches the test
+  target (without it each test fails its `XCTFail`). `DeviceViewerUiTest` with
+  `-Phopi.desktop.device=ios`: 6 of 6 (connected through `bridge.json`, stopped, reconnected 1580 ms
+  after the terminate, live rows from URLSession capture, a body fetched on selection).
+- **Base check**: green but for `:hopi-desktop:test`, where `ViewerTest` failed once:
+  `watchesRunOnlyWhileThereIsSomethingToWaitFor` found a bridge-file watch thread still alive 15 s
+  after the connect. Three reruns of the class failed once more, in another test,
+  `aRestartedJvmAppIsReconnectedByTheBridgeFileWatch` (its 20 s wait for the reconnect); the other
+  two passed. The stage changes no code the class runs (`hopi-core` only in comments; `hopi-desktop`
+  and `hopi-connect` not at all), so the flake predates it ("Stage 6 leaves for later stages").
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2272,8 +2335,8 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 2. Contract documents (after a separate fix commit) | done: the redirect wording fixed (`:hopi-core:jvmTest` and `:hopi-ui:jvmTest` green; `PerfUiTest` timed out once waiting 5 s for the PSS line and passed on two reruns, a timing flake in a test stage 5 deletes); ARCHITECTURE principle 1, the migration note and the Modules table's stages; ROADMAP's rule for every new tool and its surfaces; the old proposal's status line | `2e9cce0` (fix), `a6be8e8` |
 | 3. The API module | done: `hopi-api` (registry `HopiRuntimes` with the Ktor hooks' slot; no dependency; four targets; published); `@HopiInternalApi` renamed in 91 files (P2); E7 X1 to X3 and E4 X1 in section 9 | `d26907d` |
 | 4. Start sequence and tools in core | done: `HopiStart` in core (`StartConfig`, tools with their own settings, the caps preset without creating the store, the installation on a `hopi-start` thread with `agentBridge`); P4's provider in core with D9's run-time check and no start without the generated class; P5's current-activity callbacks; `NetworkTool` and `PerfEntry` as tools; the plugin adds `hopi-core` to debuggable build types and generates the tool list; the sample's caps are build properties (E3's 5 MB check passes); [run] results in section 9 | `32fbbd5` |
-| 5. Remove the in-app UI | done: `hopi-ui` holds only the desktop viewer's screens (JVM, unpublished, no ABI dump); `hopi-ui-noop`, the launcher, `HopiScreen`, the HUD and the in-app perf and rules panes deleted; shared-code tests retargeted to `HopiPanes`; the scripts that drove the in-app inspector deleted; P5 shown on the emulator; [run] results in section 9 | (this commit) |
-| 6. iOS entry | | |
+| 5. Remove the in-app UI | done: `hopi-ui` holds only the desktop viewer's screens (JVM, unpublished, no ABI dump); `hopi-ui-noop`, the launcher, `HopiScreen`, the HUD and the in-app perf and rules panes deleted; shared-code tests retargeted to `HopiPanes`; the scripts that drove the in-app inspector deleted; P5 shown on the emulator; [run] results in section 9 | `5d7b45e` |
+| 6. iOS entry | done: `hopi-start` (`Hopi.start { }`, `HopiStartConfig` with primitive members; iOS targets; published, with an ABI dump) runs the start sequence with the iOS network tool (core) and perf's tool; `@HopiInternalApi` hides from Swift (`HidesFromObjC`); Swift starts Hopi with one call inside `#if HOPI`, a condition `project.yml` derives from `HOPI_ENABLED`; [run] results in section 9 | (this commit) |
 | 7. Rules into the API | | |
 | 8. Perf into API and runtime | | |
 | 9. Network runtime and release guards | | |
@@ -2321,6 +2384,25 @@ Stage 5 leaves for later stages:
   and drop the other with the perf API move.
 - `hopi-ui`'s `HopiScreen.kt` now holds only the state helpers the desktop panes share; a rename
   can come with any later change there.
+
+Stage 6 leaves for later stages:
+
+- Stage 8: `Hopi.start { summaryLog = false }` does not silence perf's own log lines: the iOS
+  `PerfEntry`, like Android's, passes `HopiPerfConfig()` defaults (E5's question of one global
+  `summaryLog`).
+- Stage 9: `HopiUrlSession.isStarted` stays false while only `Hopi.start` started capture (its KDoc
+  says so); it goes with the module. `HopiUrlSession.start` keeps `UrlSessionCapture`'s own
+  first-call guard until then, while `Hopi.start` checks the caps on every call (stage 4's note):
+  a later `Hopi.start` with invalid caps writes the invalid-caps notice.
+- Stage 4's note on `SampleHttp.start()`: on iOS the call stays, before the first frame, with the
+  reason that remains (the first request does not pay for the client); `Hopi.start` starts the
+  bridge. Android's `MainActivity` comment still gives the bridge reason, stale since stage 4.
+- The sample's build phase now passes `-Phopi.enabled=true` only in Debug with `HOPI_ENABLED` `YES`
+  or `true`, the two values that set `HOPI`, so the framework and Swift never disagree; an unset
+  `HOPI_ENABLED` now means off (before: on). Both Debug configurations set `YES` (XcodeGen writes a
+  boolean that way).
+- `ViewerTest`'s two bridge-file-watch tests fail now and then on a loaded host (section 9, the
+  base check): diagnosed and fixed, or hardened, before the next stage's base check.
 
 ---
 

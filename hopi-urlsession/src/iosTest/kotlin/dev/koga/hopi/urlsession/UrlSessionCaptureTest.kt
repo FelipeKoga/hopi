@@ -10,6 +10,9 @@ import dev.koga.hopi.core.internal.urlsession.hopi_us_test_retained_high_water
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.model.TransactionState
+import dev.koga.hopi.core.start.HopiToolContext
+import dev.koga.hopi.core.start.StartConfig
+import dev.koga.hopi.core.urlsession.NetworkTool
 import dev.koga.hopi.core.urlsession.UrlSessionCapture
 import dev.koga.hopi.urlsession.fixtures.HopiFxCompletion
 import dev.koga.hopi.urlsession.fixtures.HopiFxPartialDelegate
@@ -66,6 +69,16 @@ class UrlSessionCaptureTest {
         assertTrue(hopi_us_self_check(), "this OS passes the self-check")
         // Eight threads racing to start install once.
         hopi_fx_concurrently(8) { HopiUrlSession.start() }
+        assertEquals(1L, hopi_us_test_install_count())
+    }
+
+    @Test
+    fun theStartSequencesNetworkToolStartsTheSameCaptureAndNamesItsMode() {
+        // hopi-start's Hopi.start lists this tool. Capture runs already, with the same settings
+        // (HopiUrlSessionConfig's defaults are core's), so the tool installs nothing again.
+        val tool = NetworkTool(rules = true)
+        assertEquals("network", tool.name)
+        assertEquals("urlsession bytes", tool.start(HopiToolContext(StartConfig(summaryLog = false), platform = null)))
         assertEquals(1L, hopi_us_test_install_count())
     }
 

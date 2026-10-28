@@ -23,8 +23,9 @@ val urlSessionModule = if (hopiEnabled) project(":hopi-urlsession") else project
 // HopiRules (mock, fail, delay, edit), which the rules scenarios call: the real module or its noop.
 val rulesModule = if (hopiEnabled) project(":hopi-rules") else project(":hopi-rules-noop")
 
-// HopiPerf (frames, hangs, CPU, memory), which the perf lab and bench start and Swift installs: the
-// real module or its noop. (On Android the Gradle plugin's `hopi { perf { } }` resolves it per variant.)
+// HopiPerf (frames, hangs, CPU, memory), which the perf lab and bench start: the real module or its
+// noop. (On Android the Gradle plugin's `hopi { perf { } }` resolves it per variant; on iOS
+// hopi-start's Hopi.start registers it.)
 val perfModule = if (hopiEnabled) project(":hopi-perf") else project(":hopi-perf-noop")
 
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
@@ -77,13 +78,16 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
-            // Swift calls HopiUrlSession.shared.start() itself (iOSApp.swift) and HopiRules.shared in
-            // the rules scenarios (CaptureVerification.swift), so the framework exports both modules,
-            // real or noop: the same API either way.
+            // Swift calls HopiRules.shared in the rules scenarios (CaptureVerification.swift), so the
+            // framework exports the module, real or noop: the same API either way. HopiUrlSession and
+            // HopiPerf, which Swift no longer calls, stay exported until the runtime-split plan's
+            // stages 9 and 8 replace them.
             export(urlSessionModule)
             export(rulesModule)
-            // HopiPerf.shared.start { … } from Swift; exported, so the real framework keeps the monitors.
             export(perfModule)
+            // Hopi.shared.start { … } from Swift (iOSApp.swift, inside `#if HOPI`): with the flag only,
+            // and no noop, so a framework built without it (Xcode's Release) has no Hopi.
+            if (hopiEnabled) export(project(":hopi-start"))
         }
     }
 
@@ -94,7 +98,7 @@ kotlin {
                 implementation(if (hopiEnabled) project(":hopi-ktor") else project(":hopi-ktor-noop"))
                 // api: the Android app's rules scenarios name HopiRules too, and the iOS framework exports it.
                 api(rulesModule)
-                // api: the iOS framework exports it (HopiPerf.shared from Swift).
+                // api: the iOS framework exports it (until the runtime-split plan's stage 8).
                 api(perfModule)
                 implementation(libs.compose.runtime)
                 implementation(libs.compose.foundation)
@@ -116,6 +120,8 @@ kotlin {
             dependencies {
                 implementation(libs.ktor.client.darwin)
                 api(urlSessionModule)
+                // The iOS entry Swift starts Hopi with; api: the framework exports it.
+                if (hopiEnabled) api(project(":hopi-start"))
                 if (hopiEnabled) implementation(project(":hopi-core"))
             }
         }

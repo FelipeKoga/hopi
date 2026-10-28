@@ -198,9 +198,10 @@ public interface PerfController {
 
 /**
  * The single point where `hopi-perf` plugs into core: at most one [PerfController], registered by
- * `HopiPerf.install`/`start` or, on Android, by `hopi-perf`'s tool in the start sequence when the
- * Gradle plugin put `hopi-perf` in the variant. Holds nothing else, starts nothing: an app without
- * `hopi-perf` only ever loads this object (the bridge's `hello` reads it).
+ * `HopiPerf.install`/`start` or by `hopi-perf`'s tool in the start sequence (on Android when the
+ * Gradle plugin put `hopi-perf` in the variant, on iOS unless `hopi-start`'s `perf` is false).
+ * Holds nothing else, starts nothing: an app without `hopi-perf` only ever loads this object (the
+ * bridge's `hello` reads it).
  */
 @HopiInternalApi
 public object PerfHook {

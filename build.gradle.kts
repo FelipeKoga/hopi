@@ -239,7 +239,8 @@ abstract class PublicationCheck : DefaultTask() {
 // main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the desktop
 // viewer with its screens (hopi-ui) and the sample are not published. The dev.koga.hopi plugin
 // injects hopi-android(-noop), hopi-core (debuggable build types only) and hopi-perf(-noop) and
-// swaps the ktor/rules/perf twins, all of them listed here.
+// swaps the ktor/rules/perf twins, all of them listed here. hopi-start, the iOS entry a Debug
+// framework exports, has the iOS targets only until the runtime-split plan's stage 10.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
 val publishedModules = mapOf(
     "hopi-api" to allTargets,
@@ -254,6 +255,7 @@ val publishedModules = mapOf(
     "hopi-perf-noop" to allTargets,
     "hopi-android" to listOf("android"),
     "hopi-android-noop" to listOf("android"),
+    "hopi-start" to listOf("iosArm64", "iosSimulatorArm64"),
 )
 val publishedCinterops = mapOf("hopi-core" to listOf("oslog", "urlsession"), "hopi-perf" to listOf("perf"))
 

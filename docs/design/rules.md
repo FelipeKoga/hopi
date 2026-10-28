@@ -551,7 +551,8 @@ At the first connecting call: `EMPTY` → today's path. Otherwise match against
 ### URLSession (`hopi-urlsession`, the existing library plus three pieces)
 
 Capture stays observe-only for every request no rule claims. Rules add, all inside the Objective-C
-library and behind the `rules` switch of `HopiUrlSession.start { }` (default true):
+library and behind the `rules` switch of `HopiUrlSession.start { }` (default true; since the
+runtime-split plan's stage 6 also of `hopi-start`'s `Hopi.start { }`, the iOS start):
 
 1. **`HopiUSRuleProtocol`**, an `NSURLProtocol` subclass that claims only requests a mock or fail
    rule matches. It is put in front of every session's protocol list by replacing

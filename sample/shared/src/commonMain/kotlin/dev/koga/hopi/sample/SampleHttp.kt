@@ -53,7 +53,7 @@ public object SampleHttp {
      * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start]. On
      * Android it reaches only the requests the plugin records itself: OkHttp capture records the
      * rest at the debug build's cap (`-Psample.maxBodyBytes=N`). On iOS the launch argument also
-     * reaches `HopiUrlSession.start`.
+     * reaches `Hopi.start` (`iOSApp.swift`).
      */
     public var maxBodyBytes: Long? = null
 
@@ -80,7 +80,7 @@ public object SampleHttp {
 
     internal val api: ItemsApi by lazy { ItemsApi(client) }
 
-    /** Creates the client now, so the agent bridge is up before the first request. */
+    /** Creates the client now instead of at its first request. */
     public fun start() {
         client
     }
