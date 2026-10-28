@@ -609,5 +609,27 @@ class AndroidCaptureTest {
         assertEquals(false, observed["started"])
     }
 
+    @Test
+    fun theNetworkToolStartsCaptureWithItsOwnSettings() {
+        // Mixed values too, so a swapped or ignored constructor argument fails: `urlConnection`
+        // and `rules` each have an effect of their own. (`okhttp` only gates the notice for an
+        // OkHttp that is not instrumented, which the rewriting loader always instruments.)
+        for ((okhttp, urlConnection, rules) in listOf(Triple(true, true, true), Triple(true, false, false), Triple(true, true, false))) {
+            val label = "NetworkTool($okhttp, $urlConnection, $rules)"
+            PlatformCapture.resetForTests()
+            val settings = mapOf("okhttp" to okhttp, "urlConnection" to urlConnection, "rules" to rules)
+            val observed = runScenario("networkTool", store, server.base, start = false, extra = settings)
+            // The start line's note: the rewritten RealCall was found by name.
+            assertEquals("okhttp instrumented", observed["note"], label)
+            assertEquals(true, observed["started"], label)
+            assertEquals(true, observed["instrumented"], label)
+            assertEquals(rules, observed["rules"], label)
+            // Ktor's OkHttp engine is left to capture because its RealCall is instrumented; its
+            // Android engine only when the plugin rewrote that engine's URL calls.
+            assertTrue(PlatformCapture.covers("io.ktor.client.engine.okhttp.OkHttpEngine"), label)
+            assertEquals(urlConnection, PlatformCapture.covers("io.ktor.client.engine.android.AndroidClientEngine"), label)
+        }
+    }
+
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

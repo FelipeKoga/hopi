@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Merged into debuggable variants only: only they depend on this module (the dev.koga.hopi plugin
-     gives the other variants hopi-android-noop, which has no manifest entry). The highest initOrder
-     runs it before other SDKs' providers, which may already make requests. -->
+<!-- Merged into debuggable variants only: the dev.koga.hopi plugin adds hopi-core with the runtimes to
+     debuggable build types (the others get the noop twins, which have no manifest entry). A
+     non-debuggable app that links hopi-core anyway gets one notice line and nothing started. The
+     highest initOrder runs it before other SDKs' providers, which may already make requests. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <provider

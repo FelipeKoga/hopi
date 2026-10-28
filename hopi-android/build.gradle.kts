@@ -20,9 +20,11 @@ kotlin {
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
         filters {
-            // The hooks the rewritten bytecode calls, the interceptor, the wrappers and the
-            // manifest's provider: public in the binary (the provider must be, for the manifest)
-            // and @HopiInternalApi, but no consumer API, and the noop has no manifest and no hook.
+            // The hooks the rewritten bytecode calls, the interceptor, the wrappers and the network
+            // tool the app's generated configuration names: public in the binary (the hooks and
+            // the tool must be, for the app's own classes) and @HopiInternalApi, but no consumer
+            // API, and the noop has no hook. The provider is hopi-core's since stage 4 of the
+            // runtime-split plan.
             exclude.byNames.add("dev.koga.hopi.android.internal.**")
         }
     }

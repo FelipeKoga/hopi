@@ -1,9 +1,15 @@
 #!/bin/sh
 # Profiles one giant spec on the emulator with simpleperf (cpu-clock, call graphs, 2000 Hz) while
 # giant.py runs it, and writes the report with children to <out>-children.txt and the per-thread
-# split to <out>-threads.txt. Install the APK to profile first.
+# split to <out>-threads.txt. Install the APK to profile first; for a run with giant.py's --cap N
+# (or --store N), one built with `-Psample.maxBodyBytes=N` (`-Psample.maxTotalBytes=N`), since those
+# flags only label the run and set the Ktor plugin's own caps. giant.py's --build is refused: its
+# Gradle build and install would run inside the recording.
 # usage: profile.sh <out prefix> <label> <spec> <seconds> [giant.py args ...]
 set -u
+case " $* " in
+  *" --build "*) echo "profile.sh: install the APK first; --build would build inside the recording" >&2; exit 2;;
+esac
 ADB=~/Library/Android/sdk/platform-tools/adb
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$1; LABEL=$2; SPEC=$3; SECONDS_=$4; shift 4

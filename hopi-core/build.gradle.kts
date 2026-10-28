@@ -22,6 +22,12 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        // Keeps the manifest's provider and the generated configuration it loads by name in a
+        // minified debuggable build; only debuggable variants get this module from the plugin.
+        optimization {
+            consumerKeepRules.publish = true
+            consumerKeepRules.file("consumer-rules.pro")
+        }
     }
     // Host target so pure-logic tests run in seconds.
     jvm()

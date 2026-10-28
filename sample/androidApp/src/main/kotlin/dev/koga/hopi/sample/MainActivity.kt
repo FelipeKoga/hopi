@@ -29,13 +29,20 @@ private val PROOF_VALUE = Regex("\"proof\":\"[^\"]*\"")
 private const val SQUAT_EXTRA = "squat"
 
 /**
- * Giant-body measurements: `--el maxBodyBytes N` sets Hopi's capture cap for the process
- * (before the client exists, so force-stop the app first), and `--es giant <spec>` runs
- * [giantJsonAction] at launch, e.g. `--es giant 'mb=1,5,20;shape=minified;runs=5'`.
+ * Giant-body measurements: `--es giant <spec>` runs [giantJsonAction] at launch, e.g.
+ * `--es giant 'mb=1,5,20;shape=minified;runs=5'`. Capture's caps are build settings here: install
+ * the debug build with `-Psample.maxBodyBytes=N` (and `-Psample.maxTotalBytes=N`), which the
+ * `hopi { }` block reads. `--el maxBodyBytes N` sets only the Ktor plugin's own cap
+ * ([SampleHttp.maxBodyBytes], before the client exists, so force-stop the app first), for the
+ * requests the plugin records itself, those that name their own `Accept-Encoding`; OkHttp capture
+ * records the rest at the build's cap.
  */
 private const val MAX_BODY_BYTES_EXTRA = "maxBodyBytes"
 
-/** `--el maxTotalBytes N`: Hopi's store byte cap (the body cap is clamped to half of it). */
+/**
+ * `--el maxTotalBytes N`: the Ktor plugin's store cap ([SampleHttp.maxTotalBytes]), which the store
+ * no longer takes: the start presets the build's caps first. Kept for the run's header line.
+ */
 private const val MAX_TOTAL_BYTES_EXTRA = "maxTotalBytes"
 private const val GIANT_EXTRA = "giant"
 

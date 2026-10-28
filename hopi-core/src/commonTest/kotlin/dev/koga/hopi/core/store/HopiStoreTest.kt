@@ -10,6 +10,7 @@ import dev.koga.hopi.core.pending
 import dev.koga.hopi.core.redact.Redactor
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -530,13 +531,39 @@ class HopiStoreTest {
         assertEquals(false, store.submit(pending(1)))
     }
 
+    /** Runs [block] on a fresh process-wide store, closed and forgotten afterwards with the preset. */
+    private fun withFreshDefaultStore(block: () -> Unit) {
+        HopiStore.resetDefaultForTests()
+        try {
+            block()
+        } finally {
+            HopiStore.resetDefaultForTests()
+        }
+    }
+
     @Test
-    fun defaultStoreIsCreatedOnceWithFirstCaps() {
-        val first = HopiStore.configureDefault(maxEntries = 42)
+    fun defaultStoreIsCreatedOnceWithFirstCaps() = withFreshDefaultStore {
+        // Without a preset (JVM apps, tests): the first installation's caps.
+        val first = HopiStore.configureDefault(maxEntries = 42, maxTotalBytes = 4096)
         val second = HopiStore.configureDefault(maxEntries = 7)
         assertSame(first, second)
         assertSame(first, HopiStore.default)
         assertEquals(42, HopiStore.default.maxEntries)
+        assertEquals(4096L, HopiStore.default.maxTotalBytes)
+    }
+
+    @Test
+    fun defaultStoreIsCreatedOnceWithThePresetCaps() = withFreshDefaultStore {
+        // The start sequence presets the caps without creating the store: the first preset wins,
+        // over the caps of whichever installation then creates it.
+        assertTrue(HopiStore.presetDefault(maxEntries = 42, maxTotalBytes = 4096))
+        assertFalse(HopiStore.presetDefault(maxEntries = 9, maxTotalBytes = 8192))
+        val first = HopiStore.configureDefault(maxEntries = 7)
+        val second = HopiStore.configureDefault(maxEntries = 8)
+        assertSame(first, second)
+        assertSame(first, HopiStore.default)
+        assertEquals(42, HopiStore.default.maxEntries)
+        assertEquals(4096L, HopiStore.default.maxTotalBytes)
     }
 
     @Test

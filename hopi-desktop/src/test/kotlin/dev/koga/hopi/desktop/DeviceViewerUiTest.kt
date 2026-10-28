@@ -46,8 +46,9 @@ import kotlinx.serialization.json.jsonObject
 /**
  * The viewer against a real device, end to end: real adb, the sample's real bridge, the window's
  * real content composed offscreen. Skipped unless `-Phopi.desktop.device=android` (one
- * emulator running, the sample's debug build with `-Phopi.enabled=true` installed, the dev
- * server up and `adb reverse tcp:8765 tcp:8765`) or `=ios` (one booted simulator with the
+ * emulator running, the sample's debug build installed with `-Psample.maxBodyBytes=8388608`, the
+ * dev server up writing its stdout to `<evidence>/devserver.ndjson`, where the request overhead
+ * counts the POSTs, and `adb reverse tcp:8765 tcp:8765`) or `=ios` (one booted simulator with the
  * sample's Debug build installed). Each check appends a JSON line to `<evidence>/<platform>-checks.jsonl`
  * and the window's content goes to `<evidence>/<platform>-*.png` (`hopi.desktop.evidence`,
  * default `build/evidence/desktop`).
@@ -81,10 +82,11 @@ class DeviceViewerUiTest {
 
     private fun ComposeUiTest.android() {
         val out = evidence.resolve("android-checks.jsonl")
-        // A fresh app whose launch fetches a 5 MB JSON body (the capture cap raised to 8 MB).
+        // A fresh app whose launch fetches a 5 MB JSON body (the debug build's capture cap raised to
+        // 8 MB, see the class KDoc: OkHttp capture records the sample's Ktor requests).
         run(adb, "reverse", "tcp:8765", "tcp:8765")
         run(adb, "shell", "am", "force-stop", PKG)
-        run(adb, "shell", "am", "start", "-W", "-n", "$PKG/.MainActivity", "--el", "maxBodyBytes", "8388608", "--es", "giant", "'mb=5;runs=1;delay=1'")
+        run(adb, "shell", "am", "start", "-W", "-n", "$PKG/.MainActivity", "--es", "giant", "'mb=5;runs=1;delay=1'")
         val viewer = compose()
         waitFor("Android", 30_000)
         if (onAllNodes(hasText(PKG)).fetchSemanticsNodes().isEmpty()) onNodeWithTag(ViewerTags.APP_FIELD).performTextInput(PKG)
@@ -190,7 +192,9 @@ class DeviceViewerUiTest {
         val reset = System.nanoTime()
         sampler.pause = true
         run(adb, "kill-server")
-        run(adb, "start-server")
+        // Another adb client (the viewer's own device tracking, an agent's MCP server) may start
+        // the server first; start-server then fails with "didn't ACK", and that server is as good.
+        run(adb, "start-server", check = false)
         sampler.pause = false
         run(adb, "wait-for-device")
         run(adb, "reverse", "tcp:8765", "tcp:8765")
@@ -343,14 +347,17 @@ class DeviceViewerUiTest {
 
     /** Taps "Create 500 items" and waits for the dev server to log the 500 POSTs; the app's own result line. */
     private fun createItems(): String {
-        val log = repo.resolve("build/evidence/desktop/devserver.log")
+        val log = evidence.resolve("devserver.ndjson")
         fun posts() = Files.readAllLines(log).count { it.contains("\"POST\"") && it.contains("\"/items\"") }
         val start = posts()
+        run(adb, "logcat", "-c")
         python("ui.py", "tap", "desktop create", "Create 500 items")
         val deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(3)
         while (posts() < start + 500 && System.nanoTime() < deadline) Thread.sleep(500)
         Thread.sleep(1_500)
-        return Regex("Created \\d+ of 500 items \\(\\d+ failed\\) in \\d+ ms").find(python("ui.py", "dump"))?.value ?: "no result line"
+        // The result line sits below the fold of the Diagnostics tab, out of a UI dump; the sample logs it too.
+        val logged = run(adb, "logcat", "-d", "-v", "raw", "-s", "HopiSample:I")
+        return Regex("Created \\d+ of 500 items \\(\\d+ failed\\) in \\d+ ms").find(logged)?.value ?: "no result line"
     }
 
     /** Samples the app's bridge connections every 250 ms on the host (never during the idle window). */

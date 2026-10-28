@@ -144,21 +144,17 @@ so the app pays no extra cost.
 - **Cost on the app.** Same as a connected CLI `tail`: measured on the JVM bridge, the app's
   bridge threads take 0 ns CPU while the viewer is connected and idle; on the API 35 emulator
   (`DeviceViewerUiTest`, 2026-10-23, before automatic capture) the sample's 5 Hopi threads took
-  0 ticks over 60 s with the viewer connected (6 threads, 0 ticks on 2026-10-27), and 500
-  `POST /items` took 2660 to 2781 ms connected against 2526 to 2704 ms disconnected (3
-  alternating rounds each).
-- **`DeviceViewerUiTest` on Android, partly stale** (found 2026-10-27, run after that day's fixes;
-  its two capture-related causes show the same on the tree before them): 17 of 18. "5 MB body
-  opens" fails: the launch's giant GET goes through Ktor's OkHttp engine, so OkHttp capture
-  records it at the `hopi { }` cap (256 KB by default, which the sample keeps), while
-  `--el maxBodyBytes 8388608` reaches only `install(Hopi)`; the sample's giant-body measurements
-  on Android have the same limit (iOS passes the setting to `HopiUrlSession`). "5 MB body renders"
-  passes on that truncated body (it checks no size), and "request overhead, 500 POST /items"
-  passes with no figure: the app's result line sits below the fold of the Diagnostics tab, grown
-  since automatic capture, out of `ui.py dump`. The test also counts the POSTs in
-  `build/evidence/desktop/devserver.log`, a path it has always read and no doc names; that run's
-  dev server logged elsewhere while a 2026-10-23 log sat there, so each block waited out its
-  3 minutes.
+  0 ticks over 60 s with the viewer connected (6 threads, 0 ticks on 2026-10-27 and 2026-10-28),
+  and 500 `POST /items` took 2660 to 2781 ms connected against 2526 to 2704 ms disconnected (3
+  alternating rounds each; 2627 to 2744 against 2529 to 2696 ms on 2026-10-28).
+- **`DeviceViewerUiTest` on Android, fixed 2026-10-28** (the runtime-split plan's stage 4; stale
+  from 2026-10-27, 17 of 18): "5 MB body opens" failed because OkHttp capture recorded the giant
+  GET at the `hopi { }` cap, which `--el maxBodyBytes` never reached; the test now needs the debug
+  build installed with `-Psample.maxBodyBytes=8388608`, which the start presets. Its overhead step
+  counted the POSTs in a stale `build/evidence/desktop/devserver.log` and looked for the result
+  line below the fold of the Diagnostics tab; it now counts them in `<evidence>/devserver.ndjson`
+  and reads the line from logcat. Its adb reset accepts a server that another adb client started
+  first. 18 of 18 pass with figures.
 - Open questions: whether the in-app screen becomes optional (noop-by-default UI artifact, with the
   desktop as the main viewer); physical iOS devices (no bridge in v1).
 

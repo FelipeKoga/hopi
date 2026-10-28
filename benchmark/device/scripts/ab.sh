@@ -2,6 +2,9 @@
 # A/B of one detail on the emulator: installs <apk>, runs a giant spec, opens the detail <times>
 # times (fresh cache each time, reopen.sh), polls the Java heap every 0.3 s meanwhile (dumpsys
 # meminfo, its peak), then reads the heap after a forced GC (am dumpheap -g). Run it once per APK.
+# <cap> and <store> label the run and set only the Ktor plugin's own caps (giant.py --cap, --store):
+# on Android OkHttp capture and the store take the APK's, so build <apk> with
+# `-Psample.maxBodyBytes=<cap>` (and `-Psample.maxTotalBytes=<store>`).
 # usage: ab.sh <label> <apk> <spec> <cap> <store|-> <row> <times>
 set -u
 S=$(cd "$(dirname "$0")" && pwd)

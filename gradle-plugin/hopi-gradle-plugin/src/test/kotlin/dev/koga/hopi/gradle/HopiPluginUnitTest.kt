@@ -4,6 +4,7 @@ import java.io.File
 import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.gradle.testfixtures.ProjectBuilder
 
@@ -14,10 +15,9 @@ class HopiPluginUnitTest {
         assertEquals(properties.getProperty("hopi.version"), HOPI_VERSION)
     }
 
-    @Test
-    fun theConfigClassPassesTheBlockToTheRuntimesConstructor() {
+    private fun generateTask(perf: Boolean): GenerateHopiConfig {
         val project = ProjectBuilder.builder().build()
-        val task = project.tasks.register("generate", GenerateHopiConfig::class.java) { task ->
+        return project.tasks.register("generate", GenerateHopiConfig::class.java) { task ->
             task.okhttp.set(false)
             task.urlConnection.set(true)
             task.maxEntries.set(42)
@@ -29,27 +29,37 @@ class HopiPluginUnitTest {
             task.redactedQueryParameters.set(listOf("token"))
             task.redactionDisabled.set(false)
             task.rules.set(false)
-            task.perfPresent.set(true)
+            task.perfPresent.set(perf)
             task.perfAutoStart.set(HopiPerfExtension.bits(setOf(HopiMonitor.Hangs, HopiMonitor.Frames)))
             task.perfHangThresholdMs.set(300L)
             task.perfHangHeartbeat.set(false)
         }.get()
-        val source = task.render()
+    }
+
+    @Test
+    fun theConfigClassPassesTheBlockAndTheToolListToTheBaseConstructor() {
+        val source = generateTask(perf = true).render()
         assertTrue("extends dev.koga.hopi.android.internal.HopiConfigValues" in source, source)
-        assertTrue("false, // okhttp" in source, source)
-        assertTrue("true, // urlConnection" in source, source)
         assertTrue("42, // maxEntries" in source, source)
         assertTrue("1024L, // maxTotalBytes" in source, source)
         assertTrue("512L, // maxBodyBytes" in source, source)
+        assertTrue("true, // summaryLog" in source, source)
         assertTrue("true, // agentBridge" in source, source)
+        assertTrue("false, // redactionDisabled" in source, source)
         assertTrue("""new String[] { "X-Api-Key", "Quote\"d" }, // redactHeaders""" in source, source)
         assertTrue("""new String[] { "token" }, // redactQueryParameters""" in source, source)
-        assertTrue("false, // rules" in source, source)
-        assertTrue("true, // perfPresent" in source, source)
-        // Frames and Hangs: bits 0 and 1, the runtime's PerfBootstrap.bit order.
-        assertTrue("3, // perfAutoStart" in source, source)
-        assertTrue("300L, // perfHangThresholdMs" in source, source)
-        assertTrue("false // perfHangHeartbeat" in source, source)
+        // Each tool with its own settings.
+        assertTrue("new dev.koga.hopi.android.internal.NetworkTool(false, true, false), // okhttp, urlConnection, rules" in source, source)
+        // Frames and Hangs: bits 0 and 1, the order PerfEntry decodes.
+        assertTrue("new dev.koga.hopi.perf.internal.PerfEntry(3, 300L, false) // perf { }: autoStart, hangThresholdMs, hangHeartbeat" in source, source)
+        assertTrue(source.indexOf("NetworkTool(") < source.indexOf("PerfEntry("), source)
+    }
+
+    @Test
+    fun withoutThePerfBlockTheToolListNamesTheNetworkToolOnly() {
+        val source = generateTask(perf = false).render()
+        assertTrue("new dev.koga.hopi.android.internal.NetworkTool(false, true, false) // okhttp, urlConnection, rules\n        );" in source, source)
+        assertFalse("PerfEntry" in source, source)
     }
 
     @Test

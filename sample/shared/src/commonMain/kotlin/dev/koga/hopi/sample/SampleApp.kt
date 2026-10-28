@@ -361,7 +361,8 @@ private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: Mu
             })
             SampleButton("Create 500 items", primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
                 results.clear()
-                scope.launch { results.add(createItems(SampleHttp.api, count = 500)) }
+                // Logged too: DeviceViewerUiTest reads it, and the screen shows it below the fold.
+                scope.launch { results.add(createItems(SampleHttp.api, count = 500).also(::sampleLog)) }
             })
             SampleButton("Giant JSON (1, 5, 20 MB)", primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
                 results.clear()

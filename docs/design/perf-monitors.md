@@ -102,7 +102,7 @@ public class HopiPerfConfig internal constructor() {
     public var agentBridge: Boolean = false                      // start the bridge, as the recorders do
     public var summaryLog: Boolean = true                        // perf log lines (rate-limited)
 }
-// androidMain only: when hopi-android's provider is absent (an app without the Gradle plugin)
+// androidMain only: when the provider's start sequence is absent (an app without the Gradle plugin)
 public fun HopiPerf.install(application: android.app.Application, block: HopiPerfConfig.() -> Unit = {})
 ```
 
@@ -111,19 +111,24 @@ notice line and start nothing, as `HopiUrlSession.start` does (Swift cannot catc
 no `const` (the parity ban). `DefaultsParityTest` gains `HopiPerfConfig`.
 
 **How the monitors find the app.** `install` registers a `PerfController` in core's `PerfHook`
-(one object, no thread). On Android, `hopi-android`'s existing `HopiInitProvider` also registers
-it when the plugin put `hopi-perf` in the variant: the plugin writes `perf.present=true` into the
-provider's generated resources, and only then does the provider call
-`Class.forName("dev.koga.hopi.perf.internal.PerfEntry", false, loader)` and one static call. It
-never probes for an absent class (a `ClassNotFoundException` on ART fills a stack trace and costs
-far more than a hit). So a debug app with the plugin is remotely controllable without code, and no
-monitor class is loaded until a monitor starts. `hopi-perf` ships a consumer R8 keep rule for
-`PerfEntry` (a minified debuggable variant would otherwise drop the reflectively loaded class).
-The provider passes the `Application` (frames and the hang monitor's input bracket need each
-activity's `Window`, memory events need `registerComponentCallbacks`). Without the provider and
-without the Android `install(application)`, `start` on Android starts hangs (printer only, no input
-bracket), CPU and memory samples, and reports frames and memory events as unavailable with a
-notice; never `ActivityThread` reflection. The androidMain-only `install(application)` is mirrored
+(one object, no thread). On Android, perf's tool `PerfEntry` registers it when the plugin put
+`hopi-perf` in the variant: the plugin's generated configuration, a Java class (not resources; see
+android-capture.md, "Auto-start"), lists `new PerfEntry(autoStart, hangThresholdMs,
+hangHeartbeat)` in its tool list, and the provider's start sequence starts it like any tool,
+through a direct reference (since the runtime-split plan's stage 4, 2026-10-28; before, the
+provider loaded it with one `Class.forName` when the generated class said `perfPresent`). Without
+the perf block the list does not name it, so no perf class is looked up or loaded: no probe for an
+absent class either (a `ClassNotFoundException` on ART fills a stack trace and costs far more than
+a hit). So a debug app with the plugin is remotely controllable without code, and no monitor class
+is loaded until a monitor starts. `hopi-perf` still ships a consumer R8 keep rule for `PerfEntry`
+(harmless: R8 keeps a directly referenced class anyway). The start passes the `Application`
+(frames and the hang monitor's input bracket need each activity's `Window`, memory events need
+`registerComponentCallbacks`), and core's start keeps the resumed activity in `PerfLauncher`
+through one `ActivityLifecycleCallbacks` the provider registers whatever tools are listed (no
+thread, no timer), so a frames or hangs start attaches to it at once, with or without the in-app
+launcher. Without the provider and without the Android `install(application)`, `start` on Android
+starts hangs (printer only, no input bracket), CPU and memory samples, and reports frames and
+memory events as unavailable with a notice; never `ActivityThread` reflection. The androidMain-only `install(application)` is mirrored
 in `hopi-perf-noop`'s androidMain and in both Android ABI dumps, as `hopi-android-noop` does for its
 platform API. On iOS nothing runs until Swift or Kotlin calls `install` or `start` (from any thread;
 the few UIKit reads hop to the main queue once); a launch argument `-hopiPerf frames,hangs` is read
@@ -131,14 +136,14 @@ by `install` (one `NSProcessInfo` lookup) so an agent can measure a cold start:
 `xcrun simctl launch <udid> <id> -hopiPerf hangs`. Work before `install` runs (pre-main, `+load`,
 static initializers, the start of `didFinishLaunching`) is not covered.
 
-**Gradle DSL** (Android, generated into the provider's resources like the other settings; all
-false by default):
+**Gradle DSL** (Android, generated into the app's configuration class like the other settings, as
+the perf tool's constructor arguments; all false by default):
 
 ```kotlin
 hopi {
     perf {
-        enabled = false          // true: hopi-perf in debuggable variants (noop elsewhere), provider registers it
-        autoStart(HopiMonitor.Hangs, HopiMonitor.Frames)   // started by the provider; default none
+        enabled = false          // true: hopi-perf in debuggable variants (noop elsewhere), its tool in the tool list
+        autoStart(HopiMonitor.Hangs, HopiMonitor.Frames)   // started by the perf tool at start; default none
         hangThresholdMs = 250
         hangHeartbeat = false    // true: keep another tool's Looper printer, pay the heartbeat's wakes
     }
@@ -673,7 +678,7 @@ lines), the hang list with stacks (copy as text), memory events as markers on th
 
 | Monitor | Off | On: threads | On: wakes | On: cost |
 | --- | --- | --- | --- | --- |
-| any, module present | 0 threads, 0 listeners, 0 wakes; Android startup: the provider reads one generated setting, and only with `perf.present` one `Class.forName` hit ≤ 0.1 ms (never a miss) | | | |
+| any, module present | 0 threads, 0 listeners, 0 wakes; Android startup: with `perf { enabled = true }` the generated tool list constructs `PerfEntry` (a direct reference, no lookup, never a miss) | | | |
 | `autoStart` (Android) | | | | thread creation at provider init (≤ 0.5 ms per thread, on the main thread at startup, measured) |
 | frames, Android | 0 | `hopi-perf-frame` | 1 per rendered frame, 0 while nothing draws | ≤ 5 µs on Hopi's thread per frame, 0 allocation; ≤ 1 µs RenderThread copy; lifecycle callbacks on the main thread per activity transition only |
 | frames, iOS tier 1 | 0 | none | 0 extra (main run-loop iterations only) | 3 C callbacks per iteration, ≤ 0.5 µs together; a Kotlin call per stall only |
@@ -693,12 +698,12 @@ lines), the hang list with stacks (copy as text), memory events as markers on th
   `hopi-perf-noop`'s JVM tests assert no `hopi-core` on its classpath; `DefaultsParityTest` covers
   `HopiPerfConfig` and `HopiMonitor`'s entries.
 - The Gradle plugin substitutes `hopi-perf` → `hopi-perf-noop` in non-debuggable variants
-  (TestKit-checked) and generates the `perf { }` resources.
+  (TestKit-checked) and lists `PerfEntry` in the generated tool list (a Java class, not resources).
 - `:sample:androidApp:verifyReleaseUsesNoop` (and `verifyHopiSelection`): the release classpath
   holds `:hopi-perf-noop` too and its Hopi classes are the noop jar's; no type of
   `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core.perf` is defined or referenced; no Hopi class
-  references `addOnFrameMetricsAvailableListener` or `setMessageLogging`; the release provider's
-  generated resources hold no `perf.present=true`. `verifyDebugCapture` adds the positive control
+  references `addOnFrameMetricsAvailableListener` or `setMessageLogging`; the release APK has no
+  generated configuration and no provider. `verifyDebugCapture` adds the positive control
   (`PerfEntry`, its keep rule and the listener reference present).
 - `:sample:shared:verifyIosReleaseExcludesCapture`: without the flag, no `_hopi_perf_` symbol, no
   `kfun:dev.koga.hopi.perf` or `kfun:dev.koga.hopi.core.perf` symbol, no `hopi-perf-hang`
@@ -857,7 +862,9 @@ Deviations from the design, and why:
   `HopiGeneratedConfig` class (android-capture.md, "Auto-start"), so the perf block is four more
   constructor arguments of it (`perfPresent`, `perfAutoStart` as a bit set, `perfHangThresholdMs`,
   `perfHangHeartbeat`). The provider loads `PerfEntry` only when `perfPresent` and calls it through
-  core's `PerfBootstrap` interface (one `Class.forName` hit, one constructor, one call).
+  core's `PerfBootstrap` interface (one `Class.forName` hit, one constructor, one call). (History:
+  since the runtime-split plan's stage 4, `PerfEntry` is a tool the generated tool list constructs,
+  and `PerfBootstrap` is gone; see "How the monitors find the app".)
 - **The plugin's `HopiMonitor`.** `autoStart(HopiMonitor.Hangs, …)` takes the plugin's own enum
   `dev.koga.hopi.gradle.HopiMonitor` (same entries, same order): the build script cannot see
   `hopi-perf`'s.

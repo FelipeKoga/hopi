@@ -10,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import dev.koga.hopi.api.HopiInternalApi
-import dev.koga.hopi.core.perf.PerfBootstrap
 import dev.koga.hopi.core.perf.PerfData
 import dev.koga.hopi.core.perf.PerfLauncher
 import dev.koga.hopi.core.perf.PerfMonitor
@@ -19,13 +18,16 @@ import dev.koga.hopi.core.perf.PerfPss
 import dev.koga.hopi.core.perf.PerfStartRequest
 import dev.koga.hopi.core.perf.PerfThread
 import dev.koga.hopi.core.perf.PerfTimer
+import dev.koga.hopi.core.start.HopiTool
+import dev.koga.hopi.core.start.HopiToolContext
+import dev.koga.hopi.perf.HopiPerfConfig
 
 /**
  * The Android monitors. Nothing here runs until a monitor starts: no thread, no listener, no
- * lifecycle callback while every monitor is off. The [Application] (from `hopi-android`'s provider
- * or `HopiPerf.install(application)`) gives frames and the input bracket each started activity's
- * window and memory the OS's trim callbacks; without it, hangs run with the printer only, CPU and
- * memory samples run, and frames and memory events say they are unavailable.
+ * lifecycle callback while every monitor is off. The [Application] (from the start sequence, see
+ * [PerfEntry], or `HopiPerf.install(application)`) gives frames and the input bracket each started
+ * activity's window and memory the OS's trim callbacks; without it, hangs run with the printer
+ * only, CPU and memory samples run, and frames and memory events say they are unavailable.
  *
  * Every call comes under the runtime's lock (see [MonitorBackend]).
  */
@@ -180,10 +182,11 @@ internal class AndroidBackend private constructor() : MonitorBackend {
     override fun measurePss(): PerfPss = pss.measure()
 
     /**
-     * The activity `HopiLauncher` is composed in, if any (core's [PerfLauncher]): frames and the
-     * input bracket attach to it at once, with one main-thread message, instead of at its next
-     * start (a single-activity app would otherwise wait for a return from the background). The
-     * lifecycle callbacks' own attach at a later start skips a window already attached.
+     * The resumed activity, if any (core's [PerfLauncher], written by core's start and by
+     * `HopiLauncher`): frames and the input bracket attach to it at once, with one main-thread
+     * message, instead of at its next start (a single-activity app would otherwise wait for a
+     * return from the background). The lifecycle callbacks' own attach at a later start skips a
+     * window already attached.
      */
     private fun attachLauncherActivity(): Boolean {
         val activity = PerfLauncher.activity ?: return false
@@ -234,7 +237,7 @@ internal class AndroidBackend private constructor() : MonitorBackend {
         }
     }
 
-    /** Set while the provider's `autoStart` runs (before any activity): frames will attach at the first start. */
+    /** Set while [PerfEntry]'s `autoStart` runs (before any activity): frames will attach at the first start. */
     @Volatile private var autoStarting = false
 
     internal fun autoStart(block: () -> Unit) {
@@ -256,21 +259,38 @@ internal class AndroidBackend private constructor() : MonitorBackend {
 }
 
 /**
- * What `hopi-android`'s provider loads by name when the Gradle plugin put `hopi-perf` in the
- * variant (`hopi { perf { enabled = true } }`): registers the controller and starts the plugin's
- * `autoStart` monitors, on the main thread before `Application.onCreate`. Nothing else.
+ * `hopi-perf`'s tool in the start sequence: the Gradle plugin's generated configuration lists it,
+ * with the `perf { }` block's values, when the plugin put `hopi-perf` in the variant
+ * (`hopi { perf { enabled = true } }`). It registers the controller and starts the [autoStart]
+ * monitors, on the main thread before `Application.onCreate`. Nothing else: no note in the start
+ * line, and it calls the runtime itself, never `HopiPerf.install`.
  */
 @HopiInternalApi
-public class PerfEntry : PerfBootstrap {
-    override fun boot(application: Application?, autoStart: Int, hangThresholdMs: Long, hangHeartbeat: Boolean) {
-        application?.let(AndroidBackend::application)
+public class PerfEntry(
+    /** A bit set of [bit], in the plugin's `HopiMonitor` order. */
+    private val autoStart: Int,
+    private val hangThresholdMs: Long,
+    private val hangHeartbeat: Boolean,
+) : HopiTool {
+    override val name: String get() = "perf"
+
+    override fun start(context: HopiToolContext): String? {
+        (context.platform as? Application)?.let(AndroidBackend::application)
+        val threshold = hangThresholdMs
+        val heartbeat = hangHeartbeat
         val controller = PerfRuntime.install(
-            dev.koga.hopi.perf.HopiPerfConfig().apply {
-                this.hangThresholdMs = hangThresholdMs
-                this.hangHeartbeat = hangHeartbeat
+            HopiPerfConfig().apply {
+                hangThresholdMs = threshold
+                hangHeartbeat = heartbeat
             },
-        ) ?: return
-        val monitors = PerfMonitor.entries.filterTo(LinkedHashSet()) { autoStart and PerfBootstrap.bit(it) != 0 }
+        ) ?: return null
+        val monitors = PerfMonitor.entries.filterTo(LinkedHashSet()) { autoStart and bit(it) != 0 }
         if (monitors.isNotEmpty()) AndroidBackend.instance.autoStart { controller.start(PerfStartRequest(monitors), PerfOwner.Code) }
+        return null
+    }
+
+    private companion object {
+        /** [monitor]'s bit in [autoStart]: `1 shl` its ordinal, which the plugin's `HopiMonitor` order matches. */
+        fun bit(monitor: PerfMonitor): Int = 1 shl monitor.ordinal
     }
 }

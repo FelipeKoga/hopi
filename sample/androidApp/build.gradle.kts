@@ -58,6 +58,12 @@ hopi {
     enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
     // The CLI and the desktop viewer reach the app through its bridge.
     agentBridge.set(true)
+    // Capture's caps, read at build time and preset for the store at start: the giant-body
+    // measurements and DeviceViewerUiTest's 5 MB body install the debug build with
+    // `-Psample.maxBodyBytes=8388608` (a body cap is clamped to half the store's,
+    // `-Psample.maxTotalBytes`). The defaults are the plugin's, 256 KiB and 16 MiB.
+    maxBodyBytes.set(providers.gradleProperty("sample.maxBodyBytes").map { it.toLong() }.orElse(256L * 1024))
+    maxTotalBytes.set(providers.gradleProperty("sample.maxTotalBytes").map { it.toLong() }.orElse(16L * 1024 * 1024))
     // The performance monitors (docs/design/perf-monitors.md): registered for `hopi perf start`, none
     // started, so the app pays nothing until an agent or a developer starts one.
     perf { enabled.set(true) }
@@ -246,7 +252,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         if (PROVIDER !in manifest) problems += "the merged manifest does not declare $PROVIDER"
         val ruleEngine = RULE_ENGINE in dex.definedClasses
         if (!ruleEngine) problems += "the debug APK holds no $RULE_ENGINE"
-        // The perf monitors: the entry the provider loads by name, and the calls they are built on.
+        // The perf monitors: the tool the generated configuration lists, and the calls they are built on.
         val perfEntry = PERF_ENTRY in dex.definedClasses
         if (!perfEntry) problems += "the debug APK holds no $PERF_ENTRY"
         val perfCalls = PerfApis.ALL.filter { api -> dex.invokesByClass.any { (owner, calls) -> owner.startsWith("dev/koga/hopi/perf/") && api in calls } }

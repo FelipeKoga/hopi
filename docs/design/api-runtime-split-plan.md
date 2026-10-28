@@ -2127,6 +2127,74 @@ Stage 3 (2026-10-28, at `a6be8e8` plus the stage's edits):
 - **P2's "the marker appears in ABI dumps"** is refuted: after the rename, `./gradlew
   updateKotlinAbi` changed no dump but adding `hopi-api`'s own.
 
+Stage 4 (2026-10-28; "before" at `d26907d`, "after" with the stage's edits; emulator
+`Hopi_API_35`, API 35):
+
+- **E3.6-a**: `verifyReleaseUsesNoop`'s report lists the five noop projects on the release
+  classpath, 31 Hopi classes in the APK (`README.md:493` and `docs/ARCHITECTURE.md` say 13), 0
+  referenced core or capture types and 0 classes calling a hook.
+- **E3.6-b**: with `releaseImplementation(project(":hopi-android"))`, `assembleRelease` fails in
+  `mergeDexRelease`: "Type dev.koga.hopi.android.HopiAndroid is defined multiple times" (the real
+  module and its noop twin). An accidental protection that ends with the twins; stage 9's guard
+  replaces it.
+- **E3.3**: `autoStart(HopiMonitor.Hangs)` in an app's build script fails without an import
+  ("Unresolved reference 'HopiMonitor'") and passes with `import dev.koga.hopi.gradle.HopiMonitor`:
+  `README.md:410` and plan 3.2 need the import (stage 13).
+- **E3.4**: not run; the debuggable decision takes the flags as an `Int?`, so no host test needs an
+  `ApplicationInfo`.
+- **E5 X3** before: the default sample writes `android capture started (okhttp instrumented, 13706
+  us; config 365 us, okhttp lookup 634 us, start 8916 us, perf 3790 us)`, and `hopi perf status`
+  shows remote control on and every monitor off. With `autoStart(Hangs)`: `… 16515 us; config 533
+  us, okhttp lookup 611 us, start 6591 us, perf 8778 us`, hangs on at 250 ms with owner `code`,
+  one hang reported.
+- **E5 X3** after (same emulator; an interleaved A/B against the stage 3 build `d26907d`: 4 rounds
+  of 5 cold starts per arm, each install followed by one discarded launch, every launch with
+  `--es perfBench 'mode=idle;monitors=none'`, so no request; one emulator run is noisy, so medians):
+  - As first built, the provider's line took a median 33.3 ms against 26.4 ms. `config` was 6.1 ms
+    (0.26 before): it now constructs the network tool, whose class initialization ran `listOf` and
+    loaded Kotlin's collection classes inside the window (the old provider's companion did that
+    before the window opened). The start sequence's own steps, outside every part, took 3.5 ms:
+    `HopiStore.presetDefault` initialized the store's class on the main thread.
+  - Fixed in this stage: the start sequence presets the caps through a holder of their own
+    (`DefaultStoreCaps`, which `HopiStore.presetDefault` and `configureDefault` use) and leaves
+    the store's class unloaded; `NetworkTool` looks `RealCall` up with two plain calls, no list.
+    Then the line took about 2 ms more than before, in every round (round medians +0.3 to +9.3
+    ms) and at every quantile (median 29.2 against 27.5 ms; p25 to p75 27.8 to 38.1 against 21.2
+    to 32.5): `config` 1.5 ms, `network` 15.9 ms against `okhttp lookup` plus `start` 14.2 ms,
+    `perf` 9.1 ms against 8.0 ms (unchanged code), and the start sequence's own steps 1.3 ms,
+    mostly creating the `hopi-start` thread and its body (by design). `am start -W`'s TotalTime
+    fell by about 20 ms (median 1266 against 1285.5 ms, the p25 to p75 ranges overlapping; first
+    build: 1273.5 against 1316.5): with `agentBridge` the store, the summary sink and the bridge are
+    made on the `hopi-start` thread, where the sample's first Ktor client made them on the main
+    thread in `MainActivity.onCreate`.
+  - The default sample writes, for example, `android capture started (okhttp instrumented, 19303
+    us; config 1419 us, network 11292 us, perf 5349 us)`; `hopi perf status` shows remote control
+    on and every monitor off.
+- **The bridge at start**: the app's process started by a broadcast to its exported
+  `androidx.profileinstaller.ProfileInstallReceiver` (`am broadcast -f 0x20`), so no activity and
+  none of the sample's code that makes a Ktor client: the `hopi-bridge` and `hopi-store` threads
+  run, and `hopi list` exits 0 with no record.
+- **Rules**: `--es rulesVerify all`: 44 scenarios, 0 failed; the pinned check is ok.
+- **E3's body cap**: after `installDebug -Psample.maxBodyBytes=8388608`, `DeviceViewerUiTest`'s
+  "5 MB body opens" passes (captured 5242766 of 5242766, not truncated). Its adb reset step failed
+  twice the same way: another adb client (two `agent-device mcp` servers ran on the host) started
+  the server between the test's `kill-server` and `start-server`, which then failed with "didn't
+  ACK". The test now accepts a server that another client started, counts the overhead's POSTs in
+  `<evidence>/devserver.ndjson` (it read a stale `build/evidence/desktop/devserver.log`, so each
+  block waited out its 3 minutes) and reads the overhead's result line from logcat, where the
+  sample now logs it too (the screen shows it below the fold). Then 18 of 18 pass, and 500
+  `POST /items` take 2627, 2648 and 2744 ms connected against 2611, 2529 and 2696 ms
+  disconnected.
+- **idle.py** (`--seconds 60 --settle 10 --arms off=none,all=all`): the off arm's Hopi threads
+  (`hopi-store`, `hopi-bridge`) take 0 µs and 0 wakes, and so does the main thread: core's
+  current-activity callbacks (P5) wake nothing. With every monitor on, `hopi-perf-samp` takes
+  40 ms and 60 wakes in the 60 s.
+- **The base check**: the first run lost three Kotlin metadata compilations to `OutOfMemoryError:
+  Metaspace` and two iOS tests to timing (`WakeSignalTest.aMarkDuringADozeIsTakenWhenItEnds`, a
+  doze measured at 0 ms; `UrlSessionCaptureTest.sessionsAndTasksCreatedBeforeStart`, a task
+  resumed before start recorded) with the host 2.8 GB into swap; with fresh daemons the rerun was
+  green, those five included.
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2172,9 +2240,9 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | --- | --- | --- |
 | 0. Preflight | done: owner decisions recorded, baseline green | `e1ef40a` |
 | 1. Evaluation and re-plan | done: E1 to E8 and the cross-check in `docs/design/runtime-split-evaluation/`; sections 3.9, 6 to 10 rewritten | `27b1714` |
-| 2. Contract documents (after a separate fix commit) | done: the redirect wording fixed (`:hopi-core:jvmTest` and `:hopi-ui:jvmTest` green; `PerfUiTest` timed out once waiting 5 s for the PSS line and passed on two reruns, a timing flake in a test stage 5 deletes); ARCHITECTURE principle 1, the migration note and the Modules table's stages; ROADMAP's rule for every new tool and its surfaces; the old proposal's status line | `2e9cce0` (fix), (this commit) |
-| 3. The API module | done: `hopi-api` (registry `HopiRuntimes` with the Ktor hooks' slot; no dependency; four targets; published); `@HopiInternalApi` renamed in 91 files (P2); E7 X1 to X3 and E4 X1 in section 9 | (this commit) |
-| 4. Start sequence and tools in core | | |
+| 2. Contract documents (after a separate fix commit) | done: the redirect wording fixed (`:hopi-core:jvmTest` and `:hopi-ui:jvmTest` green; `PerfUiTest` timed out once waiting 5 s for the PSS line and passed on two reruns, a timing flake in a test stage 5 deletes); ARCHITECTURE principle 1, the migration note and the Modules table's stages; ROADMAP's rule for every new tool and its surfaces; the old proposal's status line | `2e9cce0` (fix), `a6be8e8` |
+| 3. The API module | done: `hopi-api` (registry `HopiRuntimes` with the Ktor hooks' slot; no dependency; four targets; published); `@HopiInternalApi` renamed in 91 files (P2); E7 X1 to X3 and E4 X1 in section 9 | `d26907d` |
+| 4. Start sequence and tools in core | done: `HopiStart` in core (`StartConfig`, tools with their own settings, the caps preset without creating the store, the installation on a `hopi-start` thread with `agentBridge`); P4's provider in core with D9's run-time check and no start without the generated class; P5's current-activity callbacks; `NetworkTool` and `PerfEntry` as tools; the plugin adds `hopi-core` to debuggable build types and generates the tool list; the sample's caps are build properties (E3's 5 MB check passes); [run] results in section 9 | (this commit) |
 | 5. Remove the in-app UI | | |
 | 6. iOS entry | | |
 | 7. Rules into the API | | |
@@ -2187,9 +2255,31 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 14. Final verification and report | | |
 | Later (O8). Plugin on KMP modules | deferred | |
 
-Carried in from before the plan: `DeviceViewerUiTest` on Android is partly stale (ROADMAP,
-"Desktop viewer"); its 5 MB check needs the sample's body cap to reach OkHttp capture, which stage 4
-solves by presetting the caps at start from a Gradle property (E3).
+Carried in from before the plan: `DeviceViewerUiTest` on Android was partly stale (ROADMAP,
+"Desktop viewer"); stage 4 fixed it (18 of 18 with figures, section 9): the build's caps reach
+OkHttp capture, and the test's overhead step reads the right dev server log and the result line.
+
+Stage 4 leaves for later stages:
+
+- Accepted consequence of P4: every real module takes `hopi-core` as `implementation`, so an
+  Android app that links one without the plugin merges core's provider. Each debug launch pays one
+  failed `Class.forName` of the generated class on the main thread and writes the
+  no-generated-configuration notice; a non-debuggable build that links a real module writes the
+  not-debuggable notice; nothing starts, and a Ktor plugin the app installs records as before
+  (ARCHITECTURE, Android capture "Start" and "Selecting real vs noop"; README, "Install").
+- Stage 6: `HopiStart` checks the caps on every call, `UrlSessionCapture` only until a call
+  succeeded; once iOS starts through `HopiStart`, a later call with invalid caps writes the
+  invalid-caps notice, not "already started".
+- Stage 9: `hopi-android/consumer-rules.pro:2` still says the provider is the manifest's; reword it
+  when `hopi-android` becomes `hopi-network`.
+- The sample's `MainActivity` still calls `SampleHttp.start()` so the bridge is up before the
+  first request; on Android the start sequence does that now, and iOS needs the call until stage 6.
+- The start sequence's notice emitter is `((String) -> Unit)?`, null meaning the platform log, so
+  the provider creates no function value on the main thread.
+- Stage 5 (its perf checks): `benchmark/perf/verify.py` passes 28 of 28 on this stage's build, and
+  `DevicePerfPanelUiTest` after it passes every check but the live click burn: the script's memory
+  step leaves the app in the background, so the test's tap finds no button. Bring the app to the
+  front first (an `am start` of the running task keeps the lab's state).
 
 ---
 

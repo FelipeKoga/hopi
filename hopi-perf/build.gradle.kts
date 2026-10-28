@@ -20,8 +20,9 @@ kotlin {
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
         filters {
-            // PerfEntry, which hopi-android's provider loads by name, and the monitors: public in
-            // the binary where the provider needs it, @HopiInternalApi, no consumer API.
+            // PerfEntry, the start sequence's perf tool, which the app's generated configuration
+            // names, and the monitors: public in the binary where the app's class needs it,
+            // @HopiInternalApi, no consumer API.
             exclude.byNames.add("dev.koga.hopi.perf.internal.**")
         }
     }
@@ -37,7 +38,9 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
-        // Keeps PerfEntry, which the provider loads reflectively, in a minified debuggable build.
+        // Keeps PerfEntry, the perf tool the generated configuration names, in a minified
+        // debuggable build (kept since the provider loaded it by name; R8 keeps a directly
+        // referenced class anyway).
         optimization {
             consumerKeepRules.publish = true
             consumerKeepRules.file("consumer-rules.pro")

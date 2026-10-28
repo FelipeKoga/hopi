@@ -48,16 +48,20 @@ public object SampleHttp {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
-     * Hopi's per-body capture cap for this process, or null for the plugin's default (256 KB).
+     * The Ktor plugin's per-body capture cap for this process, or null for its default (256 KB).
      * A debug setting for the giant-body measurements (`--el maxBodyBytes N` on Android, the
-     * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start].
+     * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start]. On
+     * Android it reaches only the requests the plugin records itself: OkHttp capture records the
+     * rest at the debug build's cap (`-Psample.maxBodyBytes=N`). On iOS the launch argument also
+     * reaches `HopiUrlSession.start`.
      */
     public var maxBodyBytes: Long? = null
 
     /**
-     * Hopi's store byte cap, or null for the default (16 MB), which clamps the body cap to half
-     * of it: a 16 MB body cap needs 32 MB here. A debug setting like [maxBodyBytes]
-     * (`--el maxTotalBytes N`, `-maxTotalBytes N`).
+     * The Ktor plugin's store byte cap, or null for the default (16 MB), which clamps the body cap
+     * to half of it: a 16 MB body cap needs 32 MB here. A debug setting like [maxBodyBytes]
+     * (`--el maxTotalBytes N`, `-maxTotalBytes N`); on Android the store takes the debug build's
+     * cap instead (`-Psample.maxTotalBytes=N`), which the start presets before any client exists.
      */
     public var maxTotalBytes: Long? = null
 

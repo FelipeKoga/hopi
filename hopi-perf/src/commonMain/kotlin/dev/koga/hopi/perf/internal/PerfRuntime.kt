@@ -97,7 +97,8 @@ internal expect fun <T> perfLocked(lock: Any, block: () -> T): T
 /**
  * The [PerfController] that `hopi-perf` registers in core's `PerfHook`: owners, leases, settings
  * and status, over the platform's [MonitorBackend]. Created on the first [HopiPerf] call that needs
- * it (install, start, or the Android provider), so an app that never calls it loads nothing more.
+ * it (install, start, or perf's tool in the Android start sequence), so an app that never calls it
+ * loads nothing more.
  */
 @HopiInternalApi
 public class PerfRuntimeController internal constructor(private val backend: MonitorBackend) : PerfController {

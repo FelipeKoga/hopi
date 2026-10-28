@@ -12,16 +12,19 @@ import org.gradle.api.artifacts.Configuration
 /**
  * `plugins { id("dev.koga.hopi") }` in an Android application module (docs/design/android-capture.md):
  *
- * - each debuggable build type gets the real runtime (`hopi-android`), every other one its noop twin;
+ * - each debuggable build type gets the real runtime (`hopi-android`) and `hopi-core`, every other
+ *   one the runtime's noop twin: javac compiles the generated configuration inside the app, and it
+ *   names core's types, which every runtime takes as `implementation` only;
  * - each debuggable variant has OkHttp's `RealCall` and every `java.net.URL` connection call site of
  *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
- *   `hopi { }` block generated into it; other variants are not instrumented at all;
+ *   `hopi { }` block generated into it as the start configuration and its tool list; other
+ *   variants are not instrumented at all;
  * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-ui`/`hopi-rules`/`hopi-perf` to the
  *   real module when debuggable and to the noop twin otherwise, whichever the app's modules name;
  * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others `hopi-perf-noop`)
- *   and the provider registers it, starting the `autoStart` monitors (docs/design/perf-monitors.md).
+ *   and the tool list names its tool, which starts the `autoStart` monitors (docs/design/perf-monitors.md).
  *
- * The runtime starts itself from a provider of its own manifest, so the app adds no code.
+ * `hopi-core`'s manifest declares the provider that starts the generated tools, so the app adds no code.
  */
 public class HopiPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -51,6 +54,10 @@ public class HopiPlugin : Plugin<Project> {
                 val real = extension.enabled.get() && buildType.isDebuggable
                 realByBuildType[buildType.name] = real
                 project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) RUNTIME else RUNTIME_NOOP))
+                // The generated configuration extends core's HopiConfigValues and lists core's
+                // HopiTool: javac needs core on the variant's compile classpath, and no runtime
+                // exposes it there.
+                if (real) project.dependencies.add("${buildType.name}Implementation", runtime(project, CORE))
                 if (extension.perf.enabled.get()) {
                     project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) PERF else PERF_NOOP))
                 }
@@ -159,6 +166,7 @@ public class HopiPlugin : Plugin<Project> {
     private companion object {
         const val KTOR_ANDROID_ENGINE = "io/ktor/client/engine/android/AndroidClientEngine"
         const val GROUP = "dev.koga.hopi"
+        const val CORE = "hopi-core"
         const val RUNTIME = "hopi-android"
         const val RUNTIME_NOOP = "hopi-android-noop"
         const val PERF = "hopi-perf"

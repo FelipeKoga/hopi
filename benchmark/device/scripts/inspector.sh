@@ -4,6 +4,9 @@
 # then opens the inspector, the giant transaction, its Response tab, scrolls the body, copies the
 # body and the cURL, opens and closes the share sheet, and goes back; each step is timed by ui.py
 # into $EVIDENCE/android-ui.jsonl (default <repo>/build/evidence/giant-json).
+# On Android the caps are build settings: with a cap or a store cap, giant.py --build first builds
+# and installs the working tree's debug sample with them, and that build stays installed (reinstall
+# the default one, `./gradlew :sample:androidApp:installDebug`, before an uncapped run).
 # usage: inspector.sh <label> <spec> [cap bytes] [row text] [store bytes]
 set -u
 ADB=~/Library/Android/sdk/platform-tools/adb
@@ -14,7 +17,8 @@ mkdir -p "$EVIDENCE"
 LABEL=$1; SPEC=$2; CAP=${3:-}; ROW=${4:-/giant}; STORE=${5:-}
 CAPARG=""; [ -n "$CAP" ] && CAPARG="--cap $CAP"
 STOREARG=""; [ -n "$STORE" ] && STOREARG="--store $STORE"
-python3 "$HERE/giant.py" "ui-$LABEL" "$SPEC;delay=1" "$EVIDENCE/android-ui-runs.ndjson" --timeout 300 $CAPARG $STOREARG | grep -E '"runs":|PROBLEM' | cut -c1-200
+BUILDARG=""; [ -n "$CAP$STORE" ] && BUILDARG="--build"
+python3 "$HERE/giant.py" "ui-$LABEL" "$SPEC;delay=1" "$EVIDENCE/android-ui-runs.ndjson" --timeout 300 $CAPARG $STOREARG $BUILDARG | grep -E '"runs":|PROBLEM' | cut -c1-200
 sleep 3
 U="python3 $HERE/ui.py"
 mem() {

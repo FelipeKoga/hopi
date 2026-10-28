@@ -4,10 +4,12 @@ import dev.koga.hopi.android.HopiAndroid
 import dev.koga.hopi.android.internal.AndroidCapture
 import dev.koga.hopi.android.internal.HopiHttpURLConnection
 import dev.koga.hopi.android.internal.CACHED_CLIENTS
-import dev.koga.hopi.android.internal.HopiInitProvider
 import dev.koga.hopi.android.internal.HopiOkHttpInterceptor
+import dev.koga.hopi.android.internal.NetworkTool
 import dev.koga.hopi.android.internal.interceptors
 import dev.koga.hopi.core.capture.PlatformCapture
+import dev.koga.hopi.core.start.HopiToolContext
+import dev.koga.hopi.core.start.StartConfig
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ktor.Hopi
 import dev.koga.hopi.ktor.HopiConfig
@@ -52,7 +54,7 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
         val store = args["store"] as HopiStore
         val base = args["base"] as String
         if (args["start"] == true) {
-            val okHttp = HopiInitProvider.okHttpState(javaClass.classLoader)
+            val okHttp = NetworkTool.okHttpState(javaClass.classLoader)
             AndroidCapture.start(
                 AndroidCapture.Settings(maxBodyBytes = args["maxBodyBytes"] as Long, summaryLog = false, rules = args["rules"] != false),
                 okHttp,
@@ -63,7 +65,7 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
         val out = linkedMapOf<String, Any?>(
             "started" to HopiAndroid.isStarted,
             "instrumented" to HopiAndroid.okHttpInstrumented,
-            "okHttpState" to HopiInitProvider.okHttpState(javaClass.classLoader).name,
+            "okHttpState" to NetworkTool.okHttpState(javaClass.classLoader).name,
         )
         when (val name = args["name"]) {
             "okhttpGet" -> okhttpGet(base, out)
@@ -95,6 +97,15 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
             "urlGet" -> urlGet(base, out)
             "urlPost" -> urlPost(base, out)
             "urlMissing" -> urlMissing(base, out)
+            "networkTool" -> {
+                // The start sequence's network tool, as the generated configuration lists it, with
+                // the settings the test passes.
+                val tool = NetworkTool(okhttp = args["okhttp"] as Boolean, urlConnection = args["urlConnection"] as Boolean, rules = args["rules"] as Boolean)
+                out["note"] = tool.start(HopiToolContext(StartConfig(summaryLog = false), platform = null))
+                out["started"] = HopiAndroid.isStarted
+                out["instrumented"] = HopiAndroid.okHttpInstrumented
+                out["rules"] = AndroidCapture.rules
+            }
             "invalidCaps" -> {
                 out["result"] = AndroidCapture.start(AndroidCapture.Settings(maxEntries = 0, summaryLog = false), AndroidCapture.OkHttp.Absent, injectedStore = store)
                 out["started"] = HopiAndroid.isStarted

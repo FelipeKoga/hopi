@@ -8,8 +8,12 @@ uiautomator dump here, since its accessibility traversal runs on the app's main 
 swipes and back presses with fixed waits, and attributes each 1 s window to the step that was
 running when it ended. A gap in a window is then the main thread stalled, not merely idle.
 
-usage: ui_hold.py <label> <spec> <hold s> <steps> [--cap BYTES] [--store BYTES]
+usage: ui_hold.py <label> <spec> <hold s> <steps> [--cap BYTES] [--store BYTES] [--build]
 steps: `name@x,y@seconds;name@swipe@seconds;name@back@seconds;...`
+--cap and --store are capture's caps, passed as the Ktor plugin's `--el` extras, as giant.py does; on
+Android OkHttp capture and the store take the installed APK's (`-Psample.maxBodyBytes` /
+`-Psample.maxTotalBytes` at build time). --build first builds and installs the working tree's debug
+sample with them, replacing the installed app.
 Output: one line per step in $EVIDENCE/android-ui-hold.jsonl, every window in android-ui-hold.ndjson.
 """
 import json, os, queue, re, subprocess, sys, threading, time
@@ -33,13 +37,22 @@ def main():
             name, action, seconds = part.split("@")
             steps.append((name, action, float(seconds)))
     spec = "%s;hold=%d;window=1;delay=1" % (spec, hold)
+    cap = args[args.index("--cap") + 1] if "--cap" in args else None
+    store = args[args.index("--store") + 1] if "--store" in args else None
+    if "--build" in args:
+        command = [os.path.join(REPO, "gradlew"), ":sample:androidApp:installDebug", "--console=plain", "-q"]
+        if cap:
+            command.append("-Psample.maxBodyBytes=" + cap)
+        if store:
+            command.append("-Psample.maxTotalBytes=" + store)
+        subprocess.run(command, cwd=REPO, check=True)
     adb("shell", "am", "force-stop", PKG)
     adb("logcat", "-c")
     start = ["shell", "am", "start", "-W", "-n", PKG + "/.MainActivity", "--es", "giant", "'" + spec + "'"]
-    if "--cap" in args:
-        start += ["--el", "maxBodyBytes", args[args.index("--cap") + 1]]
-    if "--store" in args:
-        start += ["--el", "maxTotalBytes", args[args.index("--store") + 1]]
+    if cap:
+        start += ["--el", "maxBodyBytes", cap]
+    if store:
+        start += ["--el", "maxTotalBytes", store]
     adb(*start)
     logcat = subprocess.Popen([ADB, "logcat", "-v", "raw", "-s", "HopiSample:I", "AndroidRuntime:E", "ActivityManager:E"],
                               stdout=subprocess.PIPE, text=True)

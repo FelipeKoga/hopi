@@ -127,7 +127,10 @@ Debug runs pass `-Phopi.enabled=true` (the Xcode build phase for the Debug confi
 it resolves the real modules in debug builds and the noops in release builds, whatever the
 property says. Without the plugin, an Android-only app can select by build type
 (`debugImplementation` real, `releaseImplementation` noop); an app module on top of a KMP shared
-module must not, since the shared module already brings one of the two.
+module must not, since the shared module already brings one of the two. Such an app's debug build
+still merges `hopi-core`'s start provider, which finds no generated configuration and at each
+launch writes one notice line, `not started: no generated configuration; …`; the Ktor plugin
+records as before.
 
 Install the plugin on each `HttpClient` you want to see, when the app starts:
 

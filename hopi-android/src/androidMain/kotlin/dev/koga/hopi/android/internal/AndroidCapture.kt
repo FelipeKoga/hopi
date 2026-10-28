@@ -3,18 +3,18 @@ package dev.koga.hopi.android.internal
 import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.capture.CaptureInstallation
 import dev.koga.hopi.core.capture.PlatformCapture
-import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.log.emitPlatformLogLine
+import dev.koga.hopi.core.log.noticeLine
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.store.HopiStore
 
 /**
  * Process-wide state of automatic capture on Android: whether it runs (read by every hook, one
- * volatile read), its settings, and, from the first recorded request on, its store installation. Nothing here runs on the main thread except [start], from the provider.
+ * volatile read), its settings, and, from the first recorded request on, its store installation. Nothing here runs on the main thread except [start], from [NetworkTool] in the provider's start sequence.
  */
 @HopiInternalApi
 public object AndroidCapture {
-    /** The settings of the `hopi { }` block, as the plugin generated them (or the defaults). */
+    /** The start configuration plus [NetworkTool]'s `rules`, as the plugin generated them (the defaults are for tests). */
     public data class Settings(
         val maxEntries: Int = HopiStore.DEFAULT_MAX_ENTRIES,
         val maxTotalBytes: Long = HopiStore.DEFAULT_MAX_TOTAL_BYTES,
@@ -28,7 +28,7 @@ public object AndroidCapture {
         val rules: Boolean = true,
     )
 
-    /** What the provider found of OkHttp in this APK. */
+    /** What [NetworkTool] found of OkHttp in this APK. */
     public enum class OkHttp {
         /** No OkHttp class: nothing to cover. */
         Absent,
@@ -145,8 +145,8 @@ public object AndroidCapture {
         return true
     }
 
-    /** A notice line of the summary log (no `id`, so agents skip it). */
-    public fun notice(text: String): String = JsonWriter().beginObject().field("hopi", 1).field("notice", text).endObject().toString()
+    /** A notice line of the summary log (no `id`, so agents skip it): core's [noticeLine]. */
+    public fun notice(text: String): String = noticeLine(text)
 
     /** `"<Class>: <message>"`, the Ktor plugin's error text. */
     public fun describe(error: Throwable): String {

@@ -11,9 +11,11 @@ import org.gradle.api.tasks.TaskAction
 
 /**
  * Writes the `hopi { }` block into the app as `dev.koga.hopi.android.generated.HopiGeneratedConfig`,
- * a subclass of hopi-android's `HopiConfigValues` that passes the values to its constructor, which
- * the provider calls once (docs/design/android-capture.md, "Auto-start"). Only debuggable variants
- * get it, and only they depend on hopi-android.
+ * a Java subclass of hopi-core's `HopiConfigValues` whose constructor passes the global settings,
+ * then the tool list, each tool constructed with its own settings: hopi-android's `NetworkTool`
+ * and, with `perf { enabled = true }`, hopi-perf's `PerfEntry`. The provider reads it once and
+ * hands the list to the start sequence (docs/design/android-capture.md, "Auto-start"). Only
+ * debuggable variants get it, and only they depend on hopi-core and the runtimes.
  */
 @CacheableTask
 public abstract class GenerateHopiConfig : DefaultTask() {
@@ -31,10 +33,10 @@ public abstract class GenerateHopiConfig : DefaultTask() {
     @get:Input public abstract val redactedQueryParameters: ListProperty<String>
     @get:Input public abstract val redactionDisabled: Property<Boolean>
 
-    /** `perf { enabled = true }`: the provider hands the app to hopi-perf. */
+    /** `perf { enabled = true }`: the tool list names hopi-perf's tool. */
     @get:Input public abstract val perfPresent: Property<Boolean>
 
-    /** A bit set, one bit per monitor in `HopiMonitor` order. */
+    /** A bit set, one bit per monitor in `HopiMonitor` order, which `PerfEntry` decodes. */
     @get:Input public abstract val perfAutoStart: Property<Int>
     @get:Input public abstract val perfHangThresholdMs: Property<Long>
     @get:Input public abstract val perfHangHeartbeat: Property<Boolean>
@@ -58,8 +60,6 @@ public abstract class GenerateHopiConfig : DefaultTask() {
         appendLine("public final class HopiGeneratedConfig extends dev.koga.hopi.android.internal.HopiConfigValues {")
         appendLine("    public HopiGeneratedConfig() {")
         appendLine("        super(")
-        appendLine("            ${okhttp.get()}, // okhttp")
-        appendLine("            ${urlConnection.get()}, // urlConnection")
         appendLine("            ${maxEntries.get()}, // maxEntries")
         appendLine("            ${maxTotalBytes.get()}L, // maxTotalBytes")
         appendLine("            ${maxBodyBytes.get()}L, // maxBodyBytes")
@@ -68,11 +68,18 @@ public abstract class GenerateHopiConfig : DefaultTask() {
         appendLine("            ${redactionDisabled.get()}, // redactionDisabled")
         appendLine("            new String[] ${javaStrings(redactedHeaders.get())}, // redactHeaders")
         appendLine("            new String[] ${javaStrings(redactedQueryParameters.get())}, // redactQueryParameters")
-        appendLine("            ${rules.get()}, // rules")
-        appendLine("            ${perfPresent.get()}, // perfPresent")
-        appendLine("            ${perfAutoStart.get()}, // perfAutoStart")
-        appendLine("            ${perfHangThresholdMs.get()}L, // perfHangThresholdMs")
-        appendLine("            ${perfHangHeartbeat.get()} // perfHangHeartbeat")
+        // The tool list (the constructor's varargs): a new tool is one more element, never a parameter.
+        val perf = perfPresent.get()
+        appendLine(
+            "            new dev.koga.hopi.android.internal.NetworkTool(${okhttp.get()}, ${urlConnection.get()}, ${rules.get()})" +
+                (if (perf) "," else "") + " // okhttp, urlConnection, rules",
+        )
+        if (perf) {
+            appendLine(
+                "            new dev.koga.hopi.perf.internal.PerfEntry(${perfAutoStart.get()}, ${perfHangThresholdMs.get()}L, ${perfHangHeartbeat.get()})" +
+                    " // perf { }: autoStart, hangThresholdMs, hangHeartbeat",
+            )
+        }
         appendLine("        );")
         appendLine("    }")
         appendLine("}")

@@ -1,5 +1,7 @@
 #!/bin/sh
 # Copy cURL and Share of an 8 MB POST body (8 MB cap) on the emulator, three times each.
+# Build <apk> with `-Psample.maxBodyBytes=8388608`: on Android the cap is a build setting, and
+# giant.py's --cap only labels the run and sets the Ktor plugin's own cap.
 # usage: post.sh <label> <apk>
 S=$(cd "$(dirname "$0")" && pwd); A=~/Library/Android/sdk/platform-tools/adb
 EVIDENCE=${EVIDENCE:-$(cd "$S/../../.." && pwd)/build/evidence/giant-json}

@@ -343,8 +343,12 @@ Rules for the wrapper:
 
 ## Auto-start
 
-The real runtime's `AndroidManifest.xml` declares one provider. It is merged only into debuggable
-variants, because only they depend on the real runtime:
+`hopi-core`'s `AndroidManifest.xml` declares one provider (`hopi-android`'s until the
+runtime-split plan's stage 4, 2026-10-28; the class kept its package). With the plugin it is
+merged only into debuggable variants, because only they depend on `hopi-core`: the plugin adds it
+with the runtime to debuggable build types. An app that links a real Hopi module without the plugin
+merges it wherever that module goes, where it starts nothing and writes one notice line
+(ARCHITECTURE.md, Android capture, "Start").
 
 ```xml
 <provider
@@ -357,21 +361,38 @@ variants, because only they depend on the real runtime:
 A plain `ContentProvider` is used, not androidx.startup, so there is no new dependency and no
 merge with the app's own `InitializationProvider`. The highest `initOrder` makes it start before
 other SDKs' providers that may make requests from their own providers (Firebase's
-`FirebaseInitProvider` uses 100). `onCreate` (main thread) does three things. (1) It reads the
-configuration from resources (`hopi_*` bools, integers and string arrays, a few lookups). The
-runtime's own `res/` holds the defaults, and the plugin generates a resource overlay in the app
-from the `hopi { … }` block, so it also works without the plugin (with defaults). (2) It validates
-the caps; invalid caps give a notice line and no start, `HopiUrlSession`'s rule. (3) It sets
-`started`. If `Class.forName("okhttp3.internal.connection.RealCall", false, loader)` (or
+`FirebaseInitProvider` uses 100). `onCreate` (main thread) does four things. (1) It checks
+`FLAG_DEBUGGABLE` in the app's `ApplicationInfo` (a companion function of the flags, which fails
+closed when there is none): an app that is not debuggable gets one notice line, always, since the
+configuration is not read, `not started: <package> is not debuggable (FLAG_DEBUGGABLE unset); a
+Hopi runtime reached a non-debuggable build, check the app's dependencies`, and nothing else. (2)
+It reads the configuration: not resources (see "As built"), but a Java class the plugin generates
+into each debuggable variant from the `hopi { … }` block,
+`dev.koga.hopi.android.generated.HopiGeneratedConfig extends HopiConfigValues` (core's), whose
+constructor passes the global settings (the store caps, redaction, `summaryLog`, `agentBridge`)
+and then the tool list, each tool constructed with its own settings:
+`new NetworkTool(okhttp, urlConnection, rules)` and, with `perf { enabled = true }`,
+`new PerfEntry(autoStart, hangThresholdMs, hangHeartbeat)`. One `Class.forName` and one
+constructor call. Without that class (a runtime added without the plugin) it writes one notice line,
+`not started: no generated configuration; apply the dev.koga.hopi Gradle plugin to the app`, and
+starts nothing: the tool list lives in that class, and nothing was rewritten anyway (before stage 4
+it started with defaults). (3) It registers core's current-activity callbacks (perf-monitors.md,
+"How the monitors find the app"). (4) It runs core's start sequence (ARCHITECTURE.md, "Start
+sequence") with the tool list: invalid caps give a notice line and no start, `HopiUrlSession`'s
+rule; the default store's caps are preset; with `agentBridge` the store installation is made at
+once on a background thread; then each tool starts. The network tool sets `started`. If
+`Class.forName("okhttp3.internal.connection.RealCall", false, loader)` (or
 `okhttp3.RealCall`) loads and carries `@HopiInstrumented`, it also calls
 `PlatformCapture.coverWithPassThrough("io.ktor.client.engine.okhttp.")`; for `okhttp3.RealCall`
 only when `okhttp3.RequestBody` has `isDuplex()` (OkHttp 3.14 and later, one reflective lookup made
 only for 3.x). When the generated configuration says the `URL` calls of Ktor's Android engine were
 rewritten (`urlConnection`, false when an exclude pattern matches
-`io.ktor.client.engine.android.AndroidClientEngine`, and false without the plugin), it also covers
+`io.ktor.client.engine.android.AndroidClientEngine`), it also covers
 `io.ktor.client.engine.android.`. The class is not initialized, and no OkHttp class runs code. The consumer keep rules (below) keep `RealCall`'s name and the annotation in
-a minified debug build. Requests made before the provider runs (`Application.attachBaseContext`,
-other processes) are not recorded.
+a minified debug build, and `hopi-core`'s keep the provider and the generated class. Requests made
+before the provider runs (`Application.attachBaseContext`, other processes) are not recorded. With
+`summaryLog` the provider ends with one line of its own cost, in parts: `android capture started
+(okhttp instrumented, <total> us; config <n> us, network <n> us, perf <n> us)`.
 
 ## Dedupe with the Ktor plugin
 
@@ -452,7 +473,7 @@ settings.gradle.kts         pluginManagement { includeBuild("gradle-plugin") }
 gradle-plugin/              an included build (its own settings.gradle.kts, the root's version catalog through versionCatalogs { from(files("../gradle/libs.versions.toml")) })
   instrument/               plain JVM (kotlin("jvm")), artifact dev.koga.hopi:hopi-instrument: the ASM visitors, HookDescriptors; ASM compileOnly (AGP supplies it at run time), testImplementation for its tests
   plugin/                   java-gradle-plugin, id "dev.koga.hopi", class dev.koga.hopi.gradle.HopiPlugin, artifact dev.koga.hopi:hopi-gradle-plugin; compileOnly com.android.tools.build:gradle-api:9.4.0; implementation project(":instrument")
-hopi-android/               KMP library, android target only (com.android.kotlin.multiplatform.library, like the other modules), explicitApi(), ABI validation; depends on hopi-core; compileOnly OkHttp 4.12.0 (the app brings its own; 4.12 is the lowest API Hopi compiles against, so 5.x-only API cannot creep in); androidResources enabled for the config defaults; manifest provider; consumer keep rules
+hopi-android/               KMP library, android target only (com.android.kotlin.multiplatform.library, like the other modules), explicitApi(), ABI validation; depends on hopi-core; compileOnly OkHttp 4.12.0 (the app brings its own; 4.12 is the lowest API Hopi compiles against, so 5.x-only API cannot creep in); consumer keep rules (as built: no resources, the configuration is a generated class; the manifest provider is hopi-core's since the runtime-split plan's stage 4)
 hopi-android-noop/          the same public API, no dependency, no manifest entry, no resources
 sample/fakesdk/             com.android.library, Java only, no Hopi plugin, no Hopi dependency (the third-party stand-in, below)
 ```
@@ -482,7 +503,10 @@ is excluded from the ABI dumps the same way `hopi-ui` excludes `dev.koga.hopi.ui
 reason recorded in the build script: the class is the manifest's, and the noop has no manifest. The
 pair is added to `noopTwins` in the root build, so `:checkNoopParity` covers it, with a
 `DefaultsParityTest`-style check that both `isStarted` and `okHttpInstrumented` read false in the
-noop.
+noop. (Since the runtime-split plan's stage 4, 2026-10-28, `HopiInitProvider`, its manifest entry,
+`HopiConfigValues` and `GeneratedConfig` are `hopi-core`'s, in the same package; `hopi-android`'s
+excluded package keeps the hooks, the interceptor, the wrappers and the network tool the generated
+configuration names, which the app's own classes must reach.)
 
 ### DSL
 
@@ -505,8 +529,9 @@ hopi {                                   // all optional; defaults are HopiUrlSe
 ```
 
 Every value is a Gradle `Property` and is configuration-cache safe. A task per debuggable variant
-(`generate<Variant>HopiConfig`) writes `values/hopi_config.xml`, registered with
-`variant.sources.res?.addGeneratedSourceDirectory(…)`.
+(`generate<Variant>HopiConfig`) writes the generated configuration class (Auto-start), registered
+with `variant.sources.java?.addGeneratedSourceDirectory(…)`; the design's
+`values/hopi_config.xml` became that class while building it (see "As built").
 
 ### Variant wiring
 
@@ -516,8 +541,10 @@ Every value is a Gradle `Property` and is configuration-cache safe. A task per d
   with `ALL` is what covers the libraries.
 - `androidComponents.finalizeDsl`: for each build type, it adds `<buildType>Implementation`
   of `dev.koga.hopi:hopi-android:<version>` when `isDebuggable` (and `enabled`), else of
-  `hopi-android-noop`. Debuggable is a build-type property, and finalizeDsl is the last point
-  where dependencies can be declared.
+  `hopi-android-noop`; since the runtime-split plan's stage 4, a debuggable one also gets
+  `hopi-core`, because javac compiles the generated configuration against core's types and every
+  runtime takes core as `implementation` only. Debuggable is a build-type property, and
+  finalizeDsl is the last point where dependencies can be declared.
 - `androidComponents.onVariants`: for `variant.debuggable && enabled`, it calls
   `variant.instrumentation.transformClassesWith(HopiClassVisitorFactory::class.java,
   InstrumentationScope.ALL) { okhttp.set(…); urlConnection.set(…) }` and adds the excludes.
@@ -534,8 +561,8 @@ Every value is a Gradle `Property` and is configuration-cache safe. A task per d
   published module). A unit test reads both files and compares them.
 - **This repository** (the runtime is a project of the root build, and Gradle substitutes only an
   included build's projects for coordinates): the plugin adds `project(":hopi-android")` /
-  `project(":hopi-android-noop")` when `project.rootProject.findProject(":hopi-android")` exists,
-  else the coordinates. Consumers always get the coordinates. The `instrument` module goes the
+  `project(":hopi-android-noop")` (and, since stage 4, `project(":hopi-core")`) when
+  `project.rootProject.findProject` finds that project, else the coordinates. Consumers always get the coordinates. The `instrument` module goes the
   other way: `hopi-android`'s host tests depend on `dev.koga.hopi:hopi-instrument`, which Gradle
   substitutes from the included build.
 - Debug minify: the instrumentation runs on class files before R8, so R8 sees the rewritten
@@ -543,7 +570,9 @@ Every value is a Gradle `Property` and is configuration-cache safe. A task per d
   `HopiInstrumented` annotation (`-keepattributes RuntimeVisibleAnnotations`) and the two
   `RealCall` class names
   (`-keep,allowoptimization,allowshrinking class okhttp3.internal.connection.RealCall`). They apply
-  only where the real runtime is, which is debuggable variants only.
+  only where the real runtime is, which is debuggable variants only. Since stage 4 `hopi-core`'s
+  consumer rules keep the same two packages, for the provider and the generated configuration it
+  loads by name.
 
 ### Twin selection (why `-Phopi.enabled` is no longer needed on Android)
 
@@ -867,7 +896,8 @@ Built as designed, with the deviations below; each has its reason. Files: `gradl
   values, and a resource overlay has to be merged per variant; a class is one lookup and no resource
   processing. (A first version used `public static final` boxed fields read by reflection; eleven
   `getField` calls were replaced by the constructor.) Without the class (the runtime added by hand)
-  the defaults apply.
+  the defaults apply. (History: since the runtime-split plan's stage 4 the class extends core's
+  `HopiConfigValues` and carries the tool list, and without it nothing starts; see "Auto-start".)
 - **Subproject names.** The included build's projects are `hopi-instrument` and
   `hopi-gradle-plugin`, not `instrument` and `plugin`: Gradle substitutes an included build's
   project for a coordinate by its project name, and hopi-android's tests name

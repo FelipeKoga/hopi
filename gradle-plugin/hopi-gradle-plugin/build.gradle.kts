@@ -112,10 +112,14 @@ val functionalTestTask = tasks.register<Test>("functionalTest") {
     systemProperty("hopi.agpVersion", libs.versions.agp.get())
     systemProperty("hopi.okhttpVersion", libs.versions.okhttp.get())
     systemProperty("hopi.okhttp5Version", libs.versions.okhttp5.get())
-    // The runtime's own consumer rules, which the fixture's stand-in ships for its minified variant.
+    // The runtime's and core's own consumer rules, which the fixture's stand-ins ship for its
+    // minified variant (core's keep the provider and the generated configuration).
     val consumerRules = layout.projectDirectory.file("../../hopi-android/consumer-rules.pro")
     inputs.file(consumerRules).withPropertyName("consumerRules")
     systemProperty("hopi.consumerRules", consumerRules.asFile.absolutePath)
+    val coreConsumerRules = layout.projectDirectory.file("../../hopi-core/consumer-rules.pro")
+    inputs.file(coreConsumerRules).withPropertyName("coreConsumerRules")
+    systemProperty("hopi.coreConsumerRules", coreConsumerRules.asFile.absolutePath)
     systemProperty("hopi.sdkDir", androidSdkDir())
     // One Gradle build at a time on the development machine: the fixture build runs after the rest.
     maxParallelForks = 1

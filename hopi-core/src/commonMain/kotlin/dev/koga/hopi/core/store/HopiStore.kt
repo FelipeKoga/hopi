@@ -762,20 +762,47 @@ public class HopiStore(
 
         private val defaultStore = AtomicReference<HopiStore?>(null)
 
-        /** The process-wide store; created with default caps unless [configureDefault] ran first. */
+        /**
+         * The process-wide store, created by its first reader: with the caps of [presetDefault] when
+         * it ran, else with the default caps, unless [configureDefault] ran first.
+         */
         public val default: HopiStore
             get() = defaultStore.load() ?: configureDefault()
 
-        /** Creates the process-wide store with these caps if none exists yet; otherwise returns it unchanged. */
+        /**
+         * Sets the caps the process-wide store will be created with, without creating it (its
+         * constructor starts the `hopi-store` thread), so the first reader (a recorder's
+         * installation, a rule's `from(id)`, the bridge) no longer fixes the caps. The first preset
+         * wins; a later one returns false and changes nothing, and a store that already exists keeps
+         * its caps. Valid caps only. The start sequence presets through [DefaultStoreCaps] itself,
+         * which keeps this class unloaded on Android's main thread.
+         */
+        public fun presetDefault(maxEntries: Int, maxTotalBytes: Long): Boolean =
+            DefaultStoreCaps.preset(maxEntries, maxTotalBytes)
+
+        /**
+         * Creates the process-wide store if none exists yet, with the caps of [presetDefault] when it
+         * ran (they win over these arguments), else with these; otherwise returns it unchanged.
+         */
         public fun configureDefault(
             maxEntries: Int = DEFAULT_MAX_ENTRIES,
             maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
         ): HopiStore {
             defaultStore.load()?.let { return it }
-            val candidate = HopiStore(maxEntries, maxTotalBytes)
+            val preset = DefaultStoreCaps.current
+            val candidate = if (preset != null) HopiStore(preset.maxEntries, preset.maxTotalBytes) else HopiStore(maxEntries, maxTotalBytes)
             if (defaultStore.compareAndSet(null, candidate)) return candidate
             candidate.close()
             return defaultStore.load() ?: candidate
+        }
+
+        /**
+         * Closes and forgets the process-wide store and the preset caps, so a test can create the
+         * store again; nothing else in the process may hold the old one.
+         */
+        internal fun resetDefaultForTests() {
+            defaultStore.exchange(null)?.close()
+            DefaultStoreCaps.clear()
         }
     }
 }
