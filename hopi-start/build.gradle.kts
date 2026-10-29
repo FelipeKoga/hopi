@@ -30,8 +30,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             // implementation, not api: the framework exports this module alone, so none of their
-            // types reach Swift. hopi-api comes through core.
+            // types reach Swift. hopi-api comes through core; the network tool is the network
+            // runtime's (hopi-network), the perf tool hopi-perf's.
             implementation(project(":hopi-core"))
+            implementation(project(":hopi-network"))
             implementation(project(":hopi-perf"))
         }
         commonTest.dependencies {

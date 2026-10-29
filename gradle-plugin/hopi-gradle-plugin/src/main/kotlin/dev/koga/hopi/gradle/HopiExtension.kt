@@ -8,10 +8,10 @@ import org.gradle.api.tasks.Nested
 /**
  * The optional `hopi { }` block of an Android application module. Every value has a default, so
  * `plugins { id("dev.koga.hopi") }` alone is the whole setup. The store settings mean what they mean
- * for the Ktor plugin and `HopiUrlSession`.
+ * for `Hopi.start` on iOS and for the Ktor plugin.
  */
 public abstract class HopiExtension {
-    /** False: every variant gets the noop runtime and nothing is instrumented. */
+    /** False: no variant gets a runtime, a transform or a generated class. */
     public abstract val enabled: Property<Boolean>
 
     /** Rewrites OkHttp's `RealCall`, so every OkHttp call is recorded. */

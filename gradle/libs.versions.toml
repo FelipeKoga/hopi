@@ -9,11 +9,11 @@ ktor = "3.5.2"
 androidx-activity = "1.13.0"
 # AGP 9.4.0's own ASM: the Gradle plugin's rewriter compiles against it, AGP supplies it at run time.
 asm = "9.9"
-# hopi-android compiles against the lowest OkHttp it supports, so no 5.x-only API creeps in; the
+# hopi-network compiles against the lowest OkHttp it supports, so no 5.x-only API creeps in; the
 # rewriter's tests also run against the 5.x that Ktor brings.
 okhttp = "4.12.0"
 okhttp5 = "5.3.2"
-# hopi-android's tests only: the 3.x OkHttp versions on either side of RequestBody.isDuplex() (3.14),
+# hopi-network's tests only: the 3.x OkHttp versions on either side of RequestBody.isDuplex() (3.14),
 # with the Okio 1.x each was built with, and the Okio 3 that OkHttp 5 needs.
 okhttp3-old = "3.12.13"
 okio-okhttp3-old = "1.15.0"

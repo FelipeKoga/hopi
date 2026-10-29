@@ -19,17 +19,17 @@ import org.gradle.testkit.runner.TaskOutcome
 
 /**
  * The plugin applied to fixture Android apps, built with AGP by Gradle TestKit
- * (docs/design/android-capture.md, "Tests"): the debug variant is instrumented and gets the real
- * runtime and its provider, the release variant is not touched and gets the noop, and an app with
+ * (docs/design/android-capture.md, "Tests"): the debug variant is instrumented and gets the network
+ * runtime and its provider, the release variant is not touched and gets no runtime, and an app with
  * no OkHttp builds and is instrumented for its `URL` calls. A flavored app on OkHttp 5 (the
  * `okhttp-android` artifact) with a custom debuggable, minified build type and a custom
- * non-debuggable one has exactly its debuggable variants instrumented. The fixture's `hopi-core`,
- * `hopi-android` and `hopi-android-noop` are stand-ins with the runtime's class names (the plugin
- * takes a project of that name over the coordinates): core's holds the provider, its manifest and
- * the generated configuration's base class, `hopi-android`'s the hooks and the network tool the
- * generated class names; the real runtime is tested by hopi-android's own tests. An app with no
- * such projects gets core, the runtime and the twins by their published coordinates, as a consumer
- * of Maven Local does.
+ * non-debuggable one has exactly its debuggable variants instrumented. The fixture's `hopi-core`
+ * and `hopi-network` are stand-ins with the runtime's class names (the plugin takes a project of
+ * that name over the coordinates): core's holds the provider, its manifest and the generated
+ * configuration's base class, `hopi-network`'s the hooks and the network tool the generated class
+ * names; the real runtime is tested by hopi-network's own tests. An app with no such projects gets
+ * core, the runtime and the Ktor twins by their published coordinates, as a consumer of Maven Local
+ * does.
  */
 class HopiPluginFunctionalTest {
     private val fixtures = File(System.getProperty("hopi.fixturesDir"))
@@ -85,7 +85,8 @@ class HopiPluginFunctionalTest {
         assertTrue(REAL_CALL in release.callersOf(INTERCEPTORS))
         assertTrue("com/example/sdk/Sdk" in release.callersOf(OPEN_CONNECTION))
         assertTrue("com/example/app/AppCode" in release.callersOf(OPEN_CONNECTION))
-        assertTrue("dev/koga/hopi/android/HopiAndroid" in release.definedClasses, "the noop stand-in")
+        // No runtime at all: the fixture's release variant names no Hopi module.
+        assertEquals(emptyList(), release.definedClasses.filter { it.startsWith("dev/koga/hopi/") }, "release defines no Hopi class")
         assertFalse(PROVIDER in mergedManifest(project, "app", "release"))
 
         // No OkHttp anywhere in this app: it builds, its URL call goes to the hook, and no okhttp3 class exists.
@@ -133,7 +134,7 @@ class HopiPluginFunctionalTest {
         assertEquals(emptyList(), qa.referencedTypes.filter { it.startsWith("dev/koga/hopi/android/internal/") || it.startsWith("dev/koga/hopi/android/generated/") })
         assertTrue(REAL_CALL in qa.callersOf(INTERCEPTORS))
         assertTrue("com/example/flavored/FlavoredCode" in qa.callersOf(OPEN_CONNECTION))
-        assertTrue("dev/koga/hopi/android/HopiAndroid" in qa.definedClasses, "the noop stand-in")
+        assertEquals(emptyList(), qa.definedClasses.filter { it.startsWith("dev/koga/hopi/") }, "qa defines no Hopi class")
         assertFalse(PROVIDER in mergedManifest(project, "flavored", "freeQa"))
     }
 
@@ -141,12 +142,12 @@ class HopiPluginFunctionalTest {
         project.resolve("$module/build/outputs/apk/$flavor/$buildType").walkTopDown().single { it.extension == "apk" }
 
     /**
-     * The published-coordinates path (a consumer of Maven Local): with no `hopi-android` or twin
-     * project in the build, the plugin adds `dev.koga.hopi:hopi-android(-noop)` at its own version,
+     * The published-coordinates path (a consumer of Maven Local): with no `hopi-network` or twin
+     * project in the build, the plugin adds `dev.koga.hopi:hopi-network` at its own version,
      * `hopi-core` and, with `perf { enabled = true }`, `hopi-perf` to debug only, and swaps the Ktor
      * twins a library names by their coordinates, in both directions: the shared module asks for
-     * `hopi-ktor-noop`, the debug APK gets the real modules and the release APK the noops and no
-     * `hopi-perf` at all. `hopi-api`, which the shared module also names (`HopiRules`, `HopiPerf`),
+     * `hopi-ktor-noop`, the debug APK gets the real modules and the release APK the Ktor noop and no
+     * runtime at all. `hopi-api`, which the shared module also names (`HopiRules`, `HopiPerf`),
      * has no twin: both APKs get it. The constraint the plugin adds in debug, `hopi-api` at its own
      * version, is not checked here: every stand-in is published at that version, the one the shared
      * module names, so the APKs would be the same without it. The stand-ins are jars with one marker
@@ -162,7 +163,7 @@ class HopiPluginFunctionalTest {
         val repo = root.resolve("repo").path.replace("\\", "/")
         val standIns = root.resolve("stand-ins")
         writeGradleFiles(standIns)
-        val published = listOf("hopi-api", "hopi-core", "hopi-android", "hopi-android-noop", "hopi-ktor", "hopi-ktor-noop", "hopi-perf")
+        val published = listOf("hopi-api", "hopi-core", "hopi-network", "hopi-ktor", "hopi-ktor-noop", "hopi-perf")
         standIns.write("settings.gradle.kts", published.joinToString("\n") { "include(\":$it\")" })
         standIns.write(
             "build.gradle.kts",
@@ -182,7 +183,7 @@ class HopiPluginFunctionalTest {
                 }
             }
             // The tools the generated configuration names implement core's tool interface.
-            for (tool in listOf(":hopi-android", ":hopi-perf")) {
+            for (tool in listOf(":hopi-network", ":hopi-perf")) {
                 project(tool) { dependencies { "implementation"(project(":hopi-core")) } }
             }
             """.trimIndent(),
@@ -195,7 +196,7 @@ class HopiPluginFunctionalTest {
         // constructs the tools it lists.
         standIns.write("hopi-core/src/main/java/dev/koga/hopi/android/internal/HopiConfigValues.java", CONFIG_VALUES)
         standIns.write("hopi-core/src/main/java/dev/koga/hopi/core/start/HopiTool.java", TOOL)
-        standIns.write("hopi-android/src/main/java/dev/koga/hopi/android/internal/NetworkTool.java", NETWORK_TOOL)
+        standIns.write("hopi-network/src/main/java/dev/koga/hopi/android/internal/NetworkTool.java", NETWORK_TOOL)
         standIns.write("hopi-perf/src/main/java/dev/koga/hopi/perf/internal/PerfEntry.java", PERF_ENTRY)
         runner(standIns, "publishAllPublicationsToStandInsRepository").build()
 
@@ -258,12 +259,15 @@ class HopiPluginFunctionalTest {
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:generateDebugHopiConfig")?.outcome, result.output)
         val debug = DexReader.ofApk(project.resolve("app/build/outputs/apk/debug/app-debug.apk")).definedClasses
         val release = DexReader.ofApk(project.resolve("app/build/outputs/apk/release/app-release-unsigned.apk")).definedClasses
-        for ((real, noop) in listOf("hopi-android" to "hopi-android-noop", "hopi-ktor" to "hopi-ktor-noop")) {
+        for ((real, noop) in listOf("hopi-ktor" to "hopi-ktor-noop")) {
             assertTrue("dev/koga/hopi/standin/${marker(real)}" in debug, "debug has $real: ${debug.filter { it.startsWith("dev/koga/hopi/") }}")
             assertFalse("dev/koga/hopi/standin/${marker(noop)}" in debug, "debug has no $noop")
             assertTrue("dev/koga/hopi/standin/${marker(noop)}" in release, "release has $noop: ${release.filter { it.startsWith("dev/koga/hopi/") }}")
             assertFalse("dev/koga/hopi/standin/${marker(real)}" in release, "release has no $real")
         }
+        // The network runtime: debug only, no twin.
+        assertTrue("dev/koga/hopi/standin/${marker("hopi-network")}" in debug, "debug has hopi-network")
+        assertFalse("dev/koga/hopi/standin/${marker("hopi-network")}" in release, "release has no hopi-network")
         // The perf monitors' runtime, from `perf { enabled = true }`: debug only, no twin.
         assertTrue("dev/koga/hopi/standin/${marker("hopi-perf")}" in debug, "debug has hopi-perf")
         assertFalse("dev/koga/hopi/standin/${marker("hopi-perf")}" in release, "release has no hopi-perf")
@@ -307,7 +311,7 @@ class HopiPluginFunctionalTest {
         val okhttp = System.getProperty("hopi.okhttpVersion")
         val repo = System.getProperty("hopi.functionalRepo")
         writeGradleFiles(root)
-        val modules = if (name == "apps") listOf("app", "plain", "flavored", "sdk", "hopi-core", "hopi-android", "hopi-android-noop") else listOf("lib")
+        val modules = if (name == "apps") listOf("app", "plain", "flavored", "sdk", "hopi-core", "hopi-network") else listOf("lib")
         root.write(
             "settings.gradle.kts",
             """
@@ -485,15 +489,15 @@ class HopiPluginFunctionalTest {
             """.trimIndent(),
         )
         root.write(
-            "hopi-android/build.gradle.kts",
+            "hopi-network/build.gradle.kts",
             androidModule(
-                "com.android.library", "dev.koga.hopi.android", hopi = false,
+                "com.android.library", "dev.koga.hopi.network", hopi = false,
                 dependencies = "compileOnly(\"com.squareup.okhttp3:okhttp:$okhttp\"); implementation(project(\":hopi-core\"))",
                 extra = "defaultConfig { consumerProguardFiles(\"consumer-rules.pro\") }",
             ),
         )
-        File(System.getProperty("hopi.consumerRules")).copyTo(root.resolve("hopi-android/consumer-rules.pro"))
-        val internal = "hopi-android/src/main/java/dev/koga/hopi/android/internal"
+        File(System.getProperty("hopi.consumerRules")).copyTo(root.resolve("hopi-network/consumer-rules.pro"))
+        val internal = "hopi-network/src/main/java/dev/koga/hopi/android/internal"
         root.write("$internal/HopiOkHttpHooks.java", "package dev.koga.hopi.android.internal;\npublic final class HopiOkHttpHooks {\n    public static java.util.List<okhttp3.Interceptor> interceptors(okhttp3.OkHttpClient client) { return client.interceptors(); }\n}\n")
         root.write(
             "$internal/HopiUrlHooks.java",
@@ -512,9 +516,6 @@ class HopiPluginFunctionalTest {
         )
         root.write("$internal/HopiInstrumented.java", "package dev.koga.hopi.android.internal;\n@java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)\npublic @interface HopiInstrumented {}\n")
         root.write("$internal/NetworkTool.java", NETWORK_TOOL)
-        root.write("hopi-android/src/main/java/dev/koga/hopi/android/HopiAndroid.java", "package dev.koga.hopi.android;\npublic final class HopiAndroid { public static boolean real() { return true; } }\n")
-        root.write("hopi-android-noop/build.gradle.kts", androidModule("com.android.library", "dev.koga.hopi.android.noop", hopi = false))
-        root.write("hopi-android-noop/src/main/java/dev/koga/hopi/android/HopiAndroid.java", "package dev.koga.hopi.android;\npublic final class HopiAndroid { public static boolean real() { return false; } }\n")
         return root
     }
 
@@ -581,7 +582,7 @@ class HopiPluginFunctionalTest {
             public interface HopiTool {}
         """.trimIndent()
 
-        /** hopi-android's network tool, with the constructor the generated configuration calls. */
+        /** hopi-network's Android network tool, with the constructor the generated configuration calls. */
         val NETWORK_TOOL = """
             package dev.koga.hopi.android.internal;
             public final class NetworkTool implements dev.koga.hopi.core.start.HopiTool {

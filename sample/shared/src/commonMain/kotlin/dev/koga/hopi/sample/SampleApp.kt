@@ -59,8 +59,9 @@ public class PlatformAction(public val label: String, public val run: suspend ()
  */
 public object SampleBuild {
     /**
-     * `HopiAndroid.isStarted`, set by the Android activity before the UI: in this app capture runs
-     * exactly when the plugin gave the variant the real modules. Null on iOS.
+     * The network status of `hopi-api`'s runtime registry (`networkStarted`), set by the Android
+     * activity before the UI: in this app capture runs exactly when the plugin gave the variant
+     * Hopi's runtimes, in debug. Null on iOS.
      */
     public var androidCaptureStarted: Boolean? = null
 

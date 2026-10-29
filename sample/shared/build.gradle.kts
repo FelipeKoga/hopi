@@ -17,9 +17,6 @@ plugins {
 // the Debug configuration); anything built without it ships the noop.
 val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
 
-// Automatic URLSession capture, iOS only (Android has no URLSession): the real module or its noop.
-val urlSessionModule = if (hopiEnabled) project(":hopi-urlsession") else project(":hopi-urlsession-noop")
-
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
 abstract class GenerateSampleBuildInfo : DefaultTask() {
     @get:Input
@@ -73,10 +70,8 @@ kotlin {
             // Swift calls HopiRules.shared in the rules scenarios (CaptureVerification.swift) with no
             // guard, so every framework exports hopi-api, which holds it and HopiPerf: with no
             // runtime (built without the flag) each call returns -1, false or an empty list, or does
-            // nothing. HopiUrlSession, which Swift no longer calls, stays exported until the
-            // runtime-split plan's stage 9 replaces it.
+            // nothing.
             export(project(":hopi-api"))
-            export(urlSessionModule)
             // Hopi.shared.start { … } from Swift (iOSApp.swift, inside `#if HOPI`): with the flag only,
             // and no noop, so a framework built without it (Xcode's Release) has no Hopi.
             if (hopiEnabled) export(project(":hopi-start"))
@@ -114,8 +109,8 @@ kotlin {
             if (hopiEnabled) kotlin.srcDir("src/iosCaptureProbe/kotlin")
             dependencies {
                 implementation(libs.ktor.client.darwin)
-                api(urlSessionModule)
-                // The iOS entry Swift starts Hopi with; api: the framework exports it.
+                // The iOS entry Swift starts Hopi with, which brings the network and perf runtimes;
+                // api: the framework exports it.
                 if (hopiEnabled) api(project(":hopi-start"))
                 if (hopiEnabled) implementation(project(":hopi-core"))
             }

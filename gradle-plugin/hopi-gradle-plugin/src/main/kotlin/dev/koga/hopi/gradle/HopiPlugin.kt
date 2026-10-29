@@ -12,8 +12,8 @@ import org.gradle.api.artifacts.Configuration
 /**
  * `plugins { id("dev.koga.hopi") }` in an Android application module (docs/design/android-capture.md):
  *
- * - each debuggable build type gets the real runtime (`hopi-android`) and `hopi-core`, every other
- *   one the runtime's noop twin: javac compiles the generated configuration inside the app, and it
+ * - each debuggable build type gets the network runtime (`hopi-network`) and `hopi-core`, every
+ *   other one no runtime at all: javac compiles the generated configuration inside the app, and it
  *   names core's types, which every runtime takes as `implementation` only;
  * - each debuggable variant has OkHttp's `RealCall` and every `java.net.URL` connection call site of
  *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
@@ -23,8 +23,9 @@ import org.gradle.api.artifacts.Configuration
  *   debuggable and to the noop twin otherwise, whichever the app's modules name;
  * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
  *   app's modules name in every build type) at this plugin's version, the version of the
- *   `hopi-core` and `hopi-perf` it adds: core's rules runtime and hopi-perf's runtime implement
- *   internal interfaces of `hopi-api`, and a mismatch would fail at run time;
+ *   `hopi-core`, `hopi-network` and `hopi-perf` it adds: core's rules runtime and hopi-perf's
+ *   runtime implement internal interfaces of `hopi-api`, the network tool calls its registry's
+ *   `registerNetwork`, and a mismatch would fail at run time;
  * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others nothing:
  *   `HopiPerf` is `hopi-api`'s) and the tool list names its tool, which registers the monitors and
  *   starts the `autoStart` ones (docs/design/perf-monitors.md).
@@ -58,7 +59,8 @@ public class HopiPlugin : Plugin<Project> {
             for (buildType in dsl.buildTypes) {
                 val real = extension.enabled.get() && buildType.isDebuggable
                 realByBuildType[buildType.name] = real
-                project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) RUNTIME else RUNTIME_NOOP))
+                // The network runtime, debuggable build types only: the others get no runtime.
+                if (real) project.dependencies.add("${buildType.name}Implementation", runtime(project, RUNTIME))
                 // The generated configuration extends core's HopiConfigValues and lists core's
                 // HopiTool: javac needs core on the variant's compile classpath, and no runtime
                 // exposes it there.
@@ -75,7 +77,7 @@ public class HopiPlugin : Plugin<Project> {
             if (expected != null && expected != real) {
                 throw GradleException(
                     "variant ${variant.name} is ${if (variant.debuggable) "" else "not "}debuggable, unlike its build type " +
-                        "${variant.buildType}; dev.koga.hopi gave it the ${if (expected) "real" else "noop"} runtime",
+                        "${variant.buildType}; dev.koga.hopi gave it ${if (expected) "Hopi's runtimes" else "no runtime"}",
                 )
             }
             if (real) instrument(project, extension, variant)
@@ -145,12 +147,12 @@ public class HopiPlugin : Plugin<Project> {
     }
 
     /**
-     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core, and `hopi-perf` with
-     * `perf { enabled = true }`, at that version: the app names `hopi-api` itself (it holds
-     * `HopiRules` and `HopiPerf`), at whatever version it chose, and core's rules runtime and
-     * hopi-perf's runtime implement internal interfaces of it. A constraint, so it adds nothing to
-     * a build that never names `hopi-api`; none for this repository's project, which is core's own
-     * version.
+     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core and `hopi-network`, and
+     * `hopi-perf` with `perf { enabled = true }`, at that version: the app names `hopi-api` itself
+     * (it holds `HopiRules` and `HopiPerf`), at whatever version it chose, and core's rules runtime
+     * and hopi-perf's runtime implement internal interfaces of it, and `hopi-network`'s network tool
+     * calls its registry's `registerNetwork`. A constraint, so it adds nothing to a build that never
+     * names `hopi-api`; none for this repository's project, which is core's own version.
      */
     private fun alignApi(project: Project, buildType: String) {
         if (project.rootProject.findProject(":$API") != null) return
@@ -191,8 +193,7 @@ public class HopiPlugin : Plugin<Project> {
         const val GROUP = "dev.koga.hopi"
         const val CORE = "hopi-core"
         const val API = "hopi-api"
-        const val RUNTIME = "hopi-android"
-        const val RUNTIME_NOOP = "hopi-android-noop"
+        const val RUNTIME = "hopi-network"
         const val PERF = "hopi-perf"
         val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop")
     }

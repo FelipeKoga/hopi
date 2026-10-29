@@ -4,10 +4,11 @@
 //
 // Build (from the repository root) and run interleaved on a booted simulator:
 //   xcrun --sdk iphonesimulator clang -x objective-c -fobjc-arc -fmodules -O2 \
-//     -target arm64-apple-ios15.0-simulator -Ihopi-core/src/nativeInterop/objc \
-//     -Ihopi-urlsession/src/nativeInterop/objc/test -o /tmp/hopi-ab benchmark/urlsession/ab.m \
-//     hopi-core/src/nativeInterop/objc/hopi_urlsession.m \
-//     hopi-urlsession/src/nativeInterop/objc/test/hopi_fixtures.m -lz -framework Foundation
+//     -target arm64-apple-ios15.0-simulator -Ihopi-network/src/nativeInterop/objc \
+//     -Ihopi-core/src/nativeInterop/objc -Ihopi-network/src/nativeInterop/objc/test \
+//     -o /tmp/hopi-ab benchmark/urlsession/ab.m hopi-network/src/nativeInterop/objc/hopi_urlsession.m \
+//     hopi-core/src/nativeInterop/objc/hopi_hits.m \
+//     hopi-network/src/nativeInterop/objc/test/hopi_fixtures.m -lz -framework Foundation
 //   for arm in off on off on; do xcrun simctl spawn booted /tmp/hopi-ab $arm 1024 200; done
 //
 #import "hopi_urlsession.h"

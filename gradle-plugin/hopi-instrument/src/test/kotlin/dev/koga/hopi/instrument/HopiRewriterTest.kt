@@ -77,7 +77,8 @@ class HopiRewriterTest {
         val hooks = classes.getValue("dev/koga/hopi/android/internal/HopiUrlHooks")
         assertSame(hooks, HopiRewriter.rewrite(hooks))
         assertFalse(HopiRewriter.isInstrumentable("dev.koga.hopi.android.internal.HopiUrlHooks", HopiRewriter.Options()))
-        assertFalse(HopiRewriter.isInstrumentable("dev.koga.hopi.android.HopiAndroid", HopiRewriter.Options()))
+        assertFalse(HopiRewriter.isInstrumentable("dev.koga.hopi.android.Anything", HopiRewriter.Options()))
+        assertFalse(HopiRewriter.isInstrumentable("dev.koga.hopi.android.generated.HopiGeneratedConfig", HopiRewriter.Options()))
         assertTrue(HopiRewriter.isInstrumentable("dev.koga.hopi.core.Anything", HopiRewriter.Options()))
         assertTrue(HopiRewriter.isInstrumentable("okhttp3.internal.connection.RealCall", HopiRewriter.Options(urlConnection = false)))
         assertFalse(HopiRewriter.isInstrumentable("okhttp3.OkHttpClient", HopiRewriter.Options(urlConnection = false)))
@@ -229,7 +230,7 @@ class HopiRewriterTest {
                     }
                 }
             """.trimIndent(),
-            // A recording stand-in for hopi-android's hooks, with their exact descriptors.
+            // A recording stand-in for hopi-network's hooks, with their exact descriptors.
             "dev/koga/hopi/android/internal/HopiUrlHooks.java" to """
                 package dev.koga.hopi.android.internal;
 

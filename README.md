@@ -34,6 +34,17 @@ and no runtime in a release build, which links only the `-noop` twins and, for `
 
 ## Install
 
+Coming from an earlier build of this repository, by stage of the runtime-split plan
+(`docs/design/api-runtime-split-plan.md`):
+- Stage 9: `HopiUrlSession.start { }` (Swift: `HopiUrlSession.shared.start { }`) becomes
+  `Hopi.start { }` (`Hopi.shared.start { }`) on iOS (`hopi-start`, see
+  [iOS](#ios-every-urlsession-request-automatically)), which also registers the performance
+  monitors, starting none (`perf = false` leaves them out); `HopiUrlSession.isStarted` becomes
+  `Hopi.isStarted`, true once the start sequence started. Common code that called
+  `HopiUrlSession.start` for Android or the JVM drops the call, which did nothing there.
+  `HopiAndroid` has no replacement: with `summaryLog` (the default), the start line the provider
+  writes to logcat (`android capture started (…)`) says what started.
+
 Hopi is published to Maven Local only: no remote repository, nothing downloaded from anywhere but
 the repositories your build already uses. Every artifact has the group `dev.koga.hopi` and the
 version of `hopi.version` in this repository's `gradle.properties` (`0.1.0`, the version the
@@ -83,22 +94,20 @@ older ones are not tested):
 | --------------------- | ------------------------------------------------------- |
 | `hopi-ktor`      | The Ktor client plugin                                  |
 | `hopi-ktor-noop` | Same public API as `hopi-ktor`, does nothing       |
-| `hopi-urlsession` | `HopiUrlSession.start()`, which starts URLSession capture alone; `hopi-start` does not need it (it stays until stage 9 of the runtime-split plan) |
-| `hopi-urlsession-noop` | Same public API as `hopi-urlsession`, does nothing |
 | `hopi-start`     | `Hopi.start { }`, the iOS start: URLSession capture and the performance monitors from one call; Debug frameworks only, no noop twin |
 | `hopi-api`       | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS; nothing starts one on the JVM yet), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. No noop twin. The CLI and the desktop viewer need no dependency for rules or perf |
 | `hopi-perf`      | The performance monitors (frames, hangs, CPU, memory) behind `HopiPerf`, each off until started: added by the plugin on Android (`perf { enabled = true }`, debug builds only) and by `hopi-start` on iOS; never named |
-| `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-android` to debug builds and `hopi-android-noop` to release builds, and `hopi-perf` to debug builds with `perf { enabled = true }` |
+| `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-core` and `hopi-network` to debug builds, `hopi-perf` with `perf { enabled = true }`, and nothing to release builds |
 
-`hopi-core` (shared by the real modules, and the runtime behind `HopiRules`), `hopi-android`,
-`hopi-android-noop` and `hopi-perf` (added by the plugin; `hopi-perf` on iOS by `hopi-start`) and
-`hopi-instrument` (the plugin's rewriter) are published too; you never name them. `HopiPerf` is
-in `hopi-api`. Until stage 9 of the runtime-split plan adds the release guard, a module that names
-`hopi-perf` itself ships it, and `hopi-core`, in release builds: nothing swaps it for a noop any
-more. Each KMP artifact has its Android, JVM, `iosArm64` and
-`iosSimulatorArm64` publications with sources and Gradle module metadata (`hopi-start` has the two
-iOS ones only), so `dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right one per
-target.
+`hopi-core` (shared by the real modules, and the runtime behind `HopiRules`), `hopi-network` (the
+network runtime: automatic capture on Android and iOS) and `hopi-perf` (both added by the plugin
+on Android and by `hopi-start` on iOS) and `hopi-instrument` (the plugin's rewriter) are published
+too; you never name them. `HopiPerf` is in `hopi-api`. Until stage 9 of the runtime-split plan adds
+the release guard, a module that names `hopi-network` or `hopi-perf` itself ships it, and
+`hopi-core`, in release builds: nothing swaps it for a noop any more. Each KMP artifact has its
+Android, JVM, `iosArm64` and `iosSimulatorArm64` publications with sources and Gradle module
+metadata (`hopi-start` has the two iOS ones only, `hopi-network` the Android and the two iOS
+ones), so `dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right one per target.
 
 Pick the real artifacts or the noop twins with a Gradle property in the shared module, because a
 KMP module has no build types and iOS frameworks link the same klibs for debug and release:
@@ -177,12 +186,12 @@ recorded once, by the capture (`"source":"okhttp"`), not also by the plugin. It 
 (unless a rule you added applies): nothing is re-sent, no interceptor list your code can read
 changes, and bodies are copied as your code reads them, up to `maxBodyBytes`, never read ahead.
 
-Release (non-debuggable) variants are not instrumented at all and get `hopi-android-noop`; with the
+Release (non-debuggable) variants are not instrumented at all and get no runtime; with the
 plugin, the Ktor plugin is also resolved per variant (real in debug, noop in release), so an
 Android app needs no `-Phopi.enabled`. `hopi-api` (`HopiRules`, `HopiPerf`) is the same in both;
-in debuggable variants the plugin holds it at its own version, that of the `hopi-core` and
-`hopi-perf` it adds, whose runtimes implement internal interfaces of `hopi-api`. Optional
-settings:
+in debuggable variants the plugin holds it at its own version, that of the `hopi-core`,
+`hopi-network` and `hopi-perf` it adds, whose runtimes implement internal interfaces of
+`hopi-api` or write to its registry. Optional settings:
 
 ```kotlin
 hopi {
@@ -194,11 +203,10 @@ hopi {
 }
 ```
 
-`HopiAndroid.isStarted` says whether capture runs (always false in release). Not recorded: Cronet,
-WebView, native HTTP stacks, relocated OkHttp copies, code downloaded at run time, other processes,
-and requests made before the app's content providers start. Records carry `"source":"okhttp"` or
-`"source":"urlconnection"`. Apply the plugin to the application module, not to a library: it
-instruments the libraries from there.
+Not recorded: Cronet, WebView, native HTTP stacks, relocated OkHttp copies, code downloaded at
+run time, other processes, and requests made before the app's content providers start. Records
+carry `"source":"okhttp"` or `"source":"urlconnection"`. Apply the plugin to the application
+module, not to a library: it instruments the libraries from there.
 
 ### iOS: every URLSession request, automatically
 
@@ -270,10 +278,7 @@ Requests whose task was resumed before `Hopi.shared.start` are not recorded, so 
 anything else, SDK initialisation included. Records carry `"source":"urlsession"`; request bodies
 sent as a stream or a file are recorded as skipped (they are single-use, Hopi never reads them),
 downloads by their size. WebSocket and stream tasks, AVPlayer and WKWebView traffic are not
-recorded. `HopiUrlSession.shared.start { }` (`hopi-urlsession` or its noop, exported like the
-other twins) still starts URLSession capture alone, until stage 9 of the runtime-split plan
-merges it into the network runtime; `Hopi.shared.start` is the start to use, and the only one
-that registers the runtime behind `HopiRules` (see [Rules](#rules-mock-fail-delay-edit)).
+recorded.
 
 There is no in-app screen: `HopiScreen`, `HopiLauncher` with its floating button, and the perf HUD
 were removed in stage 5 of the runtime-split plan (D7', `docs/design/api-runtime-split-plan.md`).
@@ -642,10 +647,10 @@ publication check. The base check, one Gradle invocation:
 
 ```bash
 ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest \
-  :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
+  :hopi-cli:test :hopi-connect:test :hopi-desktop:test \
   :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
-  :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \
-  :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
+  :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-network:testAndroidHostTest \
+  :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
 ```
 
 `:checkPublication` publishes every artifact into `build/publication-check` (the plugin, its marker

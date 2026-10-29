@@ -1,0 +1,6 @@
+language = C
+package = dev.koga.hopi.core.internal.hits
+headers = hopi_hits.h
+headerFilter = hopi_hits.h
+staticLibraries = libhopi_hits.a
+linkerOpts = -framework Foundation

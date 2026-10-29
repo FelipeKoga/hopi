@@ -5,7 +5,7 @@ plugins {
     `maven-publish`
 }
 
-// The coordinates hopi-android's host tests name; Gradle substitutes this project for them.
+// The coordinates hopi-network's host tests name; Gradle substitutes this project for them.
 group = "dev.koga.hopi"
 version = providers.fileContents(layout.projectDirectory.file("../../gradle.properties")).asText
     .map { text -> text.lineSequence().first { it.startsWith("hopi.version=") }.substringAfter('=').trim() }.get()

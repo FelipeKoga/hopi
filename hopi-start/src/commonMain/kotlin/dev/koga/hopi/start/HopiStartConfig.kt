@@ -8,9 +8,9 @@ import dev.koga.hopi.core.store.HopiStore
  * log, the agent bridge) and the tools' own settings ([rules]; [perf] and [perfRemoteControl]).
  * Primitive members only, so Swift sees this class and no core type. The store is the process-wide
  * one every recorder shares, and its redaction is the union of every installation's lists. Called
- * first thing, before anything created the store (a Ktor client, `HopiUrlSession.start`), the start
- * presets these caps, so they win over a recorder's own (the Ktor plugin's included); a store that
- * exists already keeps its caps.
+ * first thing, before anything created the store (a Ktor client), the start presets these caps, so
+ * they win over a recorder's own (the Ktor plugin's included); a store that exists already keeps
+ * its caps.
  */
 public class HopiStartConfig internal constructor() {
     /** Runtime kill switch. When false [Hopi.start] starts nothing and writes nothing. */

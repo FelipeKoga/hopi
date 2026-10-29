@@ -1,7 +1,7 @@
 package dev.koga.hopi.start
 
 import dev.koga.hopi.core.start.HopiTool
-import dev.koga.hopi.core.urlsession.NetworkTool
+import dev.koga.hopi.network.internal.NetworkTool
 import dev.koga.hopi.perf.internal.PerfEntry
 
 /**

@@ -58,7 +58,27 @@ class HopiRuntimesTest {
     }
 
     @Test
-    fun resetEmptiesTheSlotsTheDroppedCountsAndTheLabel() {
+    fun theNetworkStatusIsFalseUntilANetworkToolRegisters() {
+        assertFalse(HopiRuntimes.networkStarted)
+        assertFalse(HopiRuntimes.okHttpInstrumented)
+    }
+
+    @Test
+    fun theNetworkStatusIsWrittenOnce() {
+        assertTrue(HopiRuntimes.registerNetwork(okHttpInstrumented = true))
+        assertTrue(HopiRuntimes.networkStarted)
+        assertTrue(HopiRuntimes.okHttpInstrumented)
+        assertFalse(HopiRuntimes.registerNetwork(okHttpInstrumented = false), "a second registration is refused")
+        assertTrue(HopiRuntimes.okHttpInstrumented, "and changes nothing")
+        HopiRuntimes.resetForTests()
+        // iOS's tool: capture runs, OkHttp is Android's.
+        assertTrue(HopiRuntimes.registerNetwork(okHttpInstrumented = false))
+        assertTrue(HopiRuntimes.networkStarted)
+        assertFalse(HopiRuntimes.okHttpInstrumented)
+    }
+
+    @Test
+    fun resetEmptiesTheSlotsTheDroppedCountsTheLabelAndTheNetworkStatus() {
         HopiRuntimes.registerKtorHooks(Any())
         HopiRules.mock("*/a")
         HopiRuntimes.registerRules(FakeRulesRuntime())
@@ -68,6 +88,7 @@ class HopiRuntimesTest {
         HopiRuntimes.registerPerf(FakePerfRuntime())
         assertEquals(1, HopiRuntimes.droppedPerfStarts)
         assertEquals("Checkout", HopiRuntimes.perfScreen)
+        HopiRuntimes.registerNetwork(okHttpInstrumented = true)
         HopiRuntimes.resetForTests()
         assertNull(HopiRuntimes.ktorHooks)
         assertNull(HopiRuntimes.rules)
@@ -75,9 +96,12 @@ class HopiRuntimesTest {
         assertNull(HopiRuntimes.perf)
         assertEquals(0, HopiRuntimes.droppedPerfStarts)
         assertNull(HopiRuntimes.perfScreen)
+        assertFalse(HopiRuntimes.networkStarted)
+        assertFalse(HopiRuntimes.okHttpInstrumented)
         assertTrue(HopiRuntimes.registerKtorHooks(Any()))
         assertTrue(HopiRuntimes.registerRules(FakeRulesRuntime()))
         assertTrue(HopiRuntimes.registerPerf(FakePerfRuntime()))
+        assertTrue(HopiRuntimes.registerNetwork(okHttpInstrumented = false))
     }
 
     @Test

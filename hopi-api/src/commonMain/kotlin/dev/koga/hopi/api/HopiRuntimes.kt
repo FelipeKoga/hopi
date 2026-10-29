@@ -15,7 +15,10 @@ import kotlin.concurrent.atomics.incrementAndFetch
  * the first succeeds. For a slot a different runtime could also claim, the runtime refused writes
  * the notice. The rules and perf slots are typed with this module's own [HopiRulesRuntime] and
  * [HopiPerfRuntime]; a slot whose interface names types this module cannot see (the Ktor hooks)
- * holds what the runtime registered, and the module that reads it knows the type.
+ * holds what the runtime registered, and the module that reads it knows the type. The network
+ * status ([networkStarted], [okHttpInstrumented]) is a slot of the same kind: `hopi-network`'s
+ * network tool writes it once capture runs, on Android and iOS; a debug app's code may read it (the
+ * sample prints it); nothing registers it in a release build, where both values are false.
  */
 @HopiInternalApi
 public object HopiRuntimes {
@@ -25,6 +28,10 @@ public object HopiRuntimes {
     private val perfRuntime = AtomicReference<HopiPerfRuntime?>(null)
     private val droppedPerf = AtomicInt(0)
     private val pendingPerfScreen = AtomicReference<String?>(null)
+
+    // The network status: 0 until a network tool registers, then NETWORK_STARTED, with
+    // OKHTTP_INSTRUMENTED when the Android tool found this APK's OkHttp rewritten.
+    private val network = AtomicInt(0)
 
     /**
      * The Ktor client hooks the network runtime registered, or null. `hopi-ktor` casts the value to
@@ -87,7 +94,29 @@ public object HopiRuntimes {
         pendingPerfScreen.store(name)
     }
 
-    /** Empties every slot, the dropped counts and the kept label, for tests that register a runtime of their own. */
+    /**
+     * True once a network tool of `hopi-network` started capture in this process (Android's or
+     * iOS's, from the start sequence); false without a network runtime, so in every release build.
+     */
+    public val networkStarted: Boolean
+        get() = network.load() != 0
+
+    /**
+     * True when the Android network tool found this APK's OkHttp instrumented (its `RealCall` carries
+     * Hopi's annotation) as capture started; false on iOS and without a network runtime.
+     */
+    public val okHttpInstrumented: Boolean
+        get() = network.load() and OKHTTP_INSTRUMENTED != 0
+
+    /**
+     * Records that a network tool started capture, and whether OkHttp is instrumented; false,
+     * changing nothing, when a network tool registered already. One compare-and-set on a field this
+     * object already holds: no class loads for it on Android's main thread.
+     */
+    public fun registerNetwork(okHttpInstrumented: Boolean): Boolean =
+        network.compareAndSet(0, if (okHttpInstrumented) NETWORK_STARTED or OKHTTP_INSTRUMENTED else NETWORK_STARTED)
+
+    /** Empties every slot, the dropped counts, the kept label and the network status, for tests that register a runtime of their own. */
     public fun resetForTests() {
         ktor.store(null)
         rulesRuntime.store(null)
@@ -95,5 +124,9 @@ public object HopiRuntimes {
         perfRuntime.store(null)
         droppedPerf.store(0)
         pendingPerfScreen.store(null)
+        network.store(0)
     }
+
+    private const val NETWORK_STARTED = 1
+    private const val OKHTTP_INSTRUMENTED = 2
 }

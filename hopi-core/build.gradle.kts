@@ -36,11 +36,12 @@ kotlin {
         main.cinterops.create("oslog") {
             definitionFile.set(project.file("src/nativeInterop/cinterop/oslog.def"))
         }
-        // The URLSession capture library (docs/design/urlsession-capture.md), compiled per target
-        // and embedded in the cinterop klib, so consumers need no extra linker setup.
-        val archive = urlSessionShim(target.name)
-        val interop = main.cinterops.create("urlsession") {
-            definitionFile.set(project.file("src/nativeInterop/cinterop/urlsession.def"))
+        // The rules' hit counter (docs/design/rules.md, "iOS mirror"), compiled per target and
+        // embedded in the cinterop klib, so consumers need no extra linker setup: Kotlin's RuleHits
+        // and hopi-network's URLSession library claim through it.
+        val archive = hitsShim(target.name)
+        val interop = main.cinterops.create("hits") {
+            definitionFile.set(project.file("src/nativeInterop/cinterop/hits.def"))
             includeDirs(project.file("src/nativeInterop/objc"))
             extraOpts("-libraryPath", archive.get().outputs.files.singleFile.parentFile.absolutePath)
         }
@@ -65,26 +66,22 @@ kotlin {
 
 apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))
 
-/**
- * Kotlin/Native's minimum iOS version (`minVersion.ios` in its `konan.properties`), so the archive
- * links into any framework Kotlin builds. :hopi-core:checkUrlSessionMinIos compares the two.
- */
-val urlSessionMinIos = "15.0"
-
-/** Compiles and archives the URLSession capture library for one iOS target; returns the archive task. */
-fun urlSessionShim(targetName: String): TaskProvider<Exec> {
+/** Compiles and archives the rules' hit counter library for one iOS target; returns the archive task. */
+fun hitsShim(targetName: String): TaskProvider<Exec> {
     val suffix = targetName.replaceFirstChar(Char::uppercase)
     val simulator = targetName == "iosSimulatorArm64"
-    val source = layout.projectDirectory.file("src/nativeInterop/objc/hopi_urlsession.m")
-    val header = layout.projectDirectory.file("src/nativeInterop/objc/hopi_urlsession.h")
-    val outDir = layout.buildDirectory.dir("urlsession/$targetName")
-    val objectFile = outDir.map { it.file("hopi_urlsession.o") }
-    val compile = tasks.register<Exec>("compileUrlSessionShim$suffix") {
-        description = "Compiles the URLSession capture library for $targetName."
+    val source = layout.projectDirectory.file("src/nativeInterop/objc/hopi_hits.m")
+    val header = layout.projectDirectory.file("src/nativeInterop/objc/hopi_hits.h")
+    val outDir = layout.buildDirectory.dir("hits/$targetName")
+    val objectFile = outDir.map { it.file("hopi_hits.o") }
+    // Kotlin/Native's minimum iOS, as hopi-network's URLSession library (checkUrlSessionMinIos).
+    val minIos = "15.0"
+    val compile = tasks.register<Exec>("compileHitsShim$suffix") {
+        description = "Compiles the rules' hit counter library for $targetName."
         inputs.files(source, header).withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.property("minIos", urlSessionMinIos)
+        inputs.property("minIos", minIos)
         outputs.file(objectFile)
-        val target = "arm64-apple-ios$urlSessionMinIos" + if (simulator) "-simulator" else ""
+        val target = "arm64-apple-ios$minIos" + if (simulator) "-simulator" else ""
         val objectPath = objectFile.get().asFile
         doFirst { objectPath.parentFile.mkdirs() }
         commandLine(
@@ -93,32 +90,15 @@ fun urlSessionShim(targetName: String): TaskProvider<Exec> {
             "-o", objectPath.absolutePath, source.asFile.absolutePath,
         )
     }
-    val archiveFile = outDir.map { it.file("libhopi_urlsession.a") }
-    return tasks.register<Exec>("archiveUrlSessionShim$suffix") {
-        description = "Archives the URLSession capture library for $targetName."
+    val archiveFile = outDir.map { it.file("libhopi_hits.a") }
+    return tasks.register<Exec>("archiveHitsShim$suffix") {
+        description = "Archives the rules' hit counter library for $targetName."
         dependsOn(compile)
         inputs.file(objectFile).withPathSensitivity(PathSensitivity.NONE)
         outputs.file(archiveFile)
         commandLine("xcrun", "libtool", "-static", "-o", archiveFile.get().asFile.absolutePath, objectFile.get().asFile.absolutePath)
     }
 }
-
-val checkUrlSessionMinIos = tasks.register("checkUrlSessionMinIos") {
-    group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Checks that the URLSession library's minimum iOS version is Kotlin/Native's."
-    val kotlinVersion = libs.versions.kotlin.get()
-    val expected = urlSessionMinIos
-    val properties = File(System.getProperty("user.home"), ".konan/kotlin-native-prebuilt-macos-aarch64-$kotlinVersion/konan/konan.properties")
-    onlyIf { properties.isFile }
-    doLast {
-        val line = properties.readLines().firstOrNull { it.startsWith("minVersion.ios =") }
-            ?: throw GradleException("no minVersion.ios in $properties")
-        val actual = line.substringAfter('=').trim()
-        if (actual != expected) throw GradleException("Kotlin/Native's minimum iOS is $actual; set urlSessionMinIos in hopi-core/build.gradle.kts to it")
-    }
-}
-
-tasks.named("check") { dependsOn(checkUrlSessionMinIos) }
 
 // `-Phopi.simulator=<udid>` runs the iOS tests on that already booted simulator instead of a
 // standalone one, so its unified log can be read afterwards with `simctl spawn booted log show`.

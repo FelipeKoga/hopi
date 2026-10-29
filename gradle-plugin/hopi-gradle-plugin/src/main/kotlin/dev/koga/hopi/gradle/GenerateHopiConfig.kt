@@ -12,7 +12,7 @@ import org.gradle.api.tasks.TaskAction
 /**
  * Writes the `hopi { }` block into the app as `dev.koga.hopi.android.generated.HopiGeneratedConfig`,
  * a Java subclass of hopi-core's `HopiConfigValues` whose constructor passes the global settings,
- * then the tool list, each tool constructed with its own settings: hopi-android's `NetworkTool`
+ * then the tool list, each tool constructed with its own settings: hopi-network's `NetworkTool`
  * and, with `perf { enabled = true }`, hopi-perf's `PerfEntry`. The provider reads it once and
  * hands the list to the start sequence (docs/design/android-capture.md, "Auto-start"). Only
  * debuggable variants get it, and only they depend on hopi-core and the runtimes.

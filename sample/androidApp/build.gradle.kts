@@ -53,7 +53,7 @@ kotlin {
 }
 
 // `-Psample.hopiCapture=false` builds the debug variant as release is built (`hopi { enabled = false }`:
-// the noop runtime, the noop twins, no instrumentation), the control arm of the capture A/B.
+// no runtime, the Ktor plugin's noop twin, no instrumentation), the control arm of the capture A/B.
 hopi {
     enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
     // The CLI and the desktop viewer reach the app through its bridge.
@@ -74,11 +74,10 @@ dependencies {
     // Hopi's Ktor plugin comes with the shared module, which names the real module or the noop twin
     // by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs noop"). The
     // dev.koga.hopi plugin then resolves it per variant: real in debug, noop in release, whatever
-    // the property said, so the two are never both packaged. It also adds the capture runtime
-    // (hopi-android, or hopi-android-noop in release), core, whose start registers the runtime
-    // behind HopiRules, and, for `perf { enabled }`, hopi-perf, whose tool registers the runtime
-    // behind HopiPerf, the last two in debug only: hopi-api, which the shared module names in every
-    // build, has no twin.
+    // the property said, so the two are never both packaged. It also adds, in debug only, the
+    // network runtime (hopi-network), core, whose start registers the runtime behind HopiRules, and,
+    // for `perf { enabled }`, hopi-perf, whose tool registers the runtime behind HopiPerf: release
+    // gets no runtime, and hopi-api, which the shared module names in every build, has no twin.
     implementation(project(":sample:shared"))
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
     implementation(project(":sample:fakesdk"))
@@ -91,9 +90,9 @@ dependencies {
  * It reads the APK's dex files (classes, referenced types and methods, and each class's invoke
  * instructions, with the plugin's own `DexReader`, no SDK tool) and the merged manifest:
  *
- * - the release runtime classpath holds exactly the noop twins and `hopi-api` (`HopiRules` and
- *   `HopiPerf`, no twin; no `hopi-perf`), and the APK's Hopi classes are exactly the classes their
- *   jars hold;
+ * - the release runtime classpath holds exactly `hopi-api` (`HopiRules` and `HopiPerf`, no twin)
+ *   and the Ktor plugin's noop twin, no runtime (no `hopi-network`, `hopi-core` or `hopi-perf`),
+ *   and the APK's Hopi classes are exactly the classes their jars hold;
  * - no type of `dev.koga.hopi.core` or `dev.koga.hopi.android.internal` is defined or even
  *   referenced (an instrumented call site would reference a hook type), and no class calls a hook;
  * - the negative control: OkHttp's `RealCall` still calls `OkHttpClient.interceptors()` and the fake
@@ -133,7 +132,7 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val problems = mutableListOf<String>()
 
         val projects = hopiProjects.get()
-        val expectedProjects = setOf(":hopi-api", ":hopi-ktor-noop", ":hopi-android-noop")
+        val expectedProjects = setOf(":hopi-api", ":hopi-ktor-noop")
         if (projects != expectedProjects) {
             problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
         }
@@ -236,7 +235,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val dex = DexReader.ofApk(apk)
         val problems = mutableListOf<String>()
         val projects = hopiProjects.get()
-        val required = setOf(":hopi-android", ":hopi-api", ":hopi-core", ":hopi-ktor", ":hopi-perf")
+        val required = setOf(":hopi-api", ":hopi-core", ":hopi-ktor", ":hopi-network", ":hopi-perf")
         if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
 
         val hookCallers = dex.callersOf(OKHTTP_HOOK)

@@ -87,7 +87,7 @@ fun perfShim(targetName: String): TaskProvider<Exec> {
     val header = layout.projectDirectory.file("src/nativeInterop/objc/hopi_perf.h")
     val outDir = layout.buildDirectory.dir("perfshim/$targetName")
     val objectFile = outDir.map { it.file("hopi_perf.o") }
-    // Kotlin/Native's minimum iOS, as hopi-core's URLSession library (checkUrlSessionMinIos).
+    // Kotlin/Native's minimum iOS, as hopi-network's URLSession library (checkUrlSessionMinIos).
     val minIos = "15.0"
     val compile = tasks.register<Exec>("compilePerfShim$suffix") {
         description = "Compiles the iOS monitors' native library for $targetName."

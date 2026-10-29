@@ -2,7 +2,7 @@ package dev.koga.hopi.instrument
 
 /**
  * The one table of what the rewrite replaces and with what (docs/design/android-capture.md,
- * "Interception points"). The rewriter reads it, and hopi-android's tests check every hook here
+ * "Interception points"). The rewriter reads it, and hopi-network's tests check every hook here
  * against the hook classes it compiles, so the two cannot drift apart.
  */
 public object HookDescriptors {
