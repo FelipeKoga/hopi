@@ -10,8 +10,8 @@ import dev.koga.hopi.api.HopiInternalApi
  * out of range, and never throws. `hopi-api` comes from the app, and the runtime needs it at its
  * own version. On Android the Gradle plugin adds `hopi-perf` at the plugin's version and holds
  * `hopi-api` to it in debuggable builds. On iOS both come from the app's shared module
- * (`hopi-start` brings `hopi-perf`) at the versions it names, so it names one version for both.
- * Nothing registers a runtime on the JVM before the runtime-split plan's stage 10.
+ * (`hopi-start` brings `hopi-perf`) at the versions it names, so it names one version for both;
+ * on the JVM from the app's `hopi-start` and `hopi-api`, likewise.
  */
 @HopiInternalApi
 public interface HopiPerfRuntime {

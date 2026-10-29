@@ -9,8 +9,8 @@ import dev.koga.hopi.core.start.HopiToolContext
  * `hopi-perf`'s tool on the JVM (CPU and memory, see [JvmBackend]), the iOS tool's shape: it creates
  * the controller with the default threshold and interval and the start's `summaryLog`, registers it
  * for remote control and as `HopiPerf`'s runtime ([PerfRuntime.registerApi]), and starts nothing.
- * No start sequence lists it before the runtime-split plan's stage 10 (the JVM entry), so on the JVM
- * `HopiPerf` does nothing until then; `hopi-perf`'s JVM tests start it.
+ * `hopi-start`'s JVM `Hopi.start` lists it unless its `perf` is false; `hopi-perf`'s JVM tests also
+ * start it.
  */
 @HopiInternalApi
 public class PerfEntry(

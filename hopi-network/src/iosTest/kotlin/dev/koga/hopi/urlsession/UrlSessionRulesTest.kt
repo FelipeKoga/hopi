@@ -603,6 +603,8 @@ class UrlSessionRulesTest {
     @Test
     fun ktorDarwinIsMockedAsAUrlSessionClient() = runBlocking {
         val id = mock("/m-ktor", headers = listOf("Content-Type" to "text/plain"))
+        // The plugin installs nothing on iOS (no recorder is registered there): URLSession's rule
+        // protocol applies the mock to the Darwin engine's task, and URLSession capture records it.
         HttpClient(Darwin) { install(Hopi) { logSink = HopiLogSink.Off } }.use { client ->
             val url = Capture.url("/m-ktor")
             val watch = Watch(url)

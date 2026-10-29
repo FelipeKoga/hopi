@@ -52,19 +52,24 @@ public object SampleHttp {
      * A debug setting for the giant-body measurements (`--el maxBodyBytes N` on Android, the
      * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start]. On
      * Android it reaches only the requests the plugin records itself: OkHttp capture records the
-     * rest at the debug build's cap (`-Psample.maxBodyBytes=N`). On iOS the launch argument also
-     * reaches `Hopi.start` (`iOSApp.swift`).
+     * rest at the debug build's cap (`-Psample.maxBodyBytes=N`). On iOS only `Hopi.start`'s cap
+     * applies (the launch argument reaches it, `iOSApp.swift`): the plugin installs nothing there.
      */
     public var maxBodyBytes: Long? = null
 
     /**
      * The Ktor plugin's store byte cap, or null for the default (16 MB), which clamps the body cap
      * to half of it: a 16 MB body cap needs 32 MB here. A debug setting like [maxBodyBytes]
-     * (`--el maxTotalBytes N`, `-maxTotalBytes N`); on Android the store takes the debug build's
-     * cap instead (`-Psample.maxTotalBytes=N`), which the start presets before any client exists.
+     * (`--el maxTotalBytes N`, `-maxTotalBytes N`). It does nothing on iOS, where the plugin
+     * installs nothing; on Android the start's cap wins (`-Psample.maxTotalBytes=N`), which the
+     * start presets before any client exists.
      */
     public var maxTotalBytes: Long? = null
 
+    /**
+     * Built lazily, at the first request or [start], so after Hopi's start (the provider on
+     * Android, `Hopi.start` on iOS): the plugin reads the recorder once, when the client is built.
+     */
     internal val client: HttpClient by lazy {
         platformHttpClient {
             expectSuccess = false

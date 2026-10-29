@@ -30,10 +30,13 @@ import org.gradle.testkit.runner.TaskOutcome
  * stand-ins with the runtimes' class names (the plugin takes a project of that name over the
  * coordinates): core's holds the provider, its manifest and the generated configuration's base
  * class, `hopi-network`'s the hooks and the network tool the generated class names, `hopi-perf`'s
- * perf's tool; the real runtimes are tested by their own tests. An app with no such projects gets
- * core, the runtime and the Ktor twins by their published coordinates, as a consumer of Maven Local
- * does. A runtime that reaches a release variant fails the build in the release guard, before any
- * dex task.
+ * perf's tool; the real runtimes are tested by their own tests. The network tool references the
+ * Ktor plugin's recorder, as the real one does, compiled against stubs of `hopi-ktor`, Ktor and
+ * kotlinx-io (`ktorstubs`) that no app has, so the minified `staging` variant shows R8 accepts the
+ * runtime's consumer rules over those missing classes. An app with no such projects gets core and
+ * the runtimes by their published coordinates, beside the `hopi-ktor` and `hopi-api` the shared
+ * module names, as a consumer of Maven Local does. A runtime that reaches a release variant fails
+ * the build in the release guard, before any dex task.
  */
 class HopiPluginFunctionalTest {
     private val fixtures = File(System.getProperty("hopi.fixturesDir"))
@@ -172,6 +175,10 @@ class HopiPluginFunctionalTest {
         assertTrue("dev/koga/hopi/android/generated/HopiGeneratedConfig" in staging.definedClasses)
         assertTrue("dev/koga/hopi/android/internal/HopiInitProvider" in staging.definedClasses)
         assertTrue(PROVIDER in mergedManifest(project, "flavored", "freeStaging"))
+        // The positive control of the consumer rules' -dontwarn lines: R8 kept the network tool's
+        // reference to the Ktor recorder, whose hopi-ktor, Ktor and kotlinx-io classes are missing
+        // here, and the build passed (-dontobfuscate: the name is the source's).
+        assertTrue(KTOR_HOOKS_CLASS in staging.definedClasses, staging.definedClasses.filter { it.startsWith("dev/koga/hopi/") }.toString())
 
         val qa = DexReader.ofApk(apk(project, "flavored", "free", "qa"))
         assertEquals(emptyList(), qa.referencedTypes.filter { it.startsWith("dev/koga/hopi/android/internal/") || it.startsWith("dev/koga/hopi/android/generated/") })
@@ -185,18 +192,17 @@ class HopiPluginFunctionalTest {
         project.resolve("$module/build/outputs/apk/$flavor/$buildType").walkTopDown().single { it.extension == "apk" }
 
     /**
-     * The published-coordinates path (a consumer of Maven Local): with no `hopi-network` or twin
-     * project in the build, the plugin adds `dev.koga.hopi:hopi-network` at its own version,
-     * `hopi-core` and, with `perf { enabled = true }`, `hopi-perf` to debug only, and swaps the Ktor
-     * twins a library names by their coordinates, in both directions: the shared module asks for
-     * `hopi-ktor-noop`, the debug APK gets the real modules and the release APK the Ktor noop and no
-     * runtime at all. `hopi-api`, which the shared module also names (`HopiRules`, `HopiPerf`),
-     * has no twin: both APKs get it. The constraint the plugin adds in debug, `hopi-api` at its own
-     * version, is not checked here: every stand-in is published at that version, the one the shared
-     * module names, so the APKs would be the same without it. The stand-ins are jars with one marker
-     * class each, published by a build of their own into a repository of the fixture; core's also
-     * holds the generated configuration's base class and the tool interface, and the network and
-     * perf tools the generated class names implement it (the fixture enables perf).
+     * The published-coordinates path (a consumer of Maven Local): with no `hopi-network` project in
+     * the build, the plugin adds `dev.koga.hopi:hopi-network` at its own version, `hopi-core` and,
+     * with `perf { enabled = true }`, `hopi-perf` to debug only, so the release APK gets no runtime
+     * at all. `hopi-ktor` (the thin Ktor plugin, no twin since stage 10) and `hopi-api`
+     * (`HopiRules`, `HopiPerf`), which the shared module names, reach both APKs. The constraints the
+     * plugin adds in debug, `hopi-api` and `hopi-ktor` at its own version, are not checked here:
+     * every stand-in is published at that version, the one the shared module names, so the APKs
+     * would be the same without them. The stand-ins are jars with one marker class each, published
+     * by a build of their own into a repository of the fixture; core's also holds the generated
+     * configuration's base class and the tool interface, and the network and perf tools the
+     * generated class names implement it (the fixture enables perf).
      */
     @Test
     fun publishedCoordinatesAreSwappedPerVariant() {
@@ -210,7 +216,7 @@ class HopiPluginFunctionalTest {
             plugins { `java-library` }
             java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
             dependencies {
-                api("dev.koga.hopi:hopi-ktor-noop:$version")
+                api("dev.koga.hopi:hopi-ktor:$version")
                 api("dev.koga.hopi:hopi-api:$version")
             }
             """.trimIndent(),
@@ -226,15 +232,18 @@ class HopiPluginFunctionalTest {
 
         val result = runner(project, ":app:assembleDebug", ":app:assembleRelease").build()
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:generateDebugHopiConfig")?.outcome, result.output)
-        // The coordinates' release resolves hopi-api and the Ktor noop only: its guard passes.
+        // The coordinates' release resolves hopi-api and hopi-ktor only: its guard passes.
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:hopiReleaseGuardRelease")?.outcome, result.output)
         val debug = DexReader.ofApk(project.resolve("app/build/outputs/apk/debug/app-debug.apk")).definedClasses
         val release = DexReader.ofApk(project.resolve("app/build/outputs/apk/release/app-release-unsigned.apk")).definedClasses
-        for ((real, noop) in listOf("hopi-ktor" to "hopi-ktor-noop")) {
-            assertTrue("dev/koga/hopi/standin/${marker(real)}" in debug, "debug has $real: ${debug.filter { it.startsWith("dev/koga/hopi/") }}")
-            assertFalse("dev/koga/hopi/standin/${marker(noop)}" in debug, "debug has no $noop")
-            assertTrue("dev/koga/hopi/standin/${marker(noop)}" in release, "release has $noop: ${release.filter { it.startsWith("dev/koga/hopi/") }}")
-            assertFalse("dev/koga/hopi/standin/${marker(real)}" in release, "release has no $real")
+        // The thin Ktor plugin and hopi-api, which the shared module names: in both, nothing swapped.
+        for (module in listOf("hopi-ktor", "hopi-api")) {
+            assertTrue("dev/koga/hopi/standin/${marker(module)}" in debug, "debug has $module: ${debug.filter { it.startsWith("dev/koga/hopi/") }}")
+            assertTrue("dev/koga/hopi/standin/${marker(module)}" in release, "release has $module: ${release.filter { it.startsWith("dev/koga/hopi/") }}")
+        }
+        // No runtime marker in release.
+        for (runtime in listOf("hopi-core", "hopi-network", "hopi-perf")) {
+            assertFalse("dev/koga/hopi/standin/${marker(runtime)}" in release, "release has no $runtime")
         }
         // The network runtime: debug only, no twin.
         assertTrue("dev/koga/hopi/standin/${marker("hopi-network")}" in debug, "debug has hopi-network")
@@ -252,7 +261,7 @@ class HopiPluginFunctionalTest {
         assertEquals(emptyList(), release.filter { it.startsWith("dev/koga/hopi/android/") || it.startsWith("dev/koga/hopi/core/") || it.startsWith("dev/koga/hopi/perf/") })
     }
 
-    /** `hopi-ktor-noop` → `HopiKtorNoop`. */
+    /** `hopi-network` → `HopiNetwork`. */
     private fun marker(module: String): String = module.split('-').joinToString("") { it.replaceFirstChar(Char::uppercaseChar) }
 
     /**
@@ -266,7 +275,7 @@ class HopiPluginFunctionalTest {
         val repo = root.resolve("repo").path.replace("\\", "/")
         val standIns = root.resolve("stand-ins")
         writeGradleFiles(standIns)
-        val published = listOf("hopi-api", "hopi-core", "hopi-network", "hopi-ktor", "hopi-ktor-noop", "hopi-perf")
+        val published = listOf("hopi-api", "hopi-core", "hopi-network", "hopi-ktor", "hopi-perf")
         standIns.write("settings.gradle.kts", published.joinToString("\n") { "include(\":$it\")" })
         standIns.write(
             "build.gradle.kts",
@@ -404,7 +413,6 @@ class HopiPluginFunctionalTest {
         assertTrue("hopi-network" in result.output, result.output)
         for (component in components) assertTrue(component in result.output, "the failure names $component: ${result.output}")
         assertTrue("remove $remove from release (" in result.output, "the failure removes $remove alone: ${result.output}")
-        assertFalse("Keep hopi { selectTwins } on" in result.output, "no hopi-ktor brings a runtime here: ${result.output}")
         assertEquals(TaskOutcome.FAILED, result.task(":app:hopiReleaseGuardRelease")?.outcome, result.output)
         val dexTasks = result.tasks.map { it.path }.filter { path -> path.substringAfterLast(':').let { it.startsWith("dex") || "Dex" in it } }
         assertEquals(emptyList(), dexTasks, "no dex task ran")
@@ -438,7 +446,7 @@ class HopiPluginFunctionalTest {
         val okhttp = System.getProperty("hopi.okhttpVersion")
         val repo = System.getProperty("hopi.functionalRepo")
         writeGradleFiles(root)
-        val modules = if (name == "apps") listOf("app", "plain", "flavored", "nonet", "notools", "sdk", "hopi-core", "hopi-network", "hopi-perf") else listOf("lib")
+        val modules = if (name == "apps") listOf("app", "plain", "flavored", "nonet", "notools", "sdk", "ktorstubs", "hopi-core", "hopi-network", "hopi-perf") else listOf("lib")
         root.write(
             "settings.gradle.kts",
             """
@@ -579,6 +587,22 @@ class HopiPluginFunctionalTest {
             dependencies { implementation("com.squareup.okhttp3:okhttp:$okhttp") }
             """.trimIndent(),
         )
+        // Stubs of what the Ktor recorder is compiled against (hopi-ktor's hooks interface, Ktor's
+        // plugin builder, kotlinx-io's Buffer): compileOnly for the hopi-network stand-in, so no app
+        // of the fixture has them, as an app without Ktor has none of them.
+        root.write(
+            "ktorstubs/build.gradle.kts",
+            """
+            plugins { `java-library` }
+            java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+            """.trimIndent(),
+        )
+        root.write("ktorstubs/src/main/java/io/ktor/client/plugins/api/ClientPluginBuilder.java", "package io.ktor.client.plugins.api;\npublic class ClientPluginBuilder {}\n")
+        root.write("ktorstubs/src/main/java/kotlinx/io/Buffer.java", "package kotlinx.io;\npublic class Buffer {}\n")
+        root.write(
+            "ktorstubs/src/main/java/dev/koga/hopi/ktor/HopiKtorHooks.java",
+            "package dev.koga.hopi.ktor;\npublic interface HopiKtorHooks {\n    void install(io.ktor.client.plugins.api.ClientPluginBuilder plugin);\n}\n",
+        )
         root.write(
             "sdk/src/main/java/com/example/sdk/Sdk.java",
             """
@@ -643,7 +667,7 @@ class HopiPluginFunctionalTest {
             "hopi-network/build.gradle.kts",
             androidModule(
                 "com.android.library", "dev.koga.hopi.network", hopi = false,
-                dependencies = "compileOnly(\"com.squareup.okhttp3:okhttp:$okhttp\"); implementation(project(\":hopi-core\"))",
+                dependencies = "compileOnly(\"com.squareup.okhttp3:okhttp:$okhttp\"); implementation(project(\":hopi-core\")); compileOnly(project(\":ktorstubs\"))",
                 extra = "defaultConfig { consumerProguardFiles(\"consumer-rules.pro\") }",
             ),
         )
@@ -666,7 +690,8 @@ class HopiPluginFunctionalTest {
             """.trimIndent(),
         )
         root.write("$internal/HopiInstrumented.java", "package dev.koga.hopi.android.internal;\n@java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)\npublic @interface HopiInstrumented {}\n")
-        root.write("$internal/NetworkTool.java", NETWORK_TOOL)
+        root.write("$internal/NetworkTool.java", NETWORK_TOOL_WITH_KTOR)
+        root.write("hopi-network/src/main/java/dev/koga/hopi/network/internal/ktor/KtorHooks.java", KTOR_HOOKS)
         // perf's runtime, which nonet's `perf { enabled = true }` adds: its tool implements core's interface.
         root.write("hopi-perf/build.gradle.kts", androidModule("com.android.library", "dev.koga.hopi.perf", hopi = false, dependencies = "implementation(project(\":hopi-core\"))"))
         root.write("hopi-perf/src/main/java/dev/koga/hopi/perf/internal/PerfEntry.java", PERF_ENTRY)
@@ -723,6 +748,7 @@ class HopiPluginFunctionalTest {
         const val GENERATED_CLASS = "dev/koga/hopi/android/generated/HopiGeneratedConfig"
         const val CONFIG_VALUES_CLASS = "dev/koga/hopi/android/internal/HopiConfigValues"
         const val NETWORK_TOOL_CLASS = "dev/koga/hopi/android/internal/NetworkTool"
+        const val KTOR_HOOKS_CLASS = "dev/koga/hopi/network/internal/ktor/KtorHooks"
         const val PERF_ENTRY_CLASS = "dev/koga/hopi/perf/internal/PerfEntry"
         const val MANIFEST = "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application />\n</manifest>\n"
 
@@ -746,6 +772,47 @@ class HopiPluginFunctionalTest {
             package dev.koga.hopi.android.internal;
             public final class NetworkTool implements dev.koga.hopi.core.start.HopiTool {
                 public NetworkTool(boolean okhttp, boolean urlConnection, boolean rules) {}
+            }
+        """.trimIndent()
+
+        /**
+         * [NETWORK_TOOL] that also registers the Ktor recorder's forwarder as the real tool does, a
+         * direct reference inside a `LinkageError` catch, kept live by a field of the tool (which the
+         * consumer rules keep whole), so R8 meets the forwarder's missing classes.
+         */
+        val NETWORK_TOOL_WITH_KTOR = """
+            package dev.koga.hopi.android.internal;
+            public final class NetworkTool implements dev.koga.hopi.core.start.HopiTool {
+                static Object ktorHooks;
+
+                public NetworkTool(boolean okhttp, boolean urlConnection, boolean rules) {
+                    try {
+                        ktorHooks = new dev.koga.hopi.network.internal.ktor.KtorHooks();
+                    } catch (LinkageError e) {
+                        ktorHooks = null;
+                    }
+                }
+            }
+        """.trimIndent()
+
+        /**
+         * The recorder's forwarder: it implements hopi-ktor's hooks interface and names Ktor's and
+         * kotlinx-io's classes in its constructor's statements, which R8 keeps (a missing class's
+         * constructor cannot be shown free of side effects), not only in a signature it may drop.
+         */
+        val KTOR_HOOKS = """
+            package dev.koga.hopi.network.internal.ktor;
+            public final class KtorHooks implements dev.koga.hopi.ktor.HopiKtorHooks {
+                private final Object buffer;
+                private final Object builder;
+
+                public KtorHooks() {
+                    buffer = new kotlinx.io.Buffer();
+                    builder = new io.ktor.client.plugins.api.ClientPluginBuilder();
+                }
+
+                @Override
+                public void install(io.ktor.client.plugins.api.ClientPluginBuilder plugin) {}
             }
         """.trimIndent()
 

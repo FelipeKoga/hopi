@@ -4,6 +4,7 @@ import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.api.HopiRuntimes
 import dev.koga.hopi.core.start.HopiTool
 import dev.koga.hopi.core.start.HopiToolContext
+import dev.koga.hopi.network.internal.ktor.registerKtorHooks
 
 /**
  * Automatic OkHttp and `HttpURLConnection` capture as a tool of the start sequence: the Gradle
@@ -14,6 +15,14 @@ import dev.koga.hopi.core.start.HopiToolContext
  * the first recorded request. Once capture runs it writes the network status to `hopi-api`'s
  * registry (`HopiRuntimes.networkStarted` and `okHttpInstrumented`), which a debug app may read:
  * one call on an object the start sequence initialized already, so no class loads for it here.
+ * It also registers the Ktor plugin's recorder when the app has `hopi-ktor`, through one forwarder
+ * (`KtorHooks`), so nothing of the recorder runs on the main thread (ART's verification of the
+ * forwarder loads, without initializing, the classes its `install` names, `KtorRecorder` among
+ * them); each client's install makes the start's installation first, then its own. A request the
+ * recorder records is ruled only when both its client's `HopiConfig.rules` and this tool's [rules]
+ * are true; one this tool's capture records follows [rules] alone. A client built before the start
+ * (in `attachBaseContext`, by another provider) gets no recorder: only the requests of the engines
+ * this capture covers are recorded, without that client's settings, its redaction lists included.
  */
 @HopiInternalApi
 public class NetworkTool(
@@ -41,6 +50,7 @@ public class NetworkTool(
         )
         if (!AndroidCapture.start(settings, okHttp, okHttpWanted = okhttp, urlConnection = urlConnection)) return null
         HopiRuntimes.registerNetwork(AndroidCapture.okHttpInstrumented)
+        registerKtorHooks(config, rules)
         return "okhttp ${okHttp.name.lowercase()}"
     }
 

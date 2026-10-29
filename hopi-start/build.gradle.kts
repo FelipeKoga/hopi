@@ -5,13 +5,14 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
 }
 
-description = "Hopi.start { }, the iOS entry a Debug framework exports: it starts the network and perf tools."
+description = "Hopi.start { }, the iOS entry a Debug framework exports and the JVM entry: it starts the network and perf tools."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
-// The iOS entry (docs/ARCHITECTURE.md, "Consumer API"): `Hopi.shared.start { … }` from Swift runs
-// core's start sequence with the network tool and perf's. Only a Debug framework links and exports
-// it; its public API names no core or runtime type, so it adds `Hopi` and `HopiStartConfig` to
-// Swift's header and nothing else.
+// The iOS and JVM entry (docs/ARCHITECTURE.md, "Consumer API"): `Hopi.shared.start { … }` from
+// Swift, or `Hopi.start { … }` first in a JVM app's `main`, runs core's start sequence with the
+// network tool and perf's. Only a Debug framework links and exports it; its public API names no
+// core or runtime type, so it adds `Hopi` and `HopiStartConfig` to Swift's header and nothing else.
+// A JVM app names it only where it records (there is no JVM release guard).
 kotlin {
     explicitApi()
 
@@ -23,7 +24,7 @@ kotlin {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
     }
 
-    // The runtime-split plan's stage 10 adds the JVM entry.
+    jvm()
     iosArm64()
     iosSimulatorArm64()
 
@@ -38,6 +39,12 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+        jvmTest.dependencies {
+            // A Ktor client built after the JVM start, recorded through the plugin (hopi-network
+            // takes hopi-ktor compileOnly, so it does not come with the runtime).
+            implementation(project(":hopi-ktor"))
+            implementation(libs.ktor.client.mock)
         }
     }
 }

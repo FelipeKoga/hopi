@@ -1,6 +1,8 @@
 import com.android.build.api.variant.KotlinMultiplatformAndroidComponentsExtension
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
@@ -9,15 +11,17 @@ plugins {
 }
 
 description = "The network runtime: automatic OkHttp and HttpURLConnection capture on Android and URLSession capture on iOS, " +
-    "with their rules; the dev.koga.hopi plugin adds it to debuggable variants, hopi-start to Debug frameworks."
+    "with their rules, and, on Android and the JVM, the Ktor plugin's recorder; the dev.koga.hopi plugin adds it to " +
+    "debuggable variants, hopi-start to Debug frameworks and JVM apps."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
 // The network runtime (docs/design/android-capture.md, docs/design/urlsession-capture.md):
 // automatic OkHttp and HttpURLConnection capture on Android, automatic URLSession capture on iOS,
-// and the rules each applies. No app names it: the `dev.koga.hopi` Gradle plugin adds it to the
-// debuggable variants of an Android application, and hopi-start brings it to Debug iOS frameworks;
-// every other build gets no runtime. No noop twin. The JVM target comes with the runtime-split
-// plan's stage 10.
+// and the rules each applies, and, on Android and the JVM, the Ktor plugin's recorder, which
+// hopi-ktor's thin plugin installs once the network tool registered it. No app names it: the
+// `dev.koga.hopi` Gradle plugin adds it to the debuggable variants of an Android application, and
+// hopi-start brings it to Debug iOS frameworks and to JVM apps; every other build gets no runtime.
+// No noop twin. The JVM target holds only the recorder and the JVM network tool.
 kotlin {
     explicitApi()
 
@@ -29,8 +33,9 @@ kotlin {
             // Android: the hooks the rewritten bytecode calls, the interceptor, the wrappers and the
             // network tool the app's generated configuration names (public in the binary: the hooks
             // and the tool must be, for the app's own classes). iOS: URLSession capture, its rules
-            // and the network tool hopi-start lists. All @HopiInternalApi, no consumer API. The
-            // provider that starts the tools is hopi-core's.
+            // and the network tool hopi-start lists. Android and the JVM: the Ktor plugin's recorder
+            // (internal); the JVM: the network tool hopi-start lists. All @HopiInternalApi, no
+            // consumer API. The provider that starts the tools is hopi-core's.
             exclude.byNames.add("dev.koga.hopi.android.internal.**")
             exclude.byNames.add("dev.koga.hopi.network.internal.**")
         }
@@ -79,6 +84,18 @@ kotlin {
         }
         tasks.named(fixturesInterop.interopProcessingTaskName) { dependsOn(fixtures) }
     }
+    jvm()
+    // androidAndJvmMain: the Ktor plugin's recorder, compiled for both JVM platforms. AGP's KMP
+    // library target is no KotlinAndroidTarget, so withAndroidTarget() would not select it.
+    @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    applyDefaultHierarchyTemplate {
+        common {
+            group("androidAndJvm") {
+                withJvm()
+                withCompilations { it.target.platformType == KotlinPlatformType.androidJvm }
+            }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
@@ -88,6 +105,13 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+        maybeCreate("androidAndJvmMain").dependencies {
+            // The recorder of an app that has the Ktor plugin: neither is on a runtime classpath, so
+            // an app without Ktor gets no Ktor class through this module (the network tool catches
+            // the missing class, consumer-rules.pro keeps R8 quiet about it).
+            compileOnly(libs.ktor.client.core)
+            compileOnly(project(":hopi-ktor"))
         }
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
@@ -116,6 +140,17 @@ kotlin {
             implementation(libs.ktor.client.darwin)
             implementation(project(":hopi-ktor"))
         }
+        jvmTest.dependencies {
+            // The recorder's tests (moved from hopi-ktor in the runtime-split plan's stage 10): the
+            // plugin over a MockEngine, a response body edit under the real ContentEncoding plugin,
+            // and a real socket engine for the giant-body benchmark (the sample's Android engine).
+            implementation(project(":hopi-ktor"))
+            implementation(libs.ktor.client.mock)
+            implementation(libs.ktor.client.encoding)
+            implementation(libs.ktor.client.okhttp)
+        }
+        // The giant-body fixtures and probes, shared by every module's benchmark.
+        jvmTest { kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures")) }
     }
 }
 
@@ -245,8 +280,11 @@ fun fixturesArchive(targetName: String): TaskProvider<Exec> {
     }
 }
 
-// The giant-body benchmark (AndroidGiantBodyBenchmark), beside the Android host tests, which skip
-// it: ./gradlew :hopi-network:androidHostGiantBodyBenchmark
+// The giant-body benchmarks, beside the tests that skip them: the Ktor recorder's
+// (KtorGiantBodyBenchmark), ./gradlew :hopi-network:jvmGiantBodyBenchmark, and automatic Android
+// capture's (AndroidGiantBodyBenchmark), ./gradlew :hopi-network:androidHostGiantBodyBenchmark.
+extra["hopi.giantBodyTestTask"] = "jvmTest"
+apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))
 extra["hopi.giantBodyTestTask"] = "testAndroidHostTest"
 apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))
 

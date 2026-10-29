@@ -12,10 +12,12 @@ plugins {
 }
 
 // The selection every KMP consumer makes (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP
-// project"): a shared module has no build types, so a Gradle property picks the real hopi-ktor or
-// its noop twin, and hopi-start, for every target at once. Debug runs pass -Phopi.enabled=true (the
-// Xcode build phase does for the Debug configuration); anything built without it ships the noop,
-// and the iOS release guard (below) fails a Release link that would hold a runtime.
+// project"): a shared module has no build types, so a Gradle property picks hopi-start, the iOS
+// entry that brings the runtimes, for every target at once; the thin hopi-ktor is in every build
+// and installs nothing in a Release framework (no recorder is registered there). Debug runs pass
+// -Phopi.enabled=true (the Xcode build phase does for the Debug configuration); anything built
+// without it has no runtime, and the iOS release guard (below) fails a Release link that would
+// hold one.
 val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
 
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
@@ -36,7 +38,7 @@ abstract class GenerateSampleBuildInfo : DefaultTask() {
             """
             |package dev.koga.hopi.sample
             |
-            |/** Generated from the `hopi.enabled` Gradle property: true for the real modules, false for the noop twins. */
+            |/** Generated from the `hopi.enabled` Gradle property: true when an iOS build links Hopi's runtimes (hopi-start). */
             |internal const val HOPI_ENABLED: Boolean = ${realHopi.get()}
             |
             """.trimMargin(),
@@ -83,7 +85,10 @@ kotlin {
         commonMain {
             kotlin.srcDir(generateSampleBuildInfo.flatMap { it.outputDirectory })
             dependencies {
-                implementation(if (hopiEnabled) project(":hopi-ktor") else project(":hopi-ktor-noop"))
+                // The thin Ktor plugin, in every build: it records only where a debug build's network
+                // runtime registered its recorder (Android's debug variants), and installs nothing
+                // on iOS, where URLSession capture records the Darwin engine.
+                implementation(project(":hopi-ktor"))
                 // HopiRules (mock, fail, delay, edit), which the rules scenarios call, and HopiPerf,
                 // which the perf lab and bench start, in every build: hopi-api has no noop, a debug
                 // build's start registers the runtimes behind them (on Android the plugin adds

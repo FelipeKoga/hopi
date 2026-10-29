@@ -22,23 +22,29 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 /**
- * Loads OkHttp, Okio, Ktor's OkHttp and Android engines, Hopi's Android runtime and the `hopitest`
- * scenarios child-first, each class passed through the plugin's own rewriter, so a scenario runs
- * the bytecode an instrumented app runs (RealCall's rewritten interceptors call and annotation,
- * rewritten URL call sites). Kotlin, Ktor's core and hopi-core come from the test's own loader, so
- * the test and the scenario share one store class. With [jars], OkHttp, Okio and Ktor's OkHttp
- * engine come from those jars only (another OkHttp), never from the test's own classpath.
+ * Loads OkHttp, Okio, Ktor's OkHttp and Android engines, Hopi's Android runtime and the Ktor
+ * plugin's recorder (`dev.koga.hopi.network.`) and the `hopitest` scenarios child-first, each class
+ * passed through the plugin's own rewriter, so a scenario runs the bytecode an instrumented app runs
+ * (RealCall's rewritten interceptors call and annotation, rewritten URL call sites). Kotlin, Ktor's
+ * core, hopi-api, hopi-core and the thin Ktor plugin (`dev.koga.hopi.ktor.`) come from the test's
+ * own loader, so the test and the scenario share one store class and one registry. With [jars],
+ * OkHttp, Okio and Ktor's OkHttp engine come from those jars only (another OkHttp), never from the
+ * test's own classpath. A class under one of the [hidden] prefixes does not exist for the scenario
+ * (an app without that library), wherever it would load from.
  */
 class RewritingClassLoader(
     parent: ClassLoader,
     private val options: HopiRewriter.Options = HopiRewriter.Options(),
     jars: List<File> = emptyList(),
+    private val hidden: List<String> = emptyList(),
 ) : ClassLoader(parent) {
     val rewritten = ConcurrentLinkedQueue<String>()
     private val jarLoader = if (jars.isEmpty()) null else URLClassLoader(jars.map { it.toURI().toURL() }.toTypedArray(), null)
 
     override fun loadClass(name: String, resolve: Boolean): Class<*> = synchronized(this) {
         findLoadedClass(name)?.let { return it }
+        // Before the parent-first test: a hidden parent-first class must not load from the parent.
+        if (hidden.any { name.startsWith(it) }) throw ClassNotFoundException(name)
         if (CHILD_FIRST.none { name.startsWith(it) }) return super.loadClass(name, resolve)
         val resource = name.replace('.', '/') + ".class"
         // With jars, OkHttp is theirs alone: a class they lack does not exist (no 4.x RealCall in a 3.x app).
@@ -51,14 +57,17 @@ class RewritingClassLoader(
 
     private companion object {
         val JAR_OWNED = listOf("okhttp3.", "okio.", "io.ktor.client.engine.okhttp.")
-        val CHILD_FIRST = listOf("okhttp3.", "okio.", "io.ktor.client.engine.okhttp.", "io.ktor.client.engine.android.", "dev.koga.hopi.android.", "hopitest.")
+        val CHILD_FIRST = listOf(
+            "okhttp3.", "okio.", "io.ktor.client.engine.okhttp.", "io.ktor.client.engine.android.", "dev.koga.hopi.android.",
+            "dev.koga.hopi.network.", "hopitest.",
+        )
     }
 }
 
 /** The jars the build resolved for [name] (`hopi.<name>`: okhttp312, okhttp314, ktorOkhttp). */
 fun testJars(name: String): List<File> = System.getProperty("hopi.$name").split(File.pathSeparator).map(::File)
 
-/** Runs the scenario [name] of `hopitest.Scenarios` in a fresh rewriting loader. */
+/** Runs the scenario [name] of `hopitest.Scenarios` in a fresh rewriting loader, with the classes under [hidden] missing. */
 fun runScenario(
     name: String,
     store: HopiStore,
@@ -68,8 +77,9 @@ fun runScenario(
     options: HopiRewriter.Options = HopiRewriter.Options(),
     extra: Map<String, Any?> = emptyMap(),
     jars: List<File> = emptyList(),
+    hidden: List<String> = emptyList(),
 ): Map<String, Any?> {
-    val loader = RewritingClassLoader(TestServer::class.java.classLoader, options, jars)
+    val loader = RewritingClassLoader(TestServer::class.java.classLoader, options, jars, hidden)
     @Suppress("UNCHECKED_CAST")
     val scenario = loader.loadClass("hopitest.Scenarios").getDeclaredConstructor().newInstance() as java.util.function.Function<Map<String, Any?>, Map<String, Any?>>
     return scenario.apply(mapOf("name" to name, "store" to store, "base" to base, "maxBodyBytes" to maxBodyBytes, "start" to start) + extra) +

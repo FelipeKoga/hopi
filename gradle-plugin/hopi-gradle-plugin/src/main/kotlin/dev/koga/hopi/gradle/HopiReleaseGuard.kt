@@ -42,25 +42,18 @@ public abstract class HopiReleaseGuard : DefaultTask() {
     @get:Input
     public abstract val remove: ListProperty<String>
 
-    /** Whether the real `hopi-ktor` brings one of them ([HopiRuntimeGraph.broughtByKtor]). */
-    @get:Input
-    public abstract val viaKtor: Property<Boolean>
-
     @TaskAction
     public fun check() {
         val found = runtimes.get()
-        if (found.isNotEmpty()) throw GradleException(message(variantName.get(), buildType.get(), found, remove.get(), viaKtor.get()))
+        if (found.isNotEmpty()) throw GradleException(message(variantName.get(), buildType.get(), found, remove.get()))
     }
 
     internal companion object {
-        fun message(variant: String, buildType: String, runtimes: List<String>, remove: List<String>, viaKtor: Boolean): String {
-            val text = "dev.koga.hopi: variant $variant is not debuggable, but its runtime classpath holds Hopi's runtime: " +
+        fun message(variant: String, buildType: String, runtimes: List<String>, remove: List<String>): String =
+            "dev.koga.hopi: variant $variant is not debuggable, but its runtime classpath holds Hopi's runtime: " +
                 "${runtimes.joinToString()}. Hopi's runtimes belong in debuggable variants only, where this plugin adds them: " +
                 "remove ${remove.joinToString()} from $variant (in this module or the one that brings it: name it for debuggable " +
                 "build types only, as debugImplementation, not as implementation or ${buildType}Implementation)."
-            // Until stage 10 of the runtime-split plan the real hopi-ktor brings hopi-core.
-            return if (viaKtor) "$text Keep hopi { selectTwins } on (the default): the real hopi-ktor brings hopi-core, its noop twin does not." else text
-        }
     }
 }
 
@@ -71,7 +64,6 @@ public abstract class HopiReleaseGuard : DefaultTask() {
 internal object HopiRuntimeGraph {
     private const val GROUP = "dev.koga.hopi"
     private val RUNTIMES = setOf("hopi-core", "hopi-network", "hopi-perf", "hopi-start")
-    private val KTOR = setOf("hopi-ktor")
 
     /** A KMP root's coordinates redirect to its platform module's (`hopi-network-android`). */
     private val PLATFORM_SUFFIXES = listOf("-android", "-jvm", "-iosarm64", "-iossimulatorarm64")
@@ -80,7 +72,7 @@ internal object HopiRuntimeGraph {
      * Whether [id] is one of Hopi's runtimes: the projects `:hopi-core`, `:hopi-network`,
      * `:hopi-perf` and `:hopi-start`, or those modules of `dev.koga.hopi`, with or without a
      * platform suffix. Exact names, not prefixes (a stale `hopi-perf-noop` is not a runtime);
-     * `hopi-api`, `hopi-ktor` and `hopi-ktor-noop` are not runtimes.
+     * `hopi-api` and `hopi-ktor` are not runtimes.
      */
     fun isRuntime(id: ComponentIdentifier): Boolean = isOneOf(id, RUNTIMES)
 
@@ -95,25 +87,17 @@ internal object HopiRuntimeGraph {
     /**
      * Each runtime in the graph under [root], in the order a walk from the root meets them, as its
      * display name followed by the components that depend on it, the root left out
-     * (`project ':hopi-core' (via project ':hopi-ktor')`, `dev.koga.hopi:hopi-network:0.1.0`).
+     * (`project ':hopi-core' (via project ':hopi-network')`, `dev.koga.hopi:hopi-network:0.1.0`).
      */
     fun refused(root: ResolvedComponentResult): List<String> = runtimesIn(root).map { describe(it, root.id) }
 
     /**
      * The runtimes to remove, by display name, in the same order: each one that something other
-     * than a runtime brings (the variant itself, a library, `hopi-ktor`); one that only other
-     * runtimes bring (core under `hopi-network`, a KMP root's platform module) goes with them.
+     * than a runtime brings (the variant itself, a library); one that only other runtimes bring
+     * (core under `hopi-network`, a KMP root's platform module) goes with them.
      */
     fun toRemove(root: ResolvedComponentResult): List<String> =
         runtimesIn(root).filter { runtime -> broughtBy(runtime).any { !isRuntime(it) } }.map { it.id.displayName }
-
-    /**
-     * Whether the real `hopi-ktor`, as a project or by its coordinates, brings one of the runtimes:
-     * until stage 10 of the runtime-split plan it brings `hopi-core`, so a release variant reaches
-     * it with `selectTwins` off or through a substitution of the consumer's.
-     */
-    fun broughtByKtor(root: ResolvedComponentResult): Boolean =
-        runtimesIn(root).any { runtime -> broughtBy(runtime).any { isOneOf(it, KTOR) } }
 
     private fun runtimesIn(root: ResolvedComponentResult): List<ResolvedComponentResult> {
         val found = ArrayList<ResolvedComponentResult>()

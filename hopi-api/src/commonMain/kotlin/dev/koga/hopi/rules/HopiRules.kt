@@ -74,9 +74,10 @@ public object HopiRules {
 
 /**
  * Called by each add that found no rules runtime registered, once it is counted. Nothing on Android
- * and the JVM: there a missing runtime is a release build, a test that registers none, or an
- * Android app's code that ran before its provider, which the start's notice counts. On iOS the
- * start is a call the app makes (`Hopi.shared.start`), so a Debug binary's first such add writes
- * one line to the system log, in case that call is missing.
+ * and the JVM: there a missing runtime is a release build, a test that registers none, an Android
+ * app's code that ran before its provider, or a JVM process before or without `Hopi.start`; the
+ * start's dropped-rules notice counts those adds. On iOS the start is a call the app makes
+ * (`Hopi.shared.start`), so a Debug binary's first such add writes one line to the system log, in
+ * case that call is missing.
  */
 internal expect fun ruleDroppedWithoutRuntime()

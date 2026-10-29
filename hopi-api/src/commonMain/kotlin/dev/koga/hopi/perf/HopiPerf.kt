@@ -11,8 +11,8 @@ import dev.koga.hopi.api.HopiRuntimes
  * realtime log (`HopiPerf` lines) and the bridge (`hopi perf …`, the desktop viewer's Perf panel).
  *
  * Every call does nothing until a debug build's start registers the perf runtime, as in a release
- * build: on Android the Gradle plugin's `perf { enabled = true }`, on iOS `Hopi.shared.start`
- * unless its `perf` is false, on the JVM nothing before the runtime-split plan's stage 10. No call
+ * build: on Android the Gradle plugin's `perf { enabled = true }`, on iOS `Hopi.shared.start` and on
+ * the JVM `Hopi.start` (CPU and memory only), each unless its `perf` is false. No call
  * starts the runtime itself. The block always runs. A [start] made before the registration is
  * dropped and counted, and the start that registers the runtime writes one notice line with the
  * count (an iOS Debug binary also writes one line at the first dropped start); [screen] keeps its

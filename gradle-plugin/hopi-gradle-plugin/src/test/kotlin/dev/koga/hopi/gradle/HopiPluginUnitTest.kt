@@ -167,7 +167,6 @@ class HopiPluginUnitTest {
         app.dependsOn(Component(ProjectId(":hopi-network")).dependsOn(Component(ProjectId(":hopi-core"))))
         assertEquals(listOf("project ':hopi-network'", "project ':hopi-core' (via project ':hopi-network')"), HopiRuntimeGraph.refused(app))
         assertEquals(listOf("project ':hopi-network'"), HopiRuntimeGraph.toRemove(app))
-        assertFalse(HopiRuntimeGraph.broughtByKtor(app))
 
         // The app names core as well: both are to be removed.
         app = Component(ProjectId(":app"))
@@ -175,12 +174,11 @@ class HopiPluginUnitTest {
         app.dependsOn(Component(ProjectId(":hopi-network")).dependsOn(core), core)
         assertEquals(listOf("project ':hopi-network'", "project ':hopi-core'"), HopiRuntimeGraph.toRemove(app))
 
-        // selectTwins off: the real hopi-ktor brings core, which the app never named.
+        // The thin hopi-ktor, in every build, brings no runtime: only hopi-api.
         app = Component(ProjectId(":app"))
-        app.dependsOn(Component(ProjectId(":hopi-ktor")).dependsOn(Component(ProjectId(":hopi-core"))), Component(ProjectId(":hopi-api")))
-        assertEquals(listOf("project ':hopi-core' (via project ':hopi-ktor')"), HopiRuntimeGraph.refused(app))
-        assertEquals(listOf("project ':hopi-core'"), HopiRuntimeGraph.toRemove(app))
-        assertTrue(HopiRuntimeGraph.broughtByKtor(app))
+        app.dependsOn(Component(ProjectId(":hopi-ktor")).dependsOn(Component(ProjectId(":hopi-api"))))
+        assertEquals(emptyList(), HopiRuntimeGraph.refused(app))
+        assertEquals(emptyList(), HopiRuntimeGraph.toRemove(app))
 
         // Published coordinates: a library names the KMP root, which redirects to its platform
         // module, which brings core's root and its platform module; only the root is to be removed.
@@ -196,7 +194,6 @@ class HopiPluginUnitTest {
         )
         assertEquals("dev.koga.hopi:hopi-network:0.1.0 (via project ':sdk')", HopiRuntimeGraph.refused(app).first())
         assertEquals(listOf("dev.koga.hopi:hopi-network:0.1.0"), HopiRuntimeGraph.toRemove(app))
-        assertFalse(HopiRuntimeGraph.broughtByKtor(app))
 
         // A constraint brings nothing: core, constrained by the app and brought by hopi-network only, goes with it.
         app = Component(ProjectId(":app"))
@@ -207,13 +204,14 @@ class HopiPluginUnitTest {
     }
 
     @Test
-    fun theReleaseGuardsFailureSaysWhatToRemoveAndWhenToKeepSelectTwins() {
-        val text = HopiReleaseGuard.message("freeQa", "qa", listOf("project ':hopi-core' (via project ':hopi-ktor')"), listOf("project ':hopi-core'"), true)
+    fun theReleaseGuardsFailureSaysWhatToRemove() {
+        val text = HopiReleaseGuard.message("freeQa", "qa", listOf("project ':hopi-network'", "project ':hopi-core' (via project ':hopi-network')"), listOf("project ':hopi-network'"))
         assertTrue(text.startsWith("dev.koga.hopi: variant freeQa is not debuggable"), text)
-        assertTrue("remove project ':hopi-core' from freeQa (" in text, text)
-        assertTrue("not as implementation or qaImplementation)." in text, text)
-        assertTrue(text.endsWith("Keep hopi { selectTwins } on (the default): the real hopi-ktor brings hopi-core, its noop twin does not."), text)
-        assertFalse("selectTwins" in HopiReleaseGuard.message("release", "release", listOf("project ':hopi-network'"), listOf("project ':hopi-network'"), false))
+        assertTrue("remove project ':hopi-network' from freeQa (" in text, text)
+        assertTrue(text.endsWith("not as implementation or qaImplementation)."), text)
+        // No twin is left to select since stage 10: the advice never names selectTwins.
+        assertFalse("selectTwins" in text, text)
+        assertFalse("selectTwins" in HopiReleaseGuard.message("release", "release", listOf("project ':hopi-network'"), listOf("project ':hopi-network'")))
     }
 
     @Test

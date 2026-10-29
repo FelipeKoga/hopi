@@ -9,6 +9,7 @@ import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionEvent
 import dev.koga.hopi.core.model.TransactionState
+import dev.koga.hopi.core.start.StartConfig
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.instrument.HookDescriptors
 import dev.koga.hopi.instrument.HopiRewriter
@@ -45,6 +46,8 @@ class AndroidCaptureTest {
     @BeforeTest
     fun setUp() {
         PlatformCapture.resetForTests()
+        // The Ktor scenarios register their recorder in the registry's Ktor slot, the network tool its own.
+        HopiRuntimes.resetForTests()
         server = TestServer()
         store = HopiStore()
     }
@@ -54,6 +57,7 @@ class AndroidCaptureTest {
         server.close()
         store.close()
         PlatformCapture.resetForTests()
+        HopiRuntimes.resetForTests()
     }
 
     @Test
@@ -622,6 +626,8 @@ class AndroidCaptureTest {
             assertEquals(false, tool["started"])
             assertFalse(HopiRuntimes.networkStarted)
             assertFalse(HopiRuntimes.okHttpInstrumented)
+            // Nor the Ktor recorder: the tool registers it only once capture runs.
+            assertNull(HopiRuntimes.ktorHooks)
         } finally {
             HopiRuntimes.resetForTests()
         }
@@ -639,10 +645,10 @@ class AndroidCaptureTest {
                 // Before each scenario and after the test, since JUnit's order is unspecified: the
                 // registry is the test's own (dev.koga.hopi.api comes from the test's loader, the
                 // scenario's tool is its loader's child-first copy). resetForTests empties every
-                // slot, harmless here: no other host test of this module names HopiRules, HopiPerf,
-                // HopiRuntimes or ApiRules.
+                // slot, harmless here: the scenarios register the recorder in it; no host test of
+                // this module names HopiRules, HopiPerf or ApiRules.
                 HopiRuntimes.resetForTests()
-                val settings = mapOf("okhttp" to okhttp, "urlConnection" to urlConnection, "rules" to rules)
+                val settings = mapOf("okhttp" to okhttp, "urlConnection" to urlConnection, "rules" to rules, "startConfig" to NETWORK_TOOL_START)
                 val observed = runScenario("networkTool", store, server.base, start = false, extra = settings)
                 // The start line's note: the rewritten RealCall was found by name.
                 assertEquals("okhttp instrumented", observed["note"], label)
@@ -657,11 +663,38 @@ class AndroidCaptureTest {
                 // debug app reads.
                 assertTrue(HopiRuntimes.networkStarted, label)
                 assertTrue(HopiRuntimes.okHttpInstrumented, label)
+                // And registered the Ktor recorder with its own `rules` and the start's whole
+                // configuration, the summary log and both redaction lists included (read back by the
+                // scenario: the slot holds its loader's KtorHooks).
+                assertEquals(rules, observed["hooksRules"], label)
+                assertEquals(NETWORK_TOOL_START, observed["hooksStart"], label)
             }
         } finally {
             HopiRuntimes.resetForTests()
         }
     }
 
+    @Test
+    fun withoutHopiKtorTheNetworkToolRegistersNoRecorder() {
+        // An app without the Ktor plugin: hopi-ktor's classes do not exist for the scenario, so the
+        // recorder's forwarder fails to link and the tool registers no recorder, and starts capture.
+        val settings = mapOf("okhttp" to true, "urlConnection" to true, "rules" to true)
+        val observed = runScenario("networkTool", store, server.base, start = false, extra = settings, hidden = listOf("dev.koga.hopi.ktor."))
+        assertEquals("okhttp instrumented", observed["note"])
+        assertEquals(true, observed["started"])
+        assertTrue(HopiRuntimes.networkStarted)
+        assertNull(HopiRuntimes.ktorHooks)
+        assertFalse("hooksRules" in observed)
+    }
+
     private fun sha(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        /** The network tool's start configuration: no summary log, both lists, each off its default. */
+        val NETWORK_TOOL_START = StartConfig(
+            summaryLog = false,
+            redactedHeaders = listOf("X-Start-Secret"),
+            redactedQueryParameters = listOf("start_token"),
+        )
+    }
 }

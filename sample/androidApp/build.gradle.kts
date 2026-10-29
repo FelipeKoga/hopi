@@ -54,7 +54,8 @@ kotlin {
 }
 
 // `-Psample.hopiCapture=false` builds the debug variant as release is built (`hopi { enabled = false }`:
-// no runtime, the Ktor plugin's noop twin, no instrumentation), the control arm of the capture A/B.
+// no runtime, so the thin Ktor plugin installs nothing, no instrumentation), the control arm of the
+// capture A/B.
 hopi {
     enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
     // The CLI and the desktop viewer reach the app through its bridge.
@@ -72,14 +73,13 @@ hopi {
 }
 
 dependencies {
-    // Hopi's Ktor plugin comes with the shared module, which names the real module or the noop twin
-    // by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP
-    // project"). The dev.koga.hopi plugin then resolves it per variant: real in debug, noop in
-    // release, whatever the property said, so the two are never both packaged. It also adds, in
-    // debug only, the network runtime (hopi-network), core, whose start registers the runtime behind
-    // HopiRules, and, for `perf { enabled }`, hopi-perf, whose tool registers the runtime behind
-    // HopiPerf: release gets no runtime (its release guard fails a build that resolves one), and
-    // hopi-api, which the shared module names in every build, has no twin.
+    // Hopi's Ktor plugin comes with the shared module, the thin one in every build: it records only
+    // through the recorder a debug build's network runtime registered. The dev.koga.hopi plugin adds,
+    // in debug only, the network runtime (hopi-network, whose network tool registers that recorder),
+    // core, whose start registers the runtime behind HopiRules, and, for `perf { enabled }`,
+    // hopi-perf, whose tool registers the runtime behind HopiPerf: release gets no runtime (its
+    // release guard fails a build that resolves one), only hopi-api and the thin hopi-ktor, which
+    // the shared module names in every build.
     implementation(project(":sample:shared"))
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
     implementation(project(":sample:fakesdk"))
@@ -93,9 +93,9 @@ dependencies {
  * plugin's own `DexReader`, no SDK tool) and the merged manifest:
  *
  * - the release runtime classpath's Hopi components are exactly `hopi-api` (`HopiRules` and
- *   `HopiPerf`, no twin) and the Ktor plugin's noop twin (until stage 10 of the runtime-split plan,
- *   which makes the real Ktor plugin a thin one): no runtime, as a project or as `dev.koga.hopi`
- *   coordinates; and the APK's Hopi classes are exactly the classes their jars hold (unminified);
+ *   `HopiPerf`) and the thin Ktor plugin (`hopi-ktor`, which installs nothing without a runtime):
+ *   no runtime, as a project or as `dev.koga.hopi` coordinates; and the APK's Hopi classes are
+ *   exactly the classes their jars hold (unminified);
  * - no type of `dev.koga.hopi.core`, `.android`, `.perf.internal`, `.ui`, `.network`, `.urlsession`
  *   or `.start` is defined or even referenced (an instrumented call site would reference a hook
  *   type), with no exemption, and no class calls a hook;
@@ -172,7 +172,7 @@ abstract class VerifyReleaseHasNoRuntime : DefaultTask() {
 
         val summary = buildString {
             appendLine("apk: ${apk.name}")
-            appendLine("expected: hopi-api and the Ktor plugin's noop twin, no runtime, no instrumentation")
+            appendLine("expected: hopi-api and the thin Ktor plugin, no runtime, no instrumentation")
             appendLine("hopi components on the release classpath: ${components.sorted().joinToString()}")
             appendLine("hopi classes in the apk: ${apkClasses.size}; referenced runtime/capture types: ${forbidden.size}; classes calling a hook: ${hookCalls.size}; Hopi manifest components: ${manifestComponents.size}")
             appendLine("negative control: RealCall calls OkHttpClient.interceptors(): ${realCallCalls.filter { it in HookDescriptors.REAL_CALL_CLASSES }}; fake SDK classes calling URL.openConnection(): $sdkCalls")
@@ -203,8 +203,8 @@ abstract class VerifyReleaseHasNoRuntime : DefaultTask() {
     }
 
     private companion object {
-        /** Until stage 10 of the runtime-split plan, which turns the Ktor plugin's noop twin into the thin plugin. */
-        val EXPECTED_COMPONENTS = setOf(":hopi-api", ":hopi-ktor-noop")
+        /** `HopiRules` and `HopiPerf`, and the thin Ktor plugin, which brings no runtime. */
+        val EXPECTED_COMPONENTS = setOf(":hopi-api", ":hopi-ktor")
         val FORBIDDEN_PACKAGES = listOf(
             "dev/koga/hopi/core/", "dev/koga/hopi/android/", "dev/koga/hopi/perf/internal/", "dev/koga/hopi/ui/",
             "dev/koga/hopi/network/", "dev/koga/hopi/urlsession/", "dev/koga/hopi/start/",
@@ -230,7 +230,8 @@ object PerfApis {
  * `kotlin.io.TextStreamsKt` (the sample's `URL.readText()`, inlined into a call of its
  * `readBytes()`) call the URL hooks; the merged manifest
  * declares the provider; the rule engine is packaged (the release check's absent core, seen from
- * the other side); and the debug runtime classpath holds the real modules.
+ * the other side); the Ktor plugin's recorder is packaged (`KtorHooks`, the forwarder the network
+ * tool registers); and the debug runtime classpath holds the real modules.
  */
 abstract class VerifyDebugCapture : DefaultTask() {
     @get:InputFiles
@@ -278,6 +279,8 @@ abstract class VerifyDebugCapture : DefaultTask() {
         if (PROVIDER !in manifest) problems += "the merged manifest does not declare $PROVIDER"
         val ruleEngine = RULE_ENGINE in dex.definedClasses
         if (!ruleEngine) problems += "the debug APK holds no $RULE_ENGINE"
+        val ktorRecorder = KTOR_HOOKS in dex.definedClasses
+        if (!ktorRecorder) problems += "the debug APK holds no $KTOR_HOOKS"
         // The perf monitors: the tool the generated configuration lists, and the calls they are built on.
         val perfEntry = PERF_ENTRY in dex.definedClasses
         if (!perfEntry) problems += "the debug APK holds no $PERF_ENTRY"
@@ -291,6 +294,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
             appendLine("classes calling a URL hook: ${urlHookCallers.size}, e.g. ${urlHookCallers.filter { !it.startsWith("dev/koga/hopi/android/") }.take(8)}")
             appendLine("classes still opening URL connections directly: ${direct.size}; provider declared: ${PROVIDER in manifest}; rule engine packaged: $ruleEngine")
             appendLine("perf entry packaged: $perfEntry; perf monitor calls: ${perfCalls.map { it.name }}")
+            appendLine("ktor recorder packaged: $ktorRecorder")
         }
         if (problems.isNotEmpty()) throw GradleException("The debug APK is not instrumented as expected:\n- " + problems.joinToString("\n- ") + "\n" + summary)
         report.get().asFile.writeText(summary)
@@ -303,6 +307,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
         const val RULE_ENGINE = "dev/koga/hopi/core/rules/RuleEngine"
         const val PERF_ENTRY = "dev/koga/hopi/perf/internal/PerfEntry"
+        const val KTOR_HOOKS = "dev/koga/hopi/network/internal/ktor/KtorHooks"
     }
 }
 
@@ -335,12 +340,12 @@ object HopiGraph {
     }
 }
 
-// What every consumer relies on: the release APK holds hopi-api and the Ktor plugin's noop twin,
-// no runtime and no instrumentation, whatever -Phopi.enabled says (the plugin resolves the twins per
-// variant, so the property no longer reaches an Android release build).
+// What every consumer relies on: the release APK holds hopi-api and the thin Ktor plugin, no
+// runtime and no instrumentation, whatever -Phopi.enabled says (the property no longer reaches an
+// Android build: the dev.koga.hopi plugin gives only debuggable variants the runtimes).
 val verifyReleaseHasNoRuntime = tasks.register<VerifyReleaseHasNoRuntime>("verifyReleaseHasNoRuntime") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Checks that the release APK holds hopi-api and the Ktor noop twin only: no Hopi runtime, no capture code, no instrumentation."
+    description = "Checks that the release APK holds hopi-api and the thin Ktor plugin only: no Hopi runtime, no capture code, no instrumentation."
     report.set(layout.buildDirectory.file("reports/hopi/release-has-no-runtime.txt"))
 }
 

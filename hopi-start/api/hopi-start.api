@@ -1,0 +1,31 @@
+public final class dev/koga/hopi/start/Hopi {
+	public static final field INSTANCE Ldev/koga/hopi/start/Hopi;
+	public final fun isStarted ()Z
+	public final fun start ()V
+	public final fun start (Lkotlin/jvm/functions/Function1;)V
+}
+
+public final class dev/koga/hopi/start/HopiStartConfig {
+	public final fun getAgentBridge ()Z
+	public final fun getEnabled ()Z
+	public final fun getMaxBodyBytes ()J
+	public final fun getMaxEntries ()I
+	public final fun getMaxTotalBytes ()J
+	public final fun getPerf ()Z
+	public final fun getPerfRemoteControl ()Z
+	public final fun getRules ()Z
+	public final fun getSummaryLog ()Z
+	public final fun redactHeaders ([Ljava/lang/String;)V
+	public final fun redactQueryParameters ([Ljava/lang/String;)V
+	public final fun setAgentBridge (Z)V
+	public final fun setEnabled (Z)V
+	public final fun setMaxBodyBytes (J)V
+	public final fun setMaxEntries (I)V
+	public final fun setMaxTotalBytes (J)V
+	public final fun setPerf (Z)V
+	public final fun setPerfRemoteControl (Z)V
+	public final fun setRules (Z)V
+	public final fun setSummaryLog (Z)V
+	public final fun unsafeDisableRedaction ()V
+}
+

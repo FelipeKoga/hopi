@@ -12,9 +12,9 @@ struct IOSApp: App {
         // built with HOPI_ENABLED=false (project.yml). A Release framework has no Hopi to call.
         #if HOPI
         Hopi.shared.start { config in
-            // The same bridge and caps as the sample's Ktor plugin: Ktor's Darwin requests are
-            // recorded by URLSession capture (the plugin defers to it), so the giant-body launch
-            // arguments (-maxBodyBytes N, -maxTotalBytes N) must reach this call too.
+            // The bridge and the caps: Ktor's Darwin requests are recorded by URLSession capture
+            // (the plugin installs nothing on iOS), so the giant-body launch arguments
+            // (-maxBodyBytes N, -maxTotalBytes N) must reach this call.
             config.agentBridge = true
             if let value = launchArgument("-maxBodyBytes").flatMap(Int64.init) { config.maxBodyBytes = value }
             if let value = launchArgument("-maxTotalBytes").flatMap(Int64.init) { config.maxTotalBytes = value }

@@ -44,8 +44,9 @@ public class ToolStart(public val name: String, public val note: String?, public
  * configuration and a list of tools in, the rules runtime registered first, then each tool started
  * in list order; a tool may register its own API runtime when it starts (perf's registers
  * `HopiPerf`'s). On Android the provider runs it with the plugin's generated tool list, on the main
- * thread before `Application.onCreate`; on iOS `hopi-start`'s `Hopi.start`, with the network tool
- * and perf's; JVM tests call it directly. Once per process: the first valid call wins.
+ * thread before `Application.onCreate`; on iOS and the JVM `hopi-start`'s `Hopi.start`, with the
+ * network tool and perf's; JVM tests also call it directly. Once per process: the first valid call
+ * wins.
  */
 @HopiInternalApi
 public object HopiStart {

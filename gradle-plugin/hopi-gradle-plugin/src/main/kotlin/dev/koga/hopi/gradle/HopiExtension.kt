@@ -9,8 +9,8 @@ import org.gradle.api.tasks.Nested
  * The optional `hopi { }` block of an Android application module. Every value has a default, so
  * `plugins { id("dev.koga.hopi") }` alone is the whole setup. The store, redaction, log and bridge
  * settings at the top are the start's, shared by every tool, and mean what they mean for
- * `Hopi.start` on iOS and for the Ktor plugin; capture's own settings are in [network], the
- * monitors' in [perf].
+ * `Hopi.start` on iOS and the JVM and for the Ktor plugin, whose every client's installation makes
+ * the start's first; capture's own settings are in [network], the monitors' in [perf].
  */
 public abstract class HopiExtension {
     /**
@@ -20,11 +20,9 @@ public abstract class HopiExtension {
     public abstract val enabled: Property<Boolean>
 
     /**
-     * Gives debuggable variants the real `hopi-ktor` and the others its noop twin, whichever of the
-     * two the app's modules name, so no `-Phopi.enabled` is needed on Android. (`HopiRules` and
-     * `HopiPerf` are in `hopi-api`, which has no twin: every variant gets it.) Keep it on until stage
-     * 10 of the runtime-split plan: the real `hopi-ktor` still brings `hopi-core`, so a release
-     * variant that resolves it fails the release guard.
+     * Does nothing since stage 10 of the runtime-split plan, which left no twin: `hopi-ktor` is the
+     * thin Ktor plugin in every build, with no core, and `HopiRules` and `HopiPerf` are in
+     * `hopi-api`, which every variant gets. Accepted, on or off, until stage 11 removes it.
      */
     public abstract val selectTwins: Property<Boolean>
 

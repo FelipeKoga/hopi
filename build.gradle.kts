@@ -106,9 +106,9 @@ abstract class NoopParityCheck : DefaultTask() {
     }
 }
 
-val noopTwins = listOf(
-    "hopi-ktor" to "hopi-ktor-noop",
-)
+// No pair since the runtime-split plan's stage 10 (the Ktor plugin became thin, with no twin):
+// checkNoopParity checks nothing until stage 11 removes the machinery.
+val noopTwins = emptyList<Pair<String, String>>()
 
 val noopParityChecks = noopTwins.map { (real, noop) ->
     val taskName = "check" + noop.split('-').joinToString("") { it.replaceFirstChar(Char::uppercase) } + "Parity"
@@ -235,19 +235,18 @@ abstract class PublicationCheck : DefaultTask() {
 // main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the desktop
 // viewer with its screens (hopi-ui) and the sample are not published. The dev.koga.hopi plugin
 // injects the network runtime (hopi-network), hopi-core and, with `perf { enabled }`, hopi-perf
-// into debuggable build types only, swaps the ktor twins and aligns hopi-api (HopiRules, HopiPerf)
-// with its own version, all of them listed here. hopi-start, the iOS entry a Debug framework
-// exports, brings hopi-network and hopi-perf; it has the iOS targets only, and hopi-network no JVM
-// one, until the runtime-split plan's stage 10.
+// into debuggable build types only and aligns hopi-api (HopiRules, HopiPerf) and hopi-ktor (the
+// thin Ktor plugin) with its own version, all of them listed here; no twin is left to swap.
+// hopi-start, the iOS entry a Debug framework exports and the JVM entry, brings hopi-network and
+// hopi-perf; hopi-network's JVM target holds the Ktor plugin's recorder.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
 val publishedModules = mapOf(
     "hopi-api" to allTargets,
     "hopi-core" to allTargets,
     "hopi-ktor" to allTargets,
-    "hopi-ktor-noop" to allTargets,
     "hopi-perf" to allTargets,
-    "hopi-network" to listOf("android", "iosArm64", "iosSimulatorArm64"),
-    "hopi-start" to listOf("iosArm64", "iosSimulatorArm64"),
+    "hopi-network" to allTargets,
+    "hopi-start" to listOf("jvm", "iosArm64", "iosSimulatorArm64"),
 )
 val publishedCinterops = mapOf(
     "hopi-core" to listOf("oslog", "hits"),

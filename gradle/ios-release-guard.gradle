@@ -4,10 +4,11 @@
 // hopiReleaseGuard<LinkTask> (hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64),
 // which fails when the binary's classpath holds one of Hopi's runtimes: hopi-core, hopi-network,
 // hopi-perf or hopi-start, as this repository's projects or as dev.koga.hopi coordinates, a
-// platform module (hopi-network-iossimulatorarm64) included; exact names, so hopi-api, hopi-ktor
-// and hopi-ktor-noop pass. That covers every way a Release framework is linked: Xcode's Release
-// configuration, a custom configuration with KOTLIN_FRAMEWORK_BUILD_TYPE=release, the Release half
-// of assemble<Name>XCFramework (assemble<Name>ReleaseXCFramework, every slice: one invocation of
+// platform module (hopi-network-iossimulatorarm64) included; exact names, so hopi-api and
+// hopi-ktor (the thin Ktor plugin, no runtime) pass. That covers every way a Release framework is
+// linked: Xcode's Release configuration, a custom configuration with
+// KOTLIN_FRAMEWORK_BUILD_TYPE=release, the Release half of assemble<Name>XCFramework
+// (assemble<Name>ReleaseXCFramework, every slice: one invocation of
 // assemble<Name>XCFramework links both build types, so it fails as a whole, while
 // assemble<Name>DebugXCFramework links Debug only), CocoaPods' pod frameworks and
 // link<…>Release<…> itself. A custom configuration a consumer maps to debug links a Debug binary,
@@ -76,12 +77,11 @@ abstract class HopiIosReleaseGuard extends DefaultTask {
             logger.lifecycle("Hopi's iOS release guard: ${linkPath.get()} is exempt (the release check's positive control, requested by name): ${found.join(', ')}")
             return
         }
-        // Until stage 10 of the runtime-split plan the real hopi-ktor brings hopi-core.
         String message = "Hopi's iOS release guard: ${linkPath.get()} links a Release binary with Hopi's runtime on its classpath: " +
             "${found.join(', ')}. A Release binary must hold none: build it without -Phopi.enabled=true (Xcode's build phase " +
-            "passes it for the Debug configuration only); name Hopi's runtimes (hopi-start) and the real hopi-ktor, which brings " +
-            "hopi-core, only under that flag (a module that names one outside it fails here with or without the flag); or link only " +
-            "the Debug binary (link<…>Debug…, assemble<Name>DebugXCFramework)."
+            "passes it for the Debug configuration only); name Hopi's runtimes (hopi-start) only under that flag (a module that " +
+            "names one outside it fails here with or without the flag); or link only the Debug binary (link<…>Debug…, " +
+            "assemble<Name>DebugXCFramework)."
         if (releaseCheckLink.get()) {
             message += " This is the link verifyIosReleaseExcludesCapture consumes: request that task by its own name for its positive control."
         }

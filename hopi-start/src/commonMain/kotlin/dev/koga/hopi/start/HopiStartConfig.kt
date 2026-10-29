@@ -8,9 +8,10 @@ import dev.koga.hopi.core.store.HopiStore
  * log, the agent bridge) and the tools' own settings ([rules]; [perf] and [perfRemoteControl]).
  * Primitive members only, so Swift sees this class and no core type. The store is the process-wide
  * one every recorder shares, and its redaction is the union of every installation's lists. Called
- * first thing, before anything created the store (a Ktor client), the start presets these caps, so
- * they win over a recorder's own (the Ktor plugin's included); a store that exists already keeps
- * its caps.
+ * first thing, before anything created the store, the start presets these caps, so they win over a
+ * recorder's own (a Ktor client's on the JVM included); a store that exists already keeps its caps.
+ * On the JVM every Ktor client's installation makes this configuration's first (its redaction, its
+ * summary log), then the client's own.
  */
 public class HopiStartConfig internal constructor() {
     /** Runtime kill switch. When false [Hopi.start] starts nothing and writes nothing. */
@@ -26,9 +27,9 @@ public class HopiStartConfig internal constructor() {
     public var maxBodyBytes: Long = DEFAULT_MAX_BODY_BYTES
 
     /**
-     * One NDJSON summary line per completed or failed transaction in the platform log, plus notices,
-     * and the performance monitors' rate-limited lines (os_log category `perf`; their notices are
-     * written whatever this says).
+     * One NDJSON summary line per completed or failed transaction in the platform log (os_log on
+     * iOS, stderr on the JVM), plus notices, and the performance monitors' rate-limited lines (on
+     * iOS os_log category `perf`, on the JVM stderr; their notices are written whatever this says).
      */
     public var summaryLog: Boolean = true
 
@@ -36,17 +37,21 @@ public class HopiStartConfig internal constructor() {
     public var agentBridge: Boolean = false
 
     /**
-     * Applies Hopi rules (mock, delay, fail, request edit) to URLSession requests. With no
-     * rule set, a session created after [Hopi.start] pays one `canInitWithTask:` message
-     * per task and nothing else; false installs no rule hook at all (docs/design/rules.md).
+     * Applies Hopi rules (mock, delay, fail, request edit) to URLSession requests on iOS, and to the
+     * Ktor plugin's requests on the JVM (mock, delay, fail, edit; a client's own `rules` must be true
+     * too). On iOS, with no rule set, a session created after [Hopi.start] pays one
+     * `canInitWithTask:` message per task and nothing else, and false installs no rule hook at all;
+     * on the JVM a recorded request pays one read of the rule state, and false keeps the recorder
+     * from ever reading it (docs/design/rules.md).
      */
     public var rules: Boolean = true
 
     /**
      * Registers the performance monitors for remote control (`hopi perf start`, the desktop
      * viewer's Perf panel) and for `HopiPerf` from code, and starts none: a monitor costs nothing
-     * until it starts. A `-hopiPerf frames,hangs` launch argument starts those at launch. False
-     * leaves perf out of the start, and `HopiPerf` then does nothing.
+     * until it starts. On iOS a `-hopiPerf frames,hangs` launch argument starts those at launch; on
+     * the JVM only CPU and memory exist. False leaves perf out of the start, and `HopiPerf` then
+     * does nothing.
      */
     public var perf: Boolean = true
 

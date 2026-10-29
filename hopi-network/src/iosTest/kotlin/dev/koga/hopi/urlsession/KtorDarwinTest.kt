@@ -17,13 +17,15 @@ import io.ktor.utils.io.ByteReadChannel
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 
 /**
  * Ktor's Darwin engine sends through URLSession: with the plugin installed and capture started,
- * each request is recorded once, by URLSession capture (the plugin defers to it).
+ * each request is recorded once, by URLSession capture. The plugin installs nothing on iOS: no
+ * recorder is ever registered there (the Ktor recorder is hopi-network's on Android and the JVM).
  */
 class KtorDarwinTest {
     init {
@@ -37,6 +39,8 @@ class KtorDarwinTest {
     @Test
     fun oneRecordPerRequestFromUrlSessionCapture() = runBlocking {
         client().use { client ->
+            // The plugin installed no hook: the recorder's receive phases are absent.
+            assertTrue(client.receivePipeline.items.none { it.name == "HopiRawResponse" }, client.receivePipeline.items.toString())
             val url = Capture.url("/bytes?n=12345")
             val watch = Watch(url)
             assertContentEquals(expectedBytes(12345), client.get(url).bodyAsBytes())

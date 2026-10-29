@@ -19,8 +19,9 @@ import org.gradle.language.base.plugins.LifecycleBasePlugin
  *   the app and which names core's types, and every runtime takes core as `implementation` only;
  * - each debuggable variant gets the `hopi { }` block generated into it as the start configuration
  *   and its tool list: the network tool with `network { enabled }`, perf's with
- *   `perf { enabled = true }`, possibly none (the start then registers the rules runtime and starts
- *   the bridge with `agentBridge`, so `HopiRules` works for the Ktor plugin);
+ *   `perf { enabled = true }`, possibly none (the start then still registers the rules runtime and
+ *   starts the bridge with `agentBridge`; nothing records, the Ktor plugin's recorder being
+ *   `hopi-network`'s, which the network tool registers);
  * - with `network { enabled }`, each debuggable variant has OkHttp's `RealCall` and every
  *   `java.net.URL` connection call site of the app and all of its dependencies rewritten (AGP
  *   instrumentation, scope ALL); other variants are not instrumented at all;
@@ -28,13 +29,15 @@ import org.gradle.language.base.plugins.LifecycleBasePlugin
  *   ([HopiReleaseGuard]), whatever `enabled` says: before the variant's build it fails when the
  *   runtime classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, which only a
  *   module naming them can bring there;
- * - with `selectTwins` (the default), each variant resolves `hopi-ktor` to the real module when
- *   debuggable and to the noop twin otherwise, whichever the app's modules name;
+ * - `selectTwins` does nothing since stage 10 of the runtime-split plan: no twin is left (the thin
+ *   `hopi-ktor` is in every build); stage 11 removes it;
  * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
- *   app's modules name in every build type) at this plugin's version, the version of the
- *   `hopi-core`, `hopi-network` and `hopi-perf` it adds: core's rules runtime and hopi-perf's
- *   runtime implement internal interfaces of `hopi-api`, the network tool calls its registry's
- *   `registerNetwork`, and a mismatch would fail at run time;
+ *   app's modules name in every build type) and, with `network { enabled }`, `dev.koga.hopi:hopi-ktor`
+ *   (the Ktor plugin, which the app's modules may name in every build type) at this plugin's
+ *   version, the version of the `hopi-core`, `hopi-network` and `hopi-perf` it adds: core's rules
+ *   runtime and hopi-perf's runtime implement internal interfaces of `hopi-api`, the network tool
+ *   calls its registry's `registerNetwork` and implements `hopi-ktor`'s hooks interface, and a
+ *   mismatch would fail at run time;
  * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others nothing:
  *   `HopiPerf` is `hopi-api`'s) and the tool list names its tool, which registers the monitors and
  *   starts the `autoStart` ones (docs/design/perf-monitors.md).
@@ -77,7 +80,7 @@ public class HopiPlugin : Plugin<Project> {
                 // extends core's HopiConfigValues and lists core's HopiTool, so javac needs core on
                 // the variant's compile classpath, and no runtime exposes it there.
                 project.dependencies.add(configuration, runtime(project, CORE))
-                alignApi(project, buildType.name)
+                alignApi(project, buildType.name, extension.network.enabled.get())
                 // The monitors' runtime: HopiPerf, which the app calls, is hopi-api's.
                 if (extension.perf.enabled.get()) project.dependencies.add(configuration, runtime(project, PERF))
             }
@@ -151,9 +154,9 @@ public class HopiPlugin : Plugin<Project> {
 
     /**
      * The release guard of a variant that is not debuggable ([HopiReleaseGuard]): its inputs are the
-     * variant's runtime classpath, as the twin selection leaves it, mapped to the runtimes it holds,
-     * the ones to remove and whether the real `hopi-ktor` brings one, when the task's inputs are
-     * read; AGP runs it before `pre<Variant>Build`, so before any compile or dex task of the variant.
+     * variant's runtime classpath mapped to the runtimes it holds and the ones to remove, when the
+     * task's inputs are read; AGP runs it before `pre<Variant>Build`, so before any compile or dex
+     * task of the variant.
      */
     private fun guard(project: Project, variant: ApplicationVariant) {
         val name = variant.name.replaceFirstChar(Char::uppercaseChar)
@@ -165,7 +168,6 @@ public class HopiPlugin : Plugin<Project> {
             task.buildType.set(variant.buildType ?: variant.name)
             task.runtimes.set(graph.map(HopiRuntimeGraph::refused))
             task.remove.set(graph.map(HopiRuntimeGraph::toRemove))
-            task.viaKtor.set(graph.map(HopiRuntimeGraph::broughtByKtor))
         }
         variant.lifecycleTasks.registerPreBuild(guard)
     }
@@ -173,7 +175,8 @@ public class HopiPlugin : Plugin<Project> {
     /**
      * Resolves both directions of each twin pair to the side this variant needs, for this
      * repository's projects and for the published coordinates. Safe because the twins have the same
-     * ABI with no inlined body (`:checkNoopParity`).
+     * ABI with no inlined body (`:checkNoopParity`). Does nothing since stage 10 of the
+     * runtime-split plan, no pair being left ([TWINS] is empty); stage 11 removes it.
      */
     private fun selectTwins(project: Project, configuration: Configuration, real: Boolean) {
         val root = project.rootProject
@@ -191,19 +194,29 @@ public class HopiPlugin : Plugin<Project> {
     }
 
     /**
-     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core (whatever the tools),
-     * `hopi-network` with `network { enabled }` and `hopi-perf` with `perf { enabled = true }`, at
-     * that version: the app names `hopi-api` itself
-     * (it holds `HopiRules` and `HopiPerf`), at whatever version it chose, and core's rules runtime
-     * and hopi-perf's runtime implement internal interfaces of it, and `hopi-network`'s network tool
-     * calls its registry's `registerNetwork`. A constraint, so it adds nothing to a build that never
-     * names `hopi-api`; none for this repository's project, which is core's own version.
+     * Holds `hopi-api` and, with [network] (`network { enabled }`), `hopi-ktor` at [HOPI_VERSION] in
+     * [buildType], which gets core (whatever the tools), `hopi-network` with `network { enabled }`
+     * and `hopi-perf` with `perf { enabled = true }`, at that version: the app names `hopi-api`
+     * itself (it holds `HopiRules` and `HopiPerf`) and may name `hopi-ktor` (the Ktor plugin), at
+     * whatever version it chose; core's rules runtime and hopi-perf's runtime implement internal
+     * interfaces of `hopi-api`, `hopi-network`'s network tool calls its registry's
+     * `registerNetwork`, and its Ktor recorder implements `hopi-ktor`'s internal hooks interface. A
+     * constraint, so it adds nothing to a build that never names the module; none for this
+     * repository's project of that name, which is core's own version.
      */
-    private fun alignApi(project: Project, buildType: String) {
-        if (project.rootProject.findProject(":$API") != null) return
-        project.dependencies.constraints.add("${buildType}Implementation", "$GROUP:$API") { constraint ->
-            constraint.version { it.strictly(HOPI_VERSION) }
-            constraint.because("dev.koga.hopi: hopi-core $HOPI_VERSION implements hopi-api $HOPI_VERSION's internal interfaces")
+    private fun alignApi(project: Project, buildType: String, network: Boolean) {
+        val configuration = "${buildType}Implementation"
+        if (project.rootProject.findProject(":$API") == null) {
+            project.dependencies.constraints.add(configuration, "$GROUP:$API") { constraint ->
+                constraint.version { it.strictly(HOPI_VERSION) }
+                constraint.because("dev.koga.hopi: hopi-core $HOPI_VERSION implements hopi-api $HOPI_VERSION's internal interfaces")
+            }
+        }
+        if (network && project.rootProject.findProject(":$KTOR") == null) {
+            project.dependencies.constraints.add(configuration, "$GROUP:$KTOR") { constraint ->
+                constraint.version { it.strictly(HOPI_VERSION) }
+                constraint.because("dev.koga.hopi: hopi-network $HOPI_VERSION implements hopi-ktor $HOPI_VERSION's internal hooks interface")
+            }
         }
     }
 
@@ -238,8 +251,11 @@ public class HopiPlugin : Plugin<Project> {
         const val GROUP = "dev.koga.hopi"
         const val CORE = "hopi-core"
         const val API = "hopi-api"
+        const val KTOR = "hopi-ktor"
         const val RUNTIME = "hopi-network"
         const val PERF = "hopi-perf"
-        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop")
+
+        /** No twin is left since stage 10 of the runtime-split plan; stage 11 removes the selection. */
+        val TWINS = emptyList<Pair<String, String>>()
     }
 }

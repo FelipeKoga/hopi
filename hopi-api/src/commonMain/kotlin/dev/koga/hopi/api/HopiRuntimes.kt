@@ -15,10 +15,12 @@ import kotlin.concurrent.atomics.incrementAndFetch
  * the first succeeds. For a slot a different runtime could also claim, the runtime refused writes
  * the notice. The rules and perf slots are typed with this module's own [HopiRulesRuntime] and
  * [HopiPerfRuntime]; a slot whose interface names types this module cannot see (the Ktor hooks)
- * holds what the runtime registered, and the module that reads it knows the type. The network
- * status ([networkStarted], [okHttpInstrumented]) is a slot of the same kind: `hopi-network`'s
- * network tool writes it once capture runs, on Android and iOS; a debug app's code may read it (the
- * sample prints it); nothing registers it in a release build, where both values are false.
+ * holds what the runtime registered, and the module that reads it knows the type: `hopi-network`'s
+ * network tool writes the Ktor slot on Android and the JVM when the app has `hopi-ktor`. The
+ * network status ([networkStarted], [okHttpInstrumented]) is a slot of the same kind:
+ * `hopi-network`'s network tool writes it once capture runs, on Android and iOS, and on the JVM once
+ * the Ktor recorder is registered; a debug app's code may read it (the sample prints it); nothing
+ * registers it in a release build, where both values are false.
  */
 @HopiInternalApi
 public object HopiRuntimes {
@@ -34,7 +36,9 @@ public object HopiRuntimes {
     private val network = AtomicInt(0)
 
     /**
-     * The Ktor client hooks the network runtime registered, or null. `hopi-ktor` casts the value to
+     * The Ktor client hooks the network runtime registered, or null: `hopi-network`'s recorder, which
+     * its network tool registers on Android and the JVM when the app has `hopi-ktor`; nothing on iOS
+     * or in a release build. `hopi-ktor`'s plugin reads it once per client install and casts it to
      * its own hooks interface, which names Ktor types this module cannot see.
      */
     public val ktorHooks: Any?
@@ -96,7 +100,8 @@ public object HopiRuntimes {
 
     /**
      * True once a network tool of `hopi-network` started capture in this process (Android's or
-     * iOS's, from the start sequence); false without a network runtime, so in every release build.
+     * iOS's, from the start sequence), or on the JVM registered the Ktor recorder; false without a
+     * network runtime, so in every release build.
      */
     public val networkStarted: Boolean
         get() = network.load() != 0

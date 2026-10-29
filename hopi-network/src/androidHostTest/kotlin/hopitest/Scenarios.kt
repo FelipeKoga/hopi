@@ -6,13 +6,14 @@ import dev.koga.hopi.android.internal.CACHED_CLIENTS
 import dev.koga.hopi.android.internal.HopiOkHttpInterceptor
 import dev.koga.hopi.android.internal.NetworkTool
 import dev.koga.hopi.android.internal.interceptors
+import dev.koga.hopi.api.HopiRuntimes
 import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.start.HopiToolContext
 import dev.koga.hopi.core.start.StartConfig
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ktor.Hopi
-import dev.koga.hopi.ktor.HopiConfig
 import dev.koga.hopi.ktor.HopiLogSink
+import dev.koga.hopi.network.internal.ktor.KtorHooks
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.HttpClientEngineConfig
@@ -98,12 +99,23 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
             "urlMissing" -> urlMissing(base, out)
             "networkTool" -> {
                 // The start sequence's network tool, as the generated configuration lists it, with
-                // the settings the test passes.
+                // the settings and the start configuration (core's class, one for both loaders) the
+                // test passes.
                 val tool = NetworkTool(okhttp = args["okhttp"] as Boolean, urlConnection = args["urlConnection"] as Boolean, rules = args["rules"] as Boolean)
-                out["note"] = tool.start(HopiToolContext(StartConfig(summaryLog = false), platform = null))
+                val config = args["startConfig"] as StartConfig? ?: StartConfig(summaryLog = false)
+                out["note"] = tool.start(HopiToolContext(config, platform = null))
                 out["started"] = AndroidCapture.started
                 out["instrumented"] = AndroidCapture.okHttpInstrumented
                 out["rules"] = AndroidCapture.rules
+                // The Ktor recorder the tool registered, read in this loader (its KtorHooks is this
+                // loader's class): its rules and the start configuration it carries, which the test
+                // compares whole; nothing when the slot is empty (no hopi-ktor).
+                val hooks = HopiRuntimes.ktorHooks
+                if (hooks != null) {
+                    val registered = hooks as KtorHooks
+                    out["hooksRules"] = registered.rules
+                    out["hooksStart"] = registered.start
+                }
             }
             "invalidCaps" -> {
                 out["result"] = AndroidCapture.start(AndroidCapture.Settings(maxEntries = 0, summaryLog = false), AndroidCapture.OkHttp.Absent, injectedStore = store)
@@ -484,9 +496,11 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
                 deflate()
             }
         }
+        // The recorder bound to the test's store, in the registry's Ktor slot before the plugin's
+        // install reads it: the network tool's own forwarder would make the start's installation.
+        HopiRuntimes.resetForTests()
+        HopiRuntimes.registerKtorHooks(ScenarioKtorHooks(store))
         install(Hopi) {
-            // HopiConfig.store is internal to hopi-ktor (its tests' hook): set through its setter.
-            HopiConfig::class.java.methods.single { it.name.startsWith("setStore$") }.invoke(this, store)
             logSink = HopiLogSink.Off
         }
     }

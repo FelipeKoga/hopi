@@ -8,6 +8,7 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ktor.Hopi
 import dev.koga.hopi.ktor.HopiLogSink
+import dev.koga.hopi.start.Hopi as HopiStart
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -47,9 +48,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * The CLI against the real JVM bridge, over a store filled by the real Ktor plugin. The plugin's
- * store injection is internal to `hopi-ktor`, so this uses the process-wide default store,
- * cleared before each test; every test tags its URLs with its own marker.
+ * The CLI against the real JVM bridge, over a store filled by the real Ktor plugin. The JVM entry
+ * (`hopi-start`'s `Hopi.start`, first in the companion) registers the plugin's recorder, which
+ * writes to the process-wide default store, cleared before each test; every test tags its URLs with
+ * its own marker. The bridge is each test's own.
  */
 class CliBridgeTest {
     private val store = HopiStore.default
@@ -398,6 +400,14 @@ class CliBridgeTest {
         /** An OSC 52 clipboard write, a bell, and an erase-line plus cursor-up, as a server could send them. */
         const val HOSTILE = "\u001b]52;c;ZWNobyBvd25lZA==\u0007\u001b[2K\u001b[1Aforged"
 
+        init {
+            // Before the client: the plugin reads the recorder once, when the client is built.
+            HopiStart.start {
+                summaryLog = false
+                perf = false
+            }
+        }
+
         val client = HttpClient(
             MockEngine { request ->
                 when (request.url.encodedPath) {
@@ -415,7 +425,8 @@ class CliBridgeTest {
             },
         ) {
             install(Hopi) {
-                // The default store; the bridge is started by each test, not through the hook.
+                // The recorder the JVM start registered, on the default store; the bridge is started
+                // by each test, not through the hook (neither the start nor this asks for it).
                 logSink = HopiLogSink.Off
             }
         }

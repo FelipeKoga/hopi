@@ -38,7 +38,10 @@ dependencies {
     // Only the JSON tree parser; no serialization compiler plugin is needed for it.
     implementation(libs.kotlinx.serialization.json)
 
+    // The real Ktor plugin over a MockEngine fills the store, through the JVM entry's recorder:
+    // hopi-start brings the network runtime, which takes hopi-ktor compileOnly.
     testImplementation(project(":hopi-ktor"))
+    testImplementation(project(":hopi-start"))
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.ktor.client.mock)

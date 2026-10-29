@@ -887,12 +887,19 @@ surfaces.
 ## Configuration switch
 
 Each recorder's configuration gains `rules: Boolean = true`: `HopiConfig` (Ktor), iOS's
-`HopiStartConfig` (the iOS capture config's until the runtime-split plan's stage 9), and the Gradle
-DSL's `hopi { network { rules = true } }` (top-level `hopi { rules }` until stage 9), generated into
-the variant's configuration. `false`
+`HopiStartConfig` (the iOS capture config's until the runtime-split plan's stage 9; the JVM's too
+since stage 10), and the Gradle DSL's `hopi { network { rules = true } }` (top-level
+`hopi { rules }` until stage 9), generated into the variant's configuration. `false`
 means that recorder never reads the rule state (it becomes a constant-false branch) and, on iOS, no
-protocol is injected and no factory is hooked. The engine and the API stay; `hello` reports
-`"rules":false` when every recorder that started has it off. The default is true because an empty
+protocol is injected and no factory is hooked. Since stage 10 the network tool's switch (the
+Gradle DSL's on Android, `Hopi.start`'s on the JVM) also covers the Ktor plugin's recorder it
+registers: a request that recorder records is ruled only when both its client's `HopiConfig.rules`
+and the network tool's `rules` are true, and `RuleEngine.recorderStarted` gets that AND, so `hello`
+stays right; a client's `rules` covers only the requests the recorder records of it, so a Ktor
+request a platform recorder records (on Android an OkHttp-engine or rewritten Android-engine request
+that names no `Accept-Encoding` of its own, on iOS every Darwin request) follows the network tool's
+switch alone. The engine and the API stay; `hello` reports `"rules":false` when every recorder that
+started has it off. The default is true because an empty
 rule set costs one read (and on iOS one message), and an inspector whose mock command needs a
 rebuild first fails the agent use case; the switch exists for the app whose code reads
 `configuration.protocolClasses` or that suspects the rules layer. The noops accept and ignore it

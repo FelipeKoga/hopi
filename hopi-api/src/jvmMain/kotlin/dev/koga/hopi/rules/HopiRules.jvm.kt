@@ -1,7 +1,6 @@
 package dev.koga.hopi.rules
 
-// Nothing starts Hopi on the JVM before the runtime-split plan's stage 10 (its JVM entry), so no
-// runtime registers there and HopiRules returns -1, reported by nothing (docs/ARCHITECTURE.md,
-// "Start sequence"). Only Hopi's own tests register one: core's ApiRules is internal, and its
-// HopiStart is @HopiInternalApi.
+// On the JVM the rules runtime registers at hopi-start's Hopi.start (the JVM entry): an add before
+// or without it returns -1 and writes nothing here, and the start's dropped-rules notice counts it
+// (docs/ARCHITECTURE.md, "Start sequence"). Hopi's own tests also register one directly.
 internal actual fun ruleDroppedWithoutRuntime() {}
