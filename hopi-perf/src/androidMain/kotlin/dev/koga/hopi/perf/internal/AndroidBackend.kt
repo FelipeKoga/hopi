@@ -1,54 +1,65 @@
 package dev.koga.hopi.perf.internal
 
-import android.app.Activity
 import android.app.Application
-import android.content.ComponentCallbacks2
-import android.content.res.Configuration
-import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
-import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.perf.PerfData
-import dev.koga.hopi.core.perf.PerfLauncher
 import dev.koga.hopi.core.perf.PerfMonitor
-import dev.koga.hopi.core.perf.PerfOwner
 import dev.koga.hopi.core.perf.PerfPss
-import dev.koga.hopi.core.perf.PerfStartRequest
 import dev.koga.hopi.core.perf.PerfThread
 import dev.koga.hopi.core.perf.PerfTimer
-import dev.koga.hopi.core.start.HopiTool
-import dev.koga.hopi.core.start.HopiToolContext
-import dev.koga.hopi.perf.HopiPerfConfig
+import java.util.EnumSet
 
 /**
- * The Android monitors. Nothing here runs until a monitor starts: no thread, no listener, no
- * lifecycle callback while every monitor is off. The [Application] (from the start sequence, see
- * [PerfEntry], or `HopiPerf.install(application)`) gives frames and the input bracket each started
- * activity's window and memory the OS's trim callbacks; without it, hangs run with the printer
- * only, CPU and memory samples run, and frames and memory events say they are unavailable.
+ * The Android backend, created by perf's tool on the main thread before `Application.onCreate`
+ * ([PerfEntry]): it keeps the [Application] the start sequence hands over, the model, the lease and
+ * the settings, and forwards every monitor operation to [AndroidMonitors], which it creates at the
+ * first call that needs a monitor (a start, a running monitor's details, the thread list, PSS).
+ * Nothing here runs until a monitor starts: no thread, no listener, no lifecycle callback while
+ * every monitor is off. Without the [Application], hangs run with the printer only, CPU and memory
+ * samples run, and frames and memory events say they are unavailable.
  *
- * Every call comes under the runtime's lock (see [MonitorBackend]).
+ * Split so because a debug build runs from its APK, unoptimized: ART verifies a class when it is
+ * first initialized and loads every class its methods name. This class names no monitor class, no
+ * `Handler` and no lifecycle callback, so the tool's start loads none of them; [AndroidMonitors] is
+ * loaded there, not initialized, and the classes it names do not follow until a monitor starts.
+ *
+ * Every call but [threads] and [measurePss] comes under the runtime's lock (see [MonitorBackend]);
+ * those two come from bridge threads without it.
  */
 internal class AndroidBackend private constructor() : MonitorBackend {
     override val platform: String = "android"
-    override val available: Set<PerfMonitor> = PerfMonitor.entries.toSet()
+    override val available: Set<PerfMonitor> = EnumSet.allOf(PerfMonitor::class.java)
 
-    @Volatile private var application: Application? = null
-    private lateinit var data: PerfData
-    private lateinit var lease: PerfTimer
-    private val selfCpu = SelfCpu()
-    private var settings = PerfSettings.DEFAULT
+    @Volatile var application: Application? = null
+        private set
 
-    private var hang: AndroidHangMonitor? = null
-    private var frames: FramesMonitor? = null
-    private var sampler: AndroidSampler? = null
-    private var memoryCallbacks: ComponentCallbacks2? = null
-    private var lifecycle: Application.ActivityLifecycleCallbacks? = null
-    private var watchingThreads = false
-    private val pss by lazy { PssProbe(data) }
-    private val threadsOnDemand by lazy { ThreadScan() }
+    lateinit var data: PerfData
+        private set
+
+    lateinit var lease: PerfTimer
+        private set
+
+    /** The settings of the last start or apply. */
+    var settings: PerfSettings = PerfSettings.DEFAULT
+        private set
+
+    /** Whether a viewer shows the per-thread list (a sampler started later scans it too). */
+    var watchingThreads: Boolean = false
+        private set
+
+    /** Set while [PerfEntry] starts the `autoStart` monitors, before any activity: frames attaches at the first start. */
+    @Volatile var autoStarting: Boolean = false
+
+    @Volatile private var monitors: AndroidMonitors? = null
+
+    /**
+     * The one [AndroidMonitors], created at the first call that needs it. [threads] and
+     * [measurePss] come without the runtime's lock, so it is created under this object's monitor:
+     * a second instance would hold monitors that no stop reaches. Its constructor takes no lock, so
+     * holding this one cannot deadlock with the runtime's.
+     */
+    private fun monitors(): AndroidMonitors =
+        monitors ?: synchronized(this) { monitors ?: AndroidMonitors(this).also { monitors = it } }
 
     override fun nowMs(): Long = SystemClock.elapsedRealtime()
 
@@ -59,237 +70,40 @@ internal class AndroidBackend private constructor() : MonitorBackend {
 
     override fun start(monitor: PerfMonitor, settings: PerfSettings): String? {
         this.settings = settings
-        val app = application
-        return when (monitor) {
-            PerfMonitor.FRAMES -> {
-                if (app == null) return "unavailable without the Application (apply the dev.koga.hopi plugin, or call HopiPerf.install(application))"
-                frames = FramesMonitor(data, app, lease, selfCpu) { hang?.onFrame() }
-                updateLifecycle()
-                if (autoStarting || attachLauncherActivity()) {
-                    null
-                } else {
-                    "frames attach when an activity next starts"
-                }
-            }
-            PerfMonitor.HANGS -> {
-                hang = AndroidHangMonitor(data, settings.hangThresholdMs, settings.hangHeartbeat, lease, app, selfCpu).also { it.start() }
-                updateLifecycle()
-                if (app != null) attachLauncherActivity()
-                when {
-                    settings.hangHeartbeat -> null
-                    app == null -> "no input bracket without the Application: hangs inside input dispatch (a Compose onClick) are not seen"
-                    else -> "the Looper printer replaces any printer another tool set"
-                }
-            }
-            PerfMonitor.CPU -> {
-                sampler().cpu = true
-                null
-            }
-            PerfMonitor.MEMORY -> {
-                sampler().memory = true
-                if (app == null) return "no trim or low-memory events without the Application"
-                val callbacks = object : ComponentCallbacks2 {
-                    override fun onTrimMemory(level: Int) = data.recordMemoryEvent("trim", level)
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onLowMemory() = data.recordMemoryEvent("low", null)
-
-                    override fun onConfigurationChanged(newConfig: Configuration) = Unit
-                }
-                app.registerComponentCallbacks(callbacks)
-                memoryCallbacks = callbacks
-                if (Build.VERSION.SDK_INT >= 34) "Android 14+ sends no foreground trim levels: no pressure event in the foreground" else null
-            }
-        }
+        return monitors().start(monitor)
     }
 
     override fun stop(monitor: PerfMonitor) {
-        when (monitor) {
-            PerfMonitor.FRAMES -> {
-                frames?.stop()
-                frames = null
-            }
-            PerfMonitor.HANGS -> {
-                hang?.stop()
-                hang = null
-            }
-            PerfMonitor.CPU -> sampler?.cpu = false
-            PerfMonitor.MEMORY -> {
-                sampler?.memory = false
-                memoryCallbacks?.let { application?.unregisterComponentCallbacks(it) }
-                memoryCallbacks = null
-            }
-        }
-        sampler?.let { if (!it.cpu && !it.memory) { it.stop(); sampler = null } }
-        updateLifecycle()
+        monitors?.stop(monitor)
     }
 
-    private fun sampler(): AndroidSampler = sampler ?: AndroidSampler(data, lease, selfCpu) { hang?.printerState == "set" }.also {
-        it.intervalMs = settings.sampleIntervalMs
-        it.watchingThreads = watchingThreads
-        sampler = it
-        it.start()
-    }
-
+    /** With no monitor started yet (the tool's start, with the plugin's threshold), it only keeps [settings]. */
     override fun apply(settings: PerfSettings, running: Set<PerfMonitor>) {
         this.settings = settings
-        hang?.detector?.thresholdMs = settings.hangThresholdMs
-        hang?.poke()
-        sampler?.let {
-            it.intervalMs = settings.sampleIntervalMs
-            it.poke()
-        }
+        monitors?.apply()
     }
 
-    override fun details(monitor: PerfMonitor): List<Pair<String, Any?>> = when (monitor) {
-        PerfMonitor.FRAMES -> frames.let { f ->
-            listOf(
-                "attached" to ((f?.attachedWindows ?: 0) > 0),
-                "windows" to "activities only",
-                "attachedWindows" to (f?.attachedWindows ?: 0),
-            ) + (if ((f?.software ?: 0) > 0) listOf("unmeasured" to "software") else emptyList()) +
-                (if (application == null) listOf("unavailable" to "no Application") else emptyList())
-        }
-        PerfMonitor.HANGS -> hang.let { h ->
-            listOf(
-                "thresholdMs" to settings.hangThresholdMs,
-                "printer" to h?.printerState,
-                "input" to (h?.inputBracketed == true),
-                // A dialog's, sheet's or popup's touches go through its own window's callback, which
-                // no public API lets Hopi wrap: input there is unseen unless the heartbeat runs.
-                "inputWindows" to if (h?.printerState == "heartbeat") "all (heartbeat)" else "activities only",
-                "displaced" to h?.displaced,
-            )
-        }
-        PerfMonitor.CPU -> listOf("intervalMs" to settings.sampleIntervalMs, "threads" to watchingThreads)
-        PerfMonitor.MEMORY -> listOf("intervalMs" to settings.sampleIntervalMs, "events" to (memoryCallbacks != null))
-    }
+    override fun details(monitor: PerfMonitor): List<Pair<String, Any?>> = monitors().details(monitor)
 
     override fun leaseChanged(running: Set<PerfMonitor>) {
-        sampler?.poke()
-        hang?.poke()
-        // Frames alone carries the lease on its own thread: one delayed message per lease.
-        frames?.scheduleLease(if (sampler == null && hang == null) lease.msUntilDue() else Long.MAX_VALUE)
+        monitors?.leaseChanged()
     }
 
-    override fun threads(limit: Int): List<PerfThread> = sampler?.threads(limit) ?: threadsOnDemand.top(limit, scanIfStale = true)
+    override fun threads(limit: Int): List<PerfThread> = monitors().threads(limit)
 
     override fun watchThreads(watching: Boolean) {
         watchingThreads = watching
-        sampler?.watchingThreads = watching
+        monitors?.watchThreads(watching)
     }
 
-    override fun measurePss(): PerfPss = pss.measure()
-
-    /**
-     * The resumed activity, if any (core's [PerfLauncher], written by core's start): frames and
-     * the input bracket attach to it at once, with one main-thread message, instead of at its next
-     * start (a single-activity app would otherwise wait for a return from the background). The
-     * lifecycle callbacks' own attach at a later start skips a window already attached.
-     */
-    private fun attachLauncherActivity(): Boolean {
-        val activity = PerfLauncher.activity ?: return false
-        val f = frames
-        val h = hang
-        mainHandler.post {
-            if (f != null && frames === f) f.attach(activity)
-            if (h != null && hang === h) activity.window?.let(h::bracket)
-        }
-        return true
-    }
-
-    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
-
-    /** The activity callbacks, registered only while frames or hangs runs and the Application is known. */
-    private fun updateLifecycle() {
-        val app = application ?: return
-        val wanted = frames != null || hang != null
-        val current = lifecycle
-        if (wanted && current == null) {
-            val callbacks = object : Application.ActivityLifecycleCallbacks {
-                override fun onActivityStarted(activity: Activity) {
-                    frames?.attach(activity)
-                    activity.window?.let { hang?.bracket(it) }
-                }
-
-                override fun onActivityStopped(activity: Activity) {
-                    frames?.detach(activity)
-                }
-
-                override fun onActivityResumed(activity: Activity) {
-                    data.setActivity(activity.javaClass.simpleName)
-                }
-
-                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-
-                override fun onActivityPaused(activity: Activity) = Unit
-
-                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-
-                override fun onActivityDestroyed(activity: Activity) = Unit
-            }
-            app.registerActivityLifecycleCallbacks(callbacks)
-            lifecycle = callbacks
-        } else if (!wanted && current != null) {
-            app.unregisterActivityLifecycleCallbacks(current)
-            lifecycle = null
-        }
-    }
-
-    /** Set while [PerfEntry]'s `autoStart` runs (before any activity): frames will attach at the first start. */
-    @Volatile private var autoStarting = false
-
-    internal fun autoStart(block: () -> Unit) {
-        autoStarting = true
-        try {
-            block()
-        } finally {
-            autoStarting = false
-        }
-    }
+    override fun measurePss(): PerfPss = monitors().measurePss()
 
     internal companion object {
-        val instance: AndroidBackend by lazy { AndroidBackend() }
+        /** The process's one backend; no `lazy`, whose classes the main thread would load. */
+        val instance: AndroidBackend = AndroidBackend()
 
         fun application(app: Application) {
             instance.application = app
         }
-    }
-}
-
-/**
- * `hopi-perf`'s tool in the start sequence: the Gradle plugin's generated configuration lists it,
- * with the `perf { }` block's values, when the plugin put `hopi-perf` in the variant
- * (`hopi { perf { enabled = true } }`). It registers the controller and starts the [autoStart]
- * monitors, on the main thread before `Application.onCreate`. Nothing else: no note in the start
- * line, and it calls the runtime itself, never `HopiPerf.install`.
- */
-@HopiInternalApi
-public class PerfEntry(
-    /** A bit set of [bit], in the plugin's `HopiMonitor` order. */
-    private val autoStart: Int,
-    private val hangThresholdMs: Long,
-    private val hangHeartbeat: Boolean,
-) : HopiTool {
-    override val name: String get() = "perf"
-
-    override fun start(context: HopiToolContext): String? {
-        (context.platform as? Application)?.let(AndroidBackend::application)
-        val threshold = hangThresholdMs
-        val heartbeat = hangHeartbeat
-        val controller = PerfRuntime.install(
-            HopiPerfConfig().apply {
-                hangThresholdMs = threshold
-                hangHeartbeat = heartbeat
-            },
-        ) ?: return null
-        val monitors = PerfMonitor.entries.filterTo(LinkedHashSet()) { autoStart and bit(it) != 0 }
-        if (monitors.isNotEmpty()) AndroidBackend.instance.autoStart { controller.start(PerfStartRequest(monitors), PerfOwner.Code) }
-        return null
-    }
-
-    private companion object {
-        /** [monitor]'s bit in [autoStart]: `1 shl` its ordinal, which the plugin's `HopiMonitor` order matches. */
-        fun bit(monitor: PerfMonitor): Int = 1 shl monitor.ordinal
     }
 }

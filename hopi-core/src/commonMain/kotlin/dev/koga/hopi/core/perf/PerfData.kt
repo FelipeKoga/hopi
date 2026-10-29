@@ -78,13 +78,6 @@ public class PerfData {
     private val app = AtomicReference<String?>(null)
     private val activity = AtomicReference<String?>(null)
 
-    /**
-     * When set, frames are flagged `inspector` and left out. The in-app inspector set it while it
-     * was open; nothing sets it since the in-app UI went (the runtime-split plan's stage 5), so it
-     * stays false.
-     */
-    private val inspector = AtomicReference(false)
-
     public val seconds: FrameSeconds = FrameSeconds { closed -> writeSecond(closed) }
 
     public fun nextSeq(): Long = seq.incrementAndFetch()
@@ -105,12 +98,6 @@ public class PerfData {
     }
 
     public val screen: String? get() = app.load() ?: activity.load()
-
-    public var inspectorOpen: Boolean
-        get() = inspector.load()
-        set(value) {
-            inspector.store(value)
-        }
 
     // ---- listeners and log
 
@@ -159,7 +146,7 @@ public class PerfData {
         stagesNs: LongArray?,
     ) {
         val klass = FrameClassifier.classify(totalNs, deadlineNs)
-        val exclude = inspector.load() || overlapsPause(startNs, startNs + totalNs)
+        val exclude = overlapsPause(startNs, startNs + totalNs)
         val screen = screen
         if (!exclude && !firstFrame) {
             summaryLock.locked {

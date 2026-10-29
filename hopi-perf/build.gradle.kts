@@ -6,17 +6,19 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
-description = "HopiPerf, the performance monitors (frames, hangs, CPU, memory)."
+description = "The performance monitors (frames, hangs, CPU, memory): the runtime behind hopi-api's HopiPerf."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
-// HopiPerf: the performance monitors (docs/design/perf-monitors.md): frames, hangs, CPU, memory,
-// each off by default. The model, its JSON and the bridge commands live in hopi-core; this module
-// holds the consumer API and the monitors. Its noop twin, hopi-perf-noop, has the same API and does
-// nothing.
+// The performance monitors (docs/design/perf-monitors.md): frames, hangs, CPU, memory, each off by
+// default. The model, its JSON and the bridge commands live in hopi-core, the consumer API
+// (HopiPerf) in hopi-api; this module holds the monitors and the runtime perf's tool registers
+// behind HopiPerf. No app names it: the Gradle plugin adds it to debuggable build types with
+// `perf { enabled = true }`, and hopi-start brings it to Debug iOS frameworks. No noop twin.
 kotlin {
     explicitApi()
 
-    // The public API dump that :checkNoopParity compares with hopi-perf-noop's.
+    // The dumps stay empty: this module has no consumer API, and a public declaration outside
+    // dev.koga.hopi.perf.internal shows up there.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
         filters {

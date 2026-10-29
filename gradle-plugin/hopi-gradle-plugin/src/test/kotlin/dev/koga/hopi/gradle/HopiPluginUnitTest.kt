@@ -32,7 +32,8 @@ class HopiPluginUnitTest {
             task.perfPresent.set(perf)
             task.perfAutoStart.set(HopiPerfExtension.bits(setOf(HopiMonitor.Hangs, HopiMonitor.Frames)))
             task.perfHangThresholdMs.set(300L)
-            task.perfHangHeartbeat.set(false)
+            task.perfHangHeartbeat.set(true)
+            task.perfRemoteControl.set(false)
         }.get()
     }
 
@@ -50,8 +51,11 @@ class HopiPluginUnitTest {
         assertTrue("""new String[] { "token" }, // redactQueryParameters""" in source, source)
         // Each tool with its own settings.
         assertTrue("new dev.koga.hopi.android.internal.NetworkTool(false, true, false), // okhttp, urlConnection, rules" in source, source)
-        // Frames and Hangs: bits 0 and 1, the order PerfEntry decodes.
-        assertTrue("new dev.koga.hopi.perf.internal.PerfEntry(3, 300L, false) // perf { }: autoStart, hangThresholdMs, hangHeartbeat" in source, source)
+        // Frames and Hangs: bits 0 and 1, the order PerfEntry decodes; then the heartbeat and remote control.
+        assertTrue(
+            "new dev.koga.hopi.perf.internal.PerfEntry(3, 300L, true, false) // perf { }: autoStart, hangThresholdMs, hangHeartbeat, remoteControl" in source,
+            source,
+        )
         assertTrue(source.indexOf("NetworkTool(") < source.indexOf("PerfEntry("), source)
     }
 
@@ -70,6 +74,8 @@ class HopiPluginUnitTest {
         assertEquals(false, extension.perf.enabled.get())
         assertEquals(emptySet(), extension.perf.autoStart.get())
         assertEquals(250L, extension.perf.hangThresholdMs.get())
+        assertEquals(false, extension.perf.hangHeartbeat.get())
+        assertEquals(true, extension.perf.remoteControl.get(), "remote control on unless refused")
         extension.perf { it.autoStart(HopiMonitor.Memory) }
         assertEquals(8, HopiPerfExtension.bits(extension.perf.autoStart.get()))
     }

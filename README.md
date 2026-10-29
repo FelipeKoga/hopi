@@ -27,8 +27,8 @@ More tools are planned (accessibility audit, analytics debugger, state tracker);
 
 It is built to cost nothing when nobody is looking: no timers, no polling, no request of its own,
 a rule check of one volatile read per request while no rule exists,
-and no runtime in a release build, which links only the `-noop` twins and, for `HopiRules`,
-`hopi-api`, an API that stores nothing without a runtime. The design contract is
+and no runtime in a release build, which links only the `-noop` twins and, for `HopiRules` and
+`HopiPerf`, `hopi-api`, an API that stores nothing without a runtime. The design contract is
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); what may come later is in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -86,14 +86,16 @@ older ones are not tested):
 | `hopi-urlsession` | `HopiUrlSession.start()`, which starts URLSession capture alone; `hopi-start` does not need it (it stays until stage 9 of the runtime-split plan) |
 | `hopi-urlsession-noop` | Same public API as `hopi-urlsession`, does nothing |
 | `hopi-start`     | `Hopi.start { }`, the iOS start: URLSession capture and the performance monitors from one call; Debug frameworks only, no noop twin |
-| `hopi-api`       | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), the same artifact in every build: until a debug build's start registers the runtime behind it (on Android and iOS; nothing starts one on the JVM yet), every call returns `-1`, `false` or an empty list. No noop twin. The CLI and the desktop viewer need no dependency for rules |
-| `hopi-perf`      | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory), each off until started |
-| `hopi-perf-noop` | Same public API as `hopi-perf`, does nothing |
-| `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-android` to debug builds and `hopi-android-noop` to release builds |
+| `hopi-api`       | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS; nothing starts one on the JVM yet), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. No noop twin. The CLI and the desktop viewer need no dependency for rules or perf |
+| `hopi-perf`      | The performance monitors (frames, hangs, CPU, memory) behind `HopiPerf`, each off until started: added by the plugin on Android (`perf { enabled = true }`, debug builds only) and by `hopi-start` on iOS; never named |
+| `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-android` to debug builds and `hopi-android-noop` to release builds, and `hopi-perf` to debug builds with `perf { enabled = true }` |
 
-`hopi-core` (shared by the real modules, and the runtime behind `HopiRules`), `hopi-android` and
-`hopi-android-noop` (added by the plugin) and `hopi-instrument` (the plugin's rewriter) are
-published too; you never name them. Each KMP artifact has its Android, JVM, `iosArm64` and
+`hopi-core` (shared by the real modules, and the runtime behind `HopiRules`), `hopi-android`,
+`hopi-android-noop` and `hopi-perf` (added by the plugin; `hopi-perf` on iOS by `hopi-start`) and
+`hopi-instrument` (the plugin's rewriter) are published too; you never name them. `HopiPerf` is
+in `hopi-api`. Until stage 9 of the runtime-split plan adds the release guard, a module that names
+`hopi-perf` itself ships it, and `hopi-core`, in release builds: nothing swaps it for a noop any
+more. Each KMP artifact has its Android, JVM, `iosArm64` and
 `iosSimulatorArm64` publications with sources and Gradle module metadata (`hopi-start` has the two
 iOS ones only), so `dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right one per
 target.
@@ -110,7 +112,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(if (hopiEnabled) "dev.koga.hopi:hopi-ktor:$v" else "dev.koga.hopi:hopi-ktor-noop:$v")
-            // only to call HopiRules from code: one artifact for every build, no twin
+            // only to call HopiRules or HopiPerf from code: one artifact for every build, no twin
             implementation("dev.koga.hopi:hopi-api:$v")
         }
     }
@@ -119,17 +121,20 @@ kotlin {
 
 Debug runs pass `-Phopi.enabled=true` (the Xcode build phase for the Debug configuration, as in
 `sample/iosApp`). Anything built without it ships the noops, which contain no Hopi logic and no
-`hopi-core`, and `hopi-api`, an API with no runtime behind it. Swift calling `HopiRules` needs
-`hopi-api` as `api` and exported from the framework (`export("dev.koga.hopi:hopi-api:$v")`) in
-every configuration, since those calls are not inside `#if HOPI`. On Android, apply the
+`hopi-core`, and `hopi-api`, an API with no runtime behind it. Swift calling `HopiRules` or
+`HopiPerf` needs `hopi-api` as `api` and exported from the framework
+(`export("dev.koga.hopi:hopi-api:$v")`) in every configuration, since those calls are not inside
+`#if HOPI`. On Android, apply the
 `dev.koga.hopi` plugin (below) to the application module instead: it resolves the real modules in
 debug builds and the noops in release builds, whatever the property says. Without the plugin, an
 Android-only app can select by build type (`debugImplementation` real, `releaseImplementation`
 noop); an app module on top of a KMP shared module must not, since the shared module already
 brings one of the two. Such an app's debug build still merges `hopi-core`'s start provider, which
 finds no generated configuration and at each launch writes one notice line, `not started: no
-generated configuration; …`; the Ktor plugin records as before, and `HopiRules` does nothing,
-since nothing started to register its runtime.
+generated configuration; …`; the Ktor plugin records as before, and `HopiRules` and `HopiPerf`
+do nothing, since nothing started to register their runtimes. `HopiPerf` no longer starts the
+monitors itself (it did before stage 8 of the runtime-split plan): only perf's tool registers its
+runtime, and on Android only the plugin's `perf { enabled = true }` lists that tool.
 
 Install the plugin on each `HttpClient` you want to see, when the app starts:
 
@@ -173,10 +178,11 @@ recorded once, by the capture (`"source":"okhttp"`), not also by the plugin. It 
 changes, and bodies are copied as your code reads them, up to `maxBodyBytes`, never read ahead.
 
 Release (non-debuggable) variants are not instrumented at all and get `hopi-android-noop`; with the
-plugin, the Ktor plugin and `hopi-perf` are also resolved per variant (real in debug, noop in
-release), so an Android app needs no `-Phopi.enabled`. `hopi-api` (`HopiRules`) is the same in
-both; in debuggable variants the plugin holds it at its own version, that of the `hopi-core` it
-adds, whose rules runtime implements an internal interface of `hopi-api`. Optional settings:
+plugin, the Ktor plugin is also resolved per variant (real in debug, noop in release), so an
+Android app needs no `-Phopi.enabled`. `hopi-api` (`HopiRules`, `HopiPerf`) is the same in both;
+in debuggable variants the plugin holds it at its own version, that of the `hopi-core` and
+`hopi-perf` it adds, whose runtimes implement internal interfaces of `hopi-api`. Optional
+settings:
 
 ```kotlin
 hopi {
@@ -200,7 +206,7 @@ One call, `Hopi.shared.start` from `hopi-start`, records every URLSession reques
 your own code, the SDKs you do not own (analytics, ads, crash reporters), `URLSession.shared`,
 custom delegates, Swift `async`/`await`, and Ktor's Darwin engine (the plugin then leaves those
 requests to it, so each request is recorded once). The same call registers the performance
-monitors for the CLI and the desktop viewer, none started (see
+monitors for the CLI, the desktop viewer and `HopiPerf`, none started (see
 [Performance monitors](#performance-monitors-frames-hangs-cpu-memory)). It only observes: nothing
 is re-sent and nothing your app sees changes, unless a rule you added applies (and with rules on,
 sessions created after the start list Hopi's protocol class first in
@@ -253,9 +259,10 @@ Hopi.start {
     maxBodyBytes = 256L * 1024          // and maxEntries, maxTotalBytes: the store's caps
     redactHeaders("X-Api-Key")          // Authorization, Cookie, Set-Cookie… are redacted already
     redactQueryParameters("token")
-    summaryLog = true                   // one NDJSON line per request (the default)
+    summaryLog = true                   // one NDJSON line per request and perf's lines (the default)
     rules = false                       // never read the rule state (default true; see Rules)
     perf = false                        // leave the performance monitors out (default true)
+    perfRemoteControl = false           // refuse the bridge's perf starts and stops (default true)
 }
 ```
 
@@ -442,19 +449,22 @@ it from ever reading the rule state; the app's `hello` then tells the CLI that r
 
 ## Performance monitors: frames, hangs, CPU, memory
 
-`hopi-perf` (and its twin `hopi-perf-noop`) watches the app itself: **frames** (FPS and janky
-frames; iOS: main-thread stalls), **hangs** (main-thread units of work over a threshold, 250 ms by
-default, with the main thread's stack), **CPU** (the process, Hopi's own share, and per thread
-while a viewer shows the list) and **memory** (heaps, resident memory, GC counts, the OS's trim
-and memory-warning signals). Every monitor is off by default and opt-in on its own. A monitor that
-is off has no thread, no listener, no timer and no class of its own loaded; one that is on states
-its cost in [`docs/design/perf-monitors.md`](docs/design/perf-monitors.md) ("Performance budget",
-with what is measured so far under "As built"). Nothing is persisted or sent anywhere: the data
-lives in bounded rings in memory.
+`hopi-perf` watches the app itself: **frames** (FPS and janky frames; iOS: main-thread stalls),
+**hangs** (main-thread units of work over a threshold, 250 ms by default, with the main thread's
+stack), **CPU** (the process, Hopi's own share, and per thread while a viewer shows the list) and
+**memory** (heaps, resident memory, GC counts, the OS's trim and memory-warning signals). Every
+monitor is off by default and opt-in on its own. A monitor that is off has no thread, no
+listener, no timer and no monitor class loaded (perf's start creates only the controller, a
+backend that forwards to the monitors, and the model, whose rings are allocated at their first
+write); one that is on states its cost in
+[`docs/design/perf-monitors.md`](docs/design/perf-monitors.md) ("Performance budget", with what is
+measured so far under "As built"). Nothing is persisted or sent anywhere: the data lives in
+bounded rings in memory.
 
 Android, with the `dev.koga.hopi` plugin: `perf { enabled = true }` adds `hopi-perf` to debug
-builds (`hopi-perf-noop` to release builds) and registers it, so the CLI and the desktop viewer can
-start monitors with no code. `autoStart` starts some at launch:
+builds only and registers it, so the CLI, the desktop viewer and `HopiPerf` can start monitors
+with no other code; without it `HopiPerf` does nothing in any build. `autoStart` starts some at
+launch:
 
 ```kotlin
 hopi {
@@ -464,24 +474,41 @@ hopi {
         autoStart(HopiMonitor.Hangs)   // default: none
         hangThresholdMs = 250          // 100..10 000
         hangHeartbeat = false          // true: keep another tool's Looper printer (wakes main and the watchdog 8x/s each while idle)
+        remoteControl = true           // false: refuse the bridge's perf starts and stops (reads still work)
     }
 }
 ```
 
 iOS: `Hopi.shared.start` (see [iOS](#ios-every-urlsession-request-automatically)) registers the
-monitors, none started, unless its `perf` is false, so the CLI and the desktop viewer can start them
-with no other code; `xcrun simctl launch booted <bundle id> -hopiPerf frames,hangs` starts monitors
-at launch. To start, stop or label monitors from code, KMP and iOS depend on `hopi-perf` or
-`hopi-perf-noop` like the other twins (export it from the iOS framework to call it from Swift).
-`HopiPerf.install` still registers them where nothing else does (until stage 8 of the
-runtime-split plan moves `HopiPerf` into `hopi-api`):
+monitors, none started, unless its `perf` is false, so the CLI, the desktop viewer and `HopiPerf`
+can start them with no other code (`perfRemoteControl = false` refuses the bridge's starts and
+stops); `xcrun simctl launch booted <bundle id> -hopiPerf frames,hangs` starts monitors at launch.
+
+To start, stop or label monitors from code, name `hopi-api` (one artifact for every build, as for
+`HopiRules`; exported from the iOS framework to call it from Swift), never `hopi-perf`:
 
 ```kotlin
-HopiPerf.install { agentBridge = true }               // registers, starts nothing (Hopi.start does this on iOS)
-HopiPerf.start { hangs = true; frames = true }         // or start from code
+HopiPerf.start { hangs = true; frames = true }         // starts monitors from code
+HopiPerf.start { sampleIntervalMs = 500 }              // changes only what the block sets
 HopiPerf.screen("Checkout")                            // labels the janky frames and hangs that follow
 HopiPerf.stop()
 ```
+
+Every call does nothing until a debug build's start registers the runtime, as in a release build:
+`HopiPerf` no longer creates the runtime itself (before stage 8 of the runtime-split plan its
+first call did, and an `install` call registered it). A `start` made before then is dropped and
+counted; the start that registers the runtime writes one notice line with the count, under perf's
+log (logcat tag `HopiPerf`, os_log category `perf`), not under `Hopi` like the rules' one, and an
+iOS Debug binary also writes one line at the first dropped start, in case `Hopi.shared.start` (or
+its `perf`) is missing. `screen` keeps its last label for a runtime that registers later. A block
+applies only what it sets: a setting left unset keeps the value in force (the plugin's
+`perf { }`, a remote `hopi perf start --hang-ms`), and an out-of-range value writes a notice and
+starts nothing. The agent bridge and the summary log are the start's settings (`hopi { }`,
+`Hopi.start { }`), and `summaryLog = false` there now silences perf's log lines too (its notices
+are always written); remote control is perf's own, set at start only
+(`perf { remoteControl }`, `perfRemoteControl`). A start with invalid caps registers nothing, so
+`HopiPerf` stays inert until a valid start runs. On the JVM nothing registers it before stage 10
+of the runtime-split plan.
 
 From an agent or a terminal (the app's bridge, as for the requests):
 
@@ -613,7 +640,7 @@ publication check. The base check, one Gradle invocation:
 ```bash
 ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test :hopi-urlsession:jvmTest :hopi-urlsession-noop:jvmTest \
-  :hopi-perf:jvmTest :hopi-perf-noop:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
+  :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-android:testAndroidHostTest \
   :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
 ```

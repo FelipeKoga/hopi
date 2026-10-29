@@ -122,7 +122,7 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
         }
         when {
             session == null -> PerfNote("Not connected.")
-            !view.supported -> PerfNote("This app's Hopi has no perf monitors (not connected yet, no hopi-perf, HopiPerf not installed, or an older Hopi).")
+            !view.supported -> PerfNote("This app's Hopi has no perf monitors (not connected yet, no hopi-perf in this build, perf left out of Hopi's start, or an older Hopi).")
             else -> Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 Monitors(view) { monitor, on -> perf?.setMonitor(monitor, on) }
                 Section("Frames per second", latest = view.frames.lastOrNull()?.let(::framesText) ?: idle(view, "frames"))
@@ -195,7 +195,7 @@ private fun Monitors(view: RemotePerfView, onToggle: (String, Boolean) -> Unit) 
             }
         }
         val notes = buildList {
-            if (!view.control) add("This app refuses remote starts and stops (remoteControl = false).")
+            if (!view.control) add("This app refuses remote starts and stops: remote control is off in its Hopi configuration (perf remoteControl, or perfRemoteControl on iOS, is false).")
             if (status?.monitor("frames")?.unattached == true) add("Frames attach when an activity next starts.")
             addAll(status?.notices.orEmpty())
             add("A monitor switched on here runs while this panel is open; off stops it for every client.")

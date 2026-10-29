@@ -63,8 +63,14 @@ class HopiStartConfigTest {
     fun theNetworkToolStartsFirstThenPerf() {
         val tools = tools(HopiStartConfig())
         assertEquals(listOf("network", "perf"), tools.map { it.name })
-        assertIs<PerfEntry>(tools[1])
+        assertEquals(true, assertIs<PerfEntry>(tools[1]).remoteControl, "remote control on by default")
         assertEquals(true, assertIs<NetworkTool>(tools[0]).rules)
+    }
+
+    @Test
+    fun perfRemoteControlReachesPerfsTool() {
+        val tools = tools(HopiStartConfig().apply { perfRemoteControl = false })
+        assertEquals(false, assertIs<PerfEntry>(tools[1]).remoteControl)
     }
 
     @Test

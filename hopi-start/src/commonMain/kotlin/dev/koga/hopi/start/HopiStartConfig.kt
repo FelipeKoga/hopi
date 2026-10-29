@@ -5,12 +5,12 @@ import dev.koga.hopi.core.store.HopiStore
 
 /**
  * Configuration of [Hopi.start]: what every tool shares (the store's caps, redaction, the summary
- * log, the agent bridge) and the tools' own switches ([rules], [perf]). Primitive members only, so
- * Swift sees this class and no core type. The store is the process-wide one every recorder shares,
- * and its redaction is the union of every installation's lists. Called first thing, before
- * anything created the store (a Ktor client, `HopiUrlSession.start`), the start presets these
- * caps, so they win over a recorder's own (the Ktor plugin's included); a store that exists
- * already keeps its caps.
+ * log, the agent bridge) and the tools' own settings ([rules]; [perf] and [perfRemoteControl]).
+ * Primitive members only, so Swift sees this class and no core type. The store is the process-wide
+ * one every recorder shares, and its redaction is the union of every installation's lists. Called
+ * first thing, before anything created the store (a Ktor client, `HopiUrlSession.start`), the start
+ * presets these caps, so they win over a recorder's own (the Ktor plugin's included); a store that
+ * exists already keeps its caps.
  */
 public class HopiStartConfig internal constructor() {
     /** Runtime kill switch. When false [Hopi.start] starts nothing and writes nothing. */
@@ -25,7 +25,11 @@ public class HopiStartConfig internal constructor() {
     /** Per-body capture cap; longer bodies are truncated. Clamped to half of the store's [maxTotalBytes]. */
     public var maxBodyBytes: Long = DEFAULT_MAX_BODY_BYTES
 
-    /** One NDJSON summary line per completed or failed transaction in the platform log, plus notices. */
+    /**
+     * One NDJSON summary line per completed or failed transaction in the platform log, plus notices,
+     * and the performance monitors' rate-limited lines (os_log category `perf`; their notices are
+     * written whatever this says).
+     */
     public var summaryLog: Boolean = true
 
     /** Starts the device-local agent bridge at start, before any request, so the CLI and the desktop viewer can connect. */
@@ -40,10 +44,18 @@ public class HopiStartConfig internal constructor() {
 
     /**
      * Registers the performance monitors for remote control (`hopi perf start`, the desktop
-     * viewer's Perf panel) and starts none: a monitor costs nothing until it starts. A `-hopiPerf
-     * frames,hangs` launch argument starts those at launch. False leaves perf out of the start.
+     * viewer's Perf panel) and for `HopiPerf` from code, and starts none: a monitor costs nothing
+     * until it starts. A `-hopiPerf frames,hangs` launch argument starts those at launch. False
+     * leaves perf out of the start, and `HopiPerf` then does nothing.
      */
     public var perf: Boolean = true
+
+    /**
+     * Lets the bridge start and stop the monitors (`hopi perf start` and `stop`, a tail's start, the
+     * desktop viewer's switches); false refuses those, while reads still work and code and
+     * `-hopiPerf` still start monitors. Set at start only.
+     */
+    public var perfRemoteControl: Boolean = true
 
     internal val redactedHeaders = mutableListOf<String>()
     internal val redactedQueryParameters = mutableListOf<String>()

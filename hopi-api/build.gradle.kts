@@ -18,8 +18,10 @@ kotlin {
     }
 
     // The consumer API dump (HopiRules and its builders, the same as hopi-rules' before the
-    // runtime-split plan's stage 7); Hopi's own declarations stay out of it: the registry, the rules
-    // runtime's interface and the builders' members that show the runtime what was set.
+    // runtime-split plan's stage 7; HopiPerf, HopiMonitor and HopiPerfConfig, hopi-perf's before its
+    // stage 8 less install and the start configuration's three settings); Hopi's own declarations
+    // stay out of it: the registry, the rules and perf runtimes' interfaces and the builders'
+    // members that show the runtime what was set.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
         filters {

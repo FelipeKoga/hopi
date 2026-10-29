@@ -29,9 +29,10 @@ only (a button or an agent command), never continuous. Open question: one CMP se
 both platforms vs the platform accessibility APIs (`AccessibilityNodeInfo`, UIAccessibility).
 
 ### Performance monitors (built)
-Design: `docs/design/perf-monitors.md` (`hopi-perf` / `-noop`, each monitor off by default, its
-cost stated per monitor). Built in four stages: the core model, bridge `perf.*`, log lines,
-`HopiPerf` API and parity, Gradle `perf { }` and the release checks; the Android monitors
+Design: `docs/design/perf-monitors.md` (`hopi-perf`, the runtime behind `hopi-api`'s `HopiPerf`
+since the runtime-split plan's stage 8; each monitor off by default, its cost stated per monitor).
+Built in four stages: the core model, bridge `perf.*`, log lines,
+`HopiPerf` API and parity (a noop twin until stage 8), Gradle `perf { }` and the release checks; the Android monitors
 (FrameMetrics, the Looper printer with an input bracket or a heartbeat, one sampler); the iOS
 monitors (run-loop observers and stack capture in C, stalls, display-link cadence on request,
 `task_info` CPU and footprint, memory warnings); the surfaces (CLI `hopi perf …` and `hopi hangs`,

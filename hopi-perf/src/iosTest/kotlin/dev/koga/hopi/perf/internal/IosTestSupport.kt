@@ -2,7 +2,8 @@ package dev.koga.hopi.perf.internal
 
 import dev.koga.hopi.core.perf.PerfData
 import dev.koga.hopi.core.perf.PerfHook
-import dev.koga.hopi.perf.HopiPerf
+import dev.koga.hopi.core.start.HopiToolContext
+import dev.koga.hopi.core.start.StartConfig
 import dev.koga.hopi.perf.internal.native.hopi_perf_now_ms
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.test.assertNotNull
@@ -44,11 +45,19 @@ internal fun onMain(block: () -> Unit) {
 
 internal fun perfData(): PerfData = assertNotNull(PerfHook.controller, "a controller is registered").data
 
+/**
+ * What `Hopi.start` does with perf's iOS tool, without the perf lines: the controller is created
+ * once per process, and the first start registers `HopiPerf`'s runtime.
+ */
+internal fun startPerfTool() {
+    PerfEntry(remoteControl = true).start(HopiToolContext(StartConfig(summaryLog = false), platform = null))
+}
+
 /** The names of this process's `hopi-perf-*` threads now. */
 internal fun perfThreads(): List<String> = IosThreadScan().scan().map { it.name }.filter { it.startsWith("hopi-perf") }
 
-/** Stops every monitor and waits (on the main run loop) until their threads ended. */
+/** Stops every monitor, through the controller, and waits (on the main run loop) until their threads ended. */
 internal fun stopAll() {
-    HopiPerf.stop()
+    PerfHook.controller?.stop(emptySet())
     runMainLoopUntil(3_000) { perfThreads().isEmpty() }
 }

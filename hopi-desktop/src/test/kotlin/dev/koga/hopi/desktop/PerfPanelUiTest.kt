@@ -145,7 +145,7 @@ class PerfPanelUiTest {
         val app = FakeApp(root.resolve("3")).also { closeables += it }
         connected(app)
         openPanel()
-        waitForText("refuses remote starts and stops (remoteControl = false)")
+        waitForText("refuses remote starts and stops: remote control is off")
     }
 
     private fun ComposeUiTest.screenshot(name: String) {

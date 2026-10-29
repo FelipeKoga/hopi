@@ -21,15 +21,21 @@ public abstract class HopiExtension {
     public abstract val urlConnection: Property<Boolean>
 
     /**
-     * Gives debuggable variants the real `hopi-ktor`/`hopi-perf` and the others their noop twins,
-     * whichever of the two the app's modules name, so no `-Phopi.enabled` is needed on Android.
-     * (`HopiRules` is in `hopi-api`, which has no twin: every variant gets it.)
+     * Gives debuggable variants the real `hopi-ktor` and the others its noop twin, whichever of the
+     * two the app's modules name, so no `-Phopi.enabled` is needed on Android. (`HopiRules` and
+     * `HopiPerf` are in `hopi-api`, which has no twin: every variant gets it.)
      */
     public abstract val selectTwins: Property<Boolean>
 
     public abstract val maxEntries: Property<Int>
     public abstract val maxTotalBytes: Property<Long>
     public abstract val maxBodyBytes: Property<Long>
+
+    /**
+     * One NDJSON line per recorded request in logcat (tag `Hopi`), the start's own line, and the
+     * performance monitors' rate-limited lines (tag `HopiPerf`, whose notices are written whatever
+     * this says).
+     */
     public abstract val summaryLog: Property<Boolean>
     public abstract val agentBridge: Property<Boolean>
 

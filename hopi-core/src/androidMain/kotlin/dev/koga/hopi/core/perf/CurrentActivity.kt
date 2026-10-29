@@ -15,7 +15,7 @@ import kotlin.concurrent.atomics.AtomicBoolean
  * own lifecycle listener only while frames or hangs runs.
  */
 @HopiInternalApi
-public object PerfLauncher {
+public object CurrentActivity {
     @Volatile
     private var current: WeakReference<Activity>? = null
 
@@ -35,7 +35,7 @@ public object PerfLauncher {
 
 /**
  * Core's current-activity tracking (the runtime-split plan's P5): the resumed activity goes into
- * [PerfLauncher], cleared when it pauses or is destroyed, so frames and hangs attach at once. The
+ * [CurrentActivity], cleared when it pauses or is destroyed, so frames and hangs attach at once. The
  * provider registers it once, before the tools start, whatever tools are listed; it runs only on
  * the activities' lifecycle events, with no thread and no timer.
  */
@@ -46,11 +46,11 @@ internal object CurrentActivityCallbacks : Application.ActivityLifecycleCallback
         if (registered.compareAndSet(false, true)) application.registerActivityLifecycleCallbacks(this)
     }
 
-    override fun onActivityResumed(activity: Activity) = PerfLauncher.attach(activity)
+    override fun onActivityResumed(activity: Activity) = CurrentActivity.attach(activity)
 
-    override fun onActivityPaused(activity: Activity) = PerfLauncher.detach(activity)
+    override fun onActivityPaused(activity: Activity) = CurrentActivity.detach(activity)
 
-    override fun onActivityDestroyed(activity: Activity) = PerfLauncher.detach(activity)
+    override fun onActivityDestroyed(activity: Activity) = CurrentActivity.detach(activity)
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
 

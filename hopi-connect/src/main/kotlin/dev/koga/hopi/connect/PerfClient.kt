@@ -103,7 +103,7 @@ public class PerfClient(private val client: BridgeClient) {
         public const val DEFAULT_POINTS: Int = 120
         public const val MAX_POINTS: Int = 1_200
         public const val PERF_UNSUPPORTED: String =
-            "this app's Hopi has no perf monitors (no hopi-perf, HopiPerf not installed, or an older Hopi)"
+            "this app's Hopi has no perf monitors (no hopi-perf in this build, perf left out of Hopi's start, or an older Hopi)"
 
         /** The four monitors by their wire names, in display order. */
         public val MONITORS: List<String> = listOf("frames", "hangs", "cpu", "memory")
@@ -139,8 +139,11 @@ public class RemotePerfMonitor(
     public val thresholdMs: Long? get() = details.long("thresholdMs")
     public val intervalMs: Long? get() = details.long("intervalMs")
 
-    /** Android frames that no window reports yet (`"attached":false`). */
-    public val unattached: Boolean get() = name == "frames" && details.bool("attached") == false
+    /**
+     * Android frames that no window reports yet (`"attached":false`) and that waits for no attach
+     * already posted to the app's main thread (`"attaching":true`, absent from an older app).
+     */
+    public val unattached: Boolean get() = name == "frames" && details.bool("attached") == false && details.bool("attaching") != true
 }
 
 /** A `{"type":"perf.status",…}` line. */

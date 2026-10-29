@@ -142,17 +142,17 @@ class HopiPluginFunctionalTest {
 
     /**
      * The published-coordinates path (a consumer of Maven Local): with no `hopi-android` or twin
-     * project in the build, the plugin adds `dev.koga.hopi:hopi-android(-noop)` and
-     * `hopi-perf(-noop)` at its own version, `hopi-core` to debug only, and swaps the twins a
-     * library names by their coordinates, in both directions: the shared module asks for
-     * `hopi-ktor-noop` and `hopi-perf`, the debug APK gets both real modules and the release APK
-     * both noops. `hopi-api`, which the shared module also names (`HopiRules`), has no twin: both
-     * APKs get it. The constraint the plugin adds in debug, `hopi-api` at its own version, is not
-     * checked here: every stand-in is published at that version, the one the shared module names,
-     * so the APKs would be the same without it. The stand-ins are jars with one marker class each,
-     * published by a build of their own into a repository of the fixture; core's also holds the
-     * generated configuration's base class and the tool interface, and the network and perf tools
-     * the generated class names implement it (the fixture enables perf).
+     * project in the build, the plugin adds `dev.koga.hopi:hopi-android(-noop)` at its own version,
+     * `hopi-core` and, with `perf { enabled = true }`, `hopi-perf` to debug only, and swaps the Ktor
+     * twins a library names by their coordinates, in both directions: the shared module asks for
+     * `hopi-ktor-noop`, the debug APK gets the real modules and the release APK the noops and no
+     * `hopi-perf` at all. `hopi-api`, which the shared module also names (`HopiRules`, `HopiPerf`),
+     * has no twin: both APKs get it. The constraint the plugin adds in debug, `hopi-api` at its own
+     * version, is not checked here: every stand-in is published at that version, the one the shared
+     * module names, so the APKs would be the same without it. The stand-ins are jars with one marker
+     * class each, published by a build of their own into a repository of the fixture; core's also
+     * holds the generated configuration's base class and the tool interface, and the network and
+     * perf tools the generated class names implement it (the fixture enables perf).
      */
     @Test
     fun publishedCoordinatesAreSwappedPerVariant() {
@@ -162,7 +162,7 @@ class HopiPluginFunctionalTest {
         val repo = root.resolve("repo").path.replace("\\", "/")
         val standIns = root.resolve("stand-ins")
         writeGradleFiles(standIns)
-        val published = listOf("hopi-api", "hopi-core", "hopi-android", "hopi-android-noop", "hopi-ktor", "hopi-ktor-noop", "hopi-perf", "hopi-perf-noop")
+        val published = listOf("hopi-api", "hopi-core", "hopi-android", "hopi-android-noop", "hopi-ktor", "hopi-ktor-noop", "hopi-perf")
         standIns.write("settings.gradle.kts", published.joinToString("\n") { "include(\":$it\")" })
         standIns.write(
             "build.gradle.kts",
@@ -241,7 +241,6 @@ class HopiPluginFunctionalTest {
             java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
             dependencies {
                 api("dev.koga.hopi:hopi-ktor-noop:$version")
-                api("dev.koga.hopi:hopi-perf:$version")
                 api("dev.koga.hopi:hopi-api:$version")
             }
             """.trimIndent(),
@@ -259,20 +258,23 @@ class HopiPluginFunctionalTest {
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:generateDebugHopiConfig")?.outcome, result.output)
         val debug = DexReader.ofApk(project.resolve("app/build/outputs/apk/debug/app-debug.apk")).definedClasses
         val release = DexReader.ofApk(project.resolve("app/build/outputs/apk/release/app-release-unsigned.apk")).definedClasses
-        for ((real, noop) in listOf("hopi-android" to "hopi-android-noop", "hopi-ktor" to "hopi-ktor-noop", "hopi-perf" to "hopi-perf-noop")) {
+        for ((real, noop) in listOf("hopi-android" to "hopi-android-noop", "hopi-ktor" to "hopi-ktor-noop")) {
             assertTrue("dev/koga/hopi/standin/${marker(real)}" in debug, "debug has $real: ${debug.filter { it.startsWith("dev/koga/hopi/") }}")
             assertFalse("dev/koga/hopi/standin/${marker(noop)}" in debug, "debug has no $noop")
             assertTrue("dev/koga/hopi/standin/${marker(noop)}" in release, "release has $noop: ${release.filter { it.startsWith("dev/koga/hopi/") }}")
             assertFalse("dev/koga/hopi/standin/${marker(real)}" in release, "release has no $real")
         }
-        // HopiRules' module reaches both, as the shared module asked.
+        // The perf monitors' runtime, from `perf { enabled = true }`: debug only, no twin.
+        assertTrue("dev/koga/hopi/standin/${marker("hopi-perf")}" in debug, "debug has hopi-perf")
+        assertFalse("dev/koga/hopi/standin/${marker("hopi-perf")}" in release, "release has no hopi-perf")
+        // The module of HopiRules and HopiPerf reaches both, as the shared module asked.
         assertTrue("dev/koga/hopi/standin/${marker("hopi-api")}" in debug, "debug has hopi-api")
         assertTrue("dev/koga/hopi/standin/${marker("hopi-api")}" in release, "release has hopi-api")
         // Core, which the generated configuration extends, reaches debug only.
         assertTrue("dev/koga/hopi/standin/${marker("hopi-core")}" in debug, "debug has hopi-core")
         assertFalse("dev/koga/hopi/standin/${marker("hopi-core")}" in release, "release has no hopi-core")
         assertTrue("dev/koga/hopi/android/generated/HopiGeneratedConfig" in debug)
-        assertEquals(emptyList(), release.filter { it.startsWith("dev/koga/hopi/android/") || it.startsWith("dev/koga/hopi/core/") })
+        assertEquals(emptyList(), release.filter { it.startsWith("dev/koga/hopi/android/") || it.startsWith("dev/koga/hopi/core/") || it.startsWith("dev/koga/hopi/perf/") })
     }
 
     /** `hopi-ktor-noop` → `HopiKtorNoop`. */
@@ -591,7 +593,7 @@ class HopiPluginFunctionalTest {
         val PERF_ENTRY = """
             package dev.koga.hopi.perf.internal;
             public final class PerfEntry implements dev.koga.hopi.core.start.HopiTool {
-                public PerfEntry(int autoStart, long hangThresholdMs, boolean hangHeartbeat) {}
+                public PerfEntry(int autoStart, long hangThresholdMs, boolean hangHeartbeat, boolean remoteControl) {}
             }
         """.trimIndent()
         const val REAL_CALL = "okhttp3/internal/connection/RealCall"

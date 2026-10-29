@@ -19,14 +19,15 @@ import org.gradle.api.artifacts.Configuration
  *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
  *   `hopi { }` block generated into it as the start configuration and its tool list; other
  *   variants are not instrumented at all;
- * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-perf` to the real
- *   module when debuggable and to the noop twin otherwise, whichever the app's modules name;
- * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules`, which the app's modules
- *   name in every build type) at this plugin's version, the version of the `hopi-core` it adds:
- *   core's rules runtime implements an internal interface of `hopi-api`, and a mismatch would fail
- *   at run time;
- * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others `hopi-perf-noop`)
- *   and the tool list names its tool, which starts the `autoStart` monitors (docs/design/perf-monitors.md).
+ * - with `selectTwins` (the default), each variant resolves `hopi-ktor` to the real module when
+ *   debuggable and to the noop twin otherwise, whichever the app's modules name;
+ * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
+ *   app's modules name in every build type) at this plugin's version, the version of the
+ *   `hopi-core` and `hopi-perf` it adds: core's rules runtime and hopi-perf's runtime implement
+ *   internal interfaces of `hopi-api`, and a mismatch would fail at run time;
+ * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others nothing:
+ *   `HopiPerf` is `hopi-api`'s) and the tool list names its tool, which registers the monitors and
+ *   starts the `autoStart` ones (docs/design/perf-monitors.md).
  *
  * `hopi-core`'s manifest declares the provider that starts the generated tools, so the app adds no code.
  */
@@ -63,9 +64,9 @@ public class HopiPlugin : Plugin<Project> {
                 // exposes it there.
                 if (real) project.dependencies.add("${buildType.name}Implementation", runtime(project, CORE))
                 if (real) alignApi(project, buildType.name)
-                if (extension.perf.enabled.get()) {
-                    project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) PERF else PERF_NOOP))
-                }
+                // The monitors' runtime, debuggable build types only: HopiPerf, which the app calls,
+                // is hopi-api's.
+                if (real && extension.perf.enabled.get()) project.dependencies.add("${buildType.name}Implementation", runtime(project, PERF))
             }
         }
         components.onVariants(components.selector().all()) { variant ->
@@ -117,6 +118,7 @@ public class HopiPlugin : Plugin<Project> {
                 },
             )
             task.perfHangHeartbeat.set(extension.perf.hangHeartbeat)
+            task.perfRemoteControl.set(extension.perf.remoteControl)
         }
         val java = variant.sources.java ?: throw GradleException("variant ${variant.name} has no Java sources to add Hopi's configuration to")
         java.addGeneratedSourceDirectory(generate, GenerateHopiConfig::outputDirectory)
@@ -143,10 +145,12 @@ public class HopiPlugin : Plugin<Project> {
     }
 
     /**
-     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core at that version: the app
-     * names `hopi-api` itself (it holds `HopiRules`), at whatever version it chose, and core's rules
-     * runtime implements an internal interface of it. A constraint, so it adds nothing to a build
-     * that never names `hopi-api`; none for this repository's project, which is core's own version.
+     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core, and `hopi-perf` with
+     * `perf { enabled = true }`, at that version: the app names `hopi-api` itself (it holds
+     * `HopiRules` and `HopiPerf`), at whatever version it chose, and core's rules runtime and
+     * hopi-perf's runtime implement internal interfaces of it. A constraint, so it adds nothing to
+     * a build that never names `hopi-api`; none for this repository's project, which is core's own
+     * version.
      */
     private fun alignApi(project: Project, buildType: String) {
         if (project.rootProject.findProject(":$API") != null) return
@@ -190,7 +194,6 @@ public class HopiPlugin : Plugin<Project> {
         const val RUNTIME = "hopi-android"
         const val RUNTIME_NOOP = "hopi-android-noop"
         const val PERF = "hopi-perf"
-        const val PERF_NOOP = "hopi-perf-noop"
-        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", PERF to PERF_NOOP)
+        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop")
     }
 }

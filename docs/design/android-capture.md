@@ -373,7 +373,7 @@ into each debuggable variant from the `hopi { … }` block,
 constructor passes the global settings (the store caps, redaction, `summaryLog`, `agentBridge`)
 and then the tool list, each tool constructed with its own settings:
 `new NetworkTool(okhttp, urlConnection, rules)` and, with `perf { enabled = true }`,
-`new PerfEntry(autoStart, hangThresholdMs, hangHeartbeat)`. One `Class.forName` and one
+`new PerfEntry(autoStart, hangThresholdMs, hangHeartbeat, remoteControl)`. One `Class.forName` and one
 constructor call. Without that class (a runtime added without the plugin) it writes one notice line,
 `not started: no generated configuration; apply the dev.koga.hopi Gradle plugin to the app`, and
 starts nothing: the tool list lives in that class, and nothing was rewritten anyway (before stage 4
@@ -746,7 +746,8 @@ coordinates a consumer of Maven Local gets: stand-in jars, published by a build 
 fixture repository, for the runtime, `hopi-perf` and two twin pairs, which a library names in both
 directions (`hopi-ktor-noop`, `hopi-rules`); the debug APK must hold every real stand-in and the
 release APK every noop. (Since the runtime-split plan's stage 7 the library names `hopi-ktor-noop`
-and `hopi-perf` instead, and `hopi-api`, which has no twin and must be in both APKs.) The TestKit directory is a dedicated one under the plugin's
+and `hopi-api`, which has no twin and must be in both APKs, and since stage 8 no `hopi-perf`:
+`perf { enabled = true }` adds it, so the debug APK holds it and the release APK none.) The TestKit directory is a dedicated one under the plugin's
 `build/`, never the developer's Gradle user home. A `--stop` there would also stop the outer
 build's daemon, which has the same Gradle version and the same home. AGP is not downloaded: the
 nested build runs `--offline`, and its environment sets

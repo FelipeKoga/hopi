@@ -117,10 +117,7 @@ public class FrameSecond(
     public val metricsLost: Int,
     /** First frames of a window, counted apart. */
     public val firstFrames: Int,
-    /**
-     * Frames left out because a Hopi capture paused the main thread ([PerfData.inspectorOpen] would
-     * exclude them too, but nothing sets it since the runtime-split plan's stage 5).
-     */
+    /** Frames left out because a Hopi capture paused the main thread ([PerfData.markPause]). */
     public val excluded: Int,
     public val screen: String?,
 ) : PerfItem

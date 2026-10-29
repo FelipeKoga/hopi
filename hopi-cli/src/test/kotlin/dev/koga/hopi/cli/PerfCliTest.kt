@@ -144,7 +144,7 @@ class PerfCliTest {
         fake(remoteControl = false)
         val refused = cli("perf", "start", "--cpu")
         assertEquals(ExitCode.UNSUPPORTED, refused.exitCode, refused.toString())
-        assertTrue("remoteControl = false" in refused.stderr, refused.stderr)
+        assertTrue("remote control is off in its Hopi configuration" in refused.stderr, refused.stderr)
         val status = cli("perf", "status")
         assertEquals(ExitCode.OK, status.exitCode)
         assertTrue("remote control off" in status.lines.first(), status.stdout)

@@ -110,7 +110,6 @@ val noopTwins = listOf(
     "hopi-ktor" to "hopi-ktor-noop",
     "hopi-urlsession" to "hopi-urlsession-noop",
     "hopi-android" to "hopi-android-noop",
-    "hopi-perf" to "hopi-perf-noop",
 )
 
 val noopParityChecks = noopTwins.map { (real, noop) ->
@@ -237,10 +236,10 @@ abstract class PublicationCheck : DefaultTask() {
 // Every library a consumer needs (README, "Install"), by its targets and the cinterop klibs of its
 // main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the desktop
 // viewer with its screens (hopi-ui) and the sample are not published. The dev.koga.hopi plugin
-// injects hopi-android(-noop), hopi-core (debuggable build types only) and hopi-perf(-noop), swaps
-// the ktor/perf twins and aligns hopi-api (HopiRules) with its own version, all of them listed
-// here. hopi-start, the iOS entry a Debug framework exports, has the iOS targets only until the
-// runtime-split plan's stage 10.
+// injects hopi-android(-noop), and hopi-core and, with `perf { enabled }`, hopi-perf into
+// debuggable build types only, swaps the ktor twins and aligns hopi-api (HopiRules, HopiPerf) with
+// its own version, all of them listed here. hopi-start, the iOS entry a Debug framework exports,
+// has the iOS targets only until the runtime-split plan's stage 10.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
 val publishedModules = mapOf(
     "hopi-api" to allTargets,
@@ -250,7 +249,6 @@ val publishedModules = mapOf(
     "hopi-urlsession" to allTargets,
     "hopi-urlsession-noop" to allTargets,
     "hopi-perf" to allTargets,
-    "hopi-perf-noop" to allTargets,
     "hopi-android" to listOf("android"),
     "hopi-android-noop" to listOf("android"),
     "hopi-start" to listOf("iosArm64", "iosSimulatorArm64"),

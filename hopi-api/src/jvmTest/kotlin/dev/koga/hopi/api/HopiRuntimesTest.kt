@@ -1,5 +1,7 @@
 package dev.koga.hopi.api
 
+import dev.koga.hopi.perf.FakePerfRuntime
+import dev.koga.hopi.perf.HopiPerf
 import dev.koga.hopi.rules.FakeRulesRuntime
 import dev.koga.hopi.rules.HopiRules
 import java.io.File
@@ -47,23 +49,42 @@ class HopiRuntimesTest {
     }
 
     @Test
-    fun resetEmptiesTheSlotsAndTheDroppedCount() {
+    fun thePerfSlotIsWrittenOnce() {
+        assertNull(HopiRuntimes.perf)
+        val first = FakePerfRuntime()
+        assertTrue(HopiRuntimes.registerPerf(first))
+        assertFalse(HopiRuntimes.registerPerf(FakePerfRuntime()), "a second registration is refused")
+        assertSame(first, HopiRuntimes.perf)
+    }
+
+    @Test
+    fun resetEmptiesTheSlotsTheDroppedCountsAndTheLabel() {
         HopiRuntimes.registerKtorHooks(Any())
         HopiRules.mock("*/a")
         HopiRuntimes.registerRules(FakeRulesRuntime())
         assertEquals(1, HopiRuntimes.droppedRules)
+        HopiPerf.start { hangs = true }
+        HopiPerf.screen("Checkout")
+        HopiRuntimes.registerPerf(FakePerfRuntime())
+        assertEquals(1, HopiRuntimes.droppedPerfStarts)
+        assertEquals("Checkout", HopiRuntimes.perfScreen)
         HopiRuntimes.resetForTests()
         assertNull(HopiRuntimes.ktorHooks)
         assertNull(HopiRuntimes.rules)
         assertEquals(0, HopiRuntimes.droppedRules)
+        assertNull(HopiRuntimes.perf)
+        assertEquals(0, HopiRuntimes.droppedPerfStarts)
+        assertNull(HopiRuntimes.perfScreen)
         assertTrue(HopiRuntimes.registerKtorHooks(Any()))
         assertTrue(HopiRuntimes.registerRules(FakeRulesRuntime()))
+        assertTrue(HopiRuntimes.registerPerf(FakePerfRuntime()))
     }
 
     @Test
-    fun hopiCoreIsNotOnTheRuntimeClasspath() {
+    fun hopiCoreAndHopiPerfAreNotOnTheRuntimeClasspath() {
         assertFailsWith<ClassNotFoundException> { Class.forName("dev.koga.hopi.core.rules.RuleEngine") }
+        assertFailsWith<ClassNotFoundException> { Class.forName("dev.koga.hopi.core.perf.PerfHook") }
         val classpath = System.getProperty("java.class.path").split(File.pathSeparatorChar)
-        assertEquals(emptyList(), classpath.filter { "hopi-core" in it }, "hopi-core on the classpath")
+        assertEquals(emptyList(), classpath.filter { "hopi-core" in it || "hopi-perf/" in it }, "hopi-core or hopi-perf on the classpath")
     }
 }

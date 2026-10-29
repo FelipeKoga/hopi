@@ -908,7 +908,7 @@ no rules pair, and `hopi-api`'s ABI dump is the consumer API alone (its `@HopiIn
 declarations excluded), the declarations `hopi-rules` had. KMP shared modules take `hopi-api` in
 every build and export it from the iOS framework. `verifyReleaseUsesNoop` and
 `verifyHopiSelection` expect `:hopi-api` on the release classpath where they expected
-`:hopi-rules-noop` (three noops and `hopi-api`), `verifyDebugCapture` `:hopi-api` where it
+`:hopi-rules-noop` (the noop twins and `hopi-api`), `verifyDebugCapture` `:hopi-api` where it
 expected `:hopi-rules`, and `verifyIosReleaseExcludesCapture` is unchanged.
 
 The knock-ons as built on 2026-10-25, before stage 7 (history):

@@ -41,6 +41,9 @@ public abstract class GenerateHopiConfig : DefaultTask() {
     @get:Input public abstract val perfHangThresholdMs: Property<Long>
     @get:Input public abstract val perfHangHeartbeat: Property<Boolean>
 
+    /** `perf { remoteControl }`: false refuses the bridge's perf starts and stops. */
+    @get:Input public abstract val perfRemoteControl: Property<Boolean>
+
     @get:OutputDirectory
     public abstract val outputDirectory: DirectoryProperty
 
@@ -76,8 +79,8 @@ public abstract class GenerateHopiConfig : DefaultTask() {
         )
         if (perf) {
             appendLine(
-                "            new dev.koga.hopi.perf.internal.PerfEntry(${perfAutoStart.get()}, ${perfHangThresholdMs.get()}L, ${perfHangHeartbeat.get()})" +
-                    " // perf { }: autoStart, hangThresholdMs, hangHeartbeat",
+                "            new dev.koga.hopi.perf.internal.PerfEntry(${perfAutoStart.get()}, ${perfHangThresholdMs.get()}L, " +
+                    "${perfHangHeartbeat.get()}, ${perfRemoteControl.get()}) // perf { }: autoStart, hangThresholdMs, hangHeartbeat, remoteControl",
             )
         }
         appendLine("        );")

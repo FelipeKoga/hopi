@@ -1,5 +1,6 @@
 package dev.koga.hopi.perf.internal
 
+import dev.koga.hopi.api.HopiRuntimes
 import dev.koga.hopi.core.perf.PerfHook
 import dev.koga.hopi.core.start.HopiToolContext
 import dev.koga.hopi.core.start.StartConfig
@@ -12,18 +13,25 @@ import kotlin.test.assertSame
 
 /**
  * Perf's tool in the start sequence, as the generated configuration lists it: with no `autoStart`
- * monitor it registers the controller with the `perf { }` block's settings and starts nothing.
+ * monitor it registers the controller with the `perf { }` block's settings and the start's
+ * `summaryLog`, registers `HopiPerf`'s runtime, and starts nothing.
  */
 class PerfEntryTest {
     @Test
     fun withNoAutoStartThePerfToolRegistersTheControllerAndStartsNothing() {
-        val tool = PerfEntry(autoStart = 0, hangThresholdMs = 300, hangHeartbeat = true)
+        val tool = PerfEntry(autoStart = 0, hangThresholdMs = 300, hangHeartbeat = true, remoteControl = false)
         assertEquals("perf", tool.name)
-        assertNull(tool.start(HopiToolContext(StartConfig(), platform = null)), "no note in the start line")
+        assertNull(tool.start(HopiToolContext(StartConfig(summaryLog = false), platform = null)), "no note in the start line")
         val controller = assertNotNull(PerfRuntime.existing())
         assertSame(controller, PerfHook.controller)
-        assertEquals(300L, controller.currentSettings.hangThresholdMs)
-        assertEquals(true, controller.currentSettings.hangHeartbeat)
+        val settings = controller.currentSettings
+        assertEquals(300L, settings.hangThresholdMs)
+        assertEquals(true, settings.hangHeartbeat)
+        assertEquals(false, settings.remoteControl)
+        assertEquals(false, settings.summaryLog)
+        assertEquals(false, controller.remoteControl)
+        assertNull(controller.data.log, "the start's summaryLog = false: no perf line")
+        assertSame(ApiPerf, HopiRuntimes.perf, "HopiPerf's runtime")
         assertEquals(emptySet(), HopiPerf.running)
     }
 }

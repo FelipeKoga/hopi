@@ -1,5 +1,6 @@
 package dev.koga.hopi.api
 
+import dev.koga.hopi.perf.HopiPerfRuntime
 import dev.koga.hopi.rules.HopiRulesRuntime
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
@@ -9,10 +10,11 @@ import kotlin.concurrent.atomics.incrementAndFetch
  * The runtimes a debug build registered: one write-once slot per kind, each read with one volatile
  * read. Nothing registers in a release build, so every slot stays empty there and the API that
  * reads it does nothing. A second registration is refused and writes nothing, since this module
- * has no log sink. For the rules slot that is the normal case: core's start registers on each of
- * its calls, and only the first succeeds. For a slot a different runtime could also claim, the
- * runtime refused writes the notice. The rules slot is typed with this module's own
- * [HopiRulesRuntime]; a slot whose interface names types this module cannot see (the Ktor hooks)
+ * has no log sink. For the rules and perf slots that is the normal case: core's start registers
+ * the rules runtime on each of its calls, perf's tool its runtime on each of its starts, and only
+ * the first succeeds. For a slot a different runtime could also claim, the runtime refused writes
+ * the notice. The rules and perf slots are typed with this module's own [HopiRulesRuntime] and
+ * [HopiPerfRuntime]; a slot whose interface names types this module cannot see (the Ktor hooks)
  * holds what the runtime registered, and the module that reads it knows the type.
  */
 @HopiInternalApi
@@ -20,6 +22,9 @@ public object HopiRuntimes {
     private val ktor = AtomicReference<Any?>(null)
     private val rulesRuntime = AtomicReference<HopiRulesRuntime?>(null)
     private val dropped = AtomicInt(0)
+    private val perfRuntime = AtomicReference<HopiPerfRuntime?>(null)
+    private val droppedPerf = AtomicInt(0)
+    private val pendingPerfScreen = AtomicReference<String?>(null)
 
     /**
      * The Ktor client hooks the network runtime registered, or null. `hopi-ktor` casts the value to
@@ -51,10 +56,44 @@ public object HopiRuntimes {
         dropped.incrementAndFetch()
     }
 
-    /** Empties every slot and the dropped count, for tests that register a runtime of their own. */
+    /** The perf runtime `HopiPerf` delegates to, or null: `hopi-perf`'s, which perf's tool registers when it starts. */
+    public val perf: HopiPerfRuntime?
+        get() = perfRuntime.load()
+
+    /** Registers [runtime] as the perf runtime; false, changing nothing, when one is registered. */
+    public fun registerPerf(runtime: HopiPerfRuntime): Boolean = perfRuntime.compareAndSet(null, runtime)
+
+    /**
+     * The `HopiPerf.start` calls dropped because no perf runtime was registered: read once, by the
+     * registration that succeeds, for its notice line.
+     */
+    public val droppedPerfStarts: Int
+        get() = droppedPerf.load()
+
+    /** Counts one `HopiPerf.start` dropped. */
+    internal fun countDroppedPerfStart() {
+        droppedPerf.incrementAndFetch()
+    }
+
+    /**
+     * The last label `HopiPerf.screen` was given (null: none, or none set), which the perf
+     * runtime's registration applies: one value, written before `HopiPerf.screen` reads the slot.
+     */
+    public val perfScreen: String?
+        get() = pendingPerfScreen.load()
+
+    /** Keeps [name] as the last `HopiPerf.screen` label. */
+    internal fun keepPerfScreen(name: String?) {
+        pendingPerfScreen.store(name)
+    }
+
+    /** Empties every slot, the dropped counts and the kept label, for tests that register a runtime of their own. */
     public fun resetForTests() {
         ktor.store(null)
         rulesRuntime.store(null)
         dropped.store(0)
+        perfRuntime.store(null)
+        droppedPerf.store(0)
+        pendingPerfScreen.store(null)
     }
 }

@@ -20,11 +20,6 @@ val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?
 // Automatic URLSession capture, iOS only (Android has no URLSession): the real module or its noop.
 val urlSessionModule = if (hopiEnabled) project(":hopi-urlsession") else project(":hopi-urlsession-noop")
 
-// HopiPerf (frames, hangs, CPU, memory), which the perf lab and bench start: the real module or its
-// noop. (On Android the Gradle plugin's `hopi { perf { } }` resolves it per variant; on iOS
-// hopi-start's Hopi.start registers it.)
-val perfModule = if (hopiEnabled) project(":hopi-perf") else project(":hopi-perf-noop")
-
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
 abstract class GenerateSampleBuildInfo : DefaultTask() {
     @get:Input
@@ -76,13 +71,12 @@ kotlin {
             baseName = "Shared"
             isStatic = true
             // Swift calls HopiRules.shared in the rules scenarios (CaptureVerification.swift) with no
-            // guard, so every framework exports hopi-api, which holds it: with no runtime (built
-            // without the flag) each call returns -1, false or an empty list. HopiUrlSession and
-            // HopiPerf, which Swift no longer calls, stay exported until the runtime-split plan's
-            // stages 9 and 8 replace them.
+            // guard, so every framework exports hopi-api, which holds it and HopiPerf: with no
+            // runtime (built without the flag) each call returns -1, false or an empty list, or does
+            // nothing. HopiUrlSession, which Swift no longer calls, stays exported until the
+            // runtime-split plan's stage 9 replaces it.
             export(project(":hopi-api"))
             export(urlSessionModule)
-            export(perfModule)
             // Hopi.shared.start { … } from Swift (iOSApp.swift, inside `#if HOPI`): with the flag only,
             // and no noop, so a framework built without it (Xcode's Release) has no Hopi.
             if (hopiEnabled) export(project(":hopi-start"))
@@ -94,12 +88,13 @@ kotlin {
             kotlin.srcDir(generateSampleBuildInfo.flatMap { it.outputDirectory })
             dependencies {
                 implementation(if (hopiEnabled) project(":hopi-ktor") else project(":hopi-ktor-noop"))
-                // HopiRules (mock, fail, delay, edit), which the rules scenarios call, in every build:
-                // hopi-api has no noop, a debug build's start registers the runtime behind it. api: the
-                // Android app's rules scenarios name HopiRules too, and the iOS framework exports it.
+                // HopiRules (mock, fail, delay, edit), which the rules scenarios call, and HopiPerf,
+                // which the perf lab and bench start, in every build: hopi-api has no noop, a debug
+                // build's start registers the runtimes behind them (on Android the plugin adds
+                // hopi-perf with `perf { enabled }`; on iOS hopi-start names perf's tool, so
+                // Kotlin/Native keeps hopi-perf). api: the Android app's rules scenarios name
+                // HopiRules too, and the iOS framework exports it.
                 api(project(":hopi-api"))
-                // api: the iOS framework exports it (until the runtime-split plan's stage 8).
-                api(perfModule)
                 implementation(libs.compose.runtime)
                 implementation(libs.compose.foundation)
                 implementation(libs.compose.ui)
@@ -135,10 +130,10 @@ kotlin {
  * symbol (`xcrun nm`, an argument array), and neither the capture and rule queues' labels nor the
  * private selector names in its bytes. Nor any of the performance monitors: no `_hopi_perf_`
  * symbol (the C library), no `kfun:dev.koga.hopi.perf.internal` or `kfun:dev.koga.hopi.core.perf`
- * symbol (the noop's own `HopiPerf` lives in `dev.koga.hopi.perf` and is expected), no
- * `HopiPerfCadence` class and no `hopi-perf-hang` thread name. With the flag it requires all of
- * them instead (the positive control), so the check is known to see what it looks for. Run it
- * both ways.
+ * symbol (`hopi-api`'s `HopiPerf`, `HopiMonitor` and `HopiPerfConfig` live in `dev.koga.hopi.perf`
+ * and are expected), no `HopiPerfCadence` class and no `hopi-perf-hang` thread name. With the flag
+ * it requires all of them instead (the positive control), so the check is known to see what it
+ * looks for. Run it both ways.
  */
 abstract class VerifyIosCaptureSelection : DefaultTask() {
     @get:InputFile

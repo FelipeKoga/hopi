@@ -64,18 +64,20 @@ hopi {
     // `-Psample.maxTotalBytes`). The defaults are the plugin's, 256 KiB and 16 MiB.
     maxBodyBytes.set(providers.gradleProperty("sample.maxBodyBytes").map { it.toLong() }.orElse(256L * 1024))
     maxTotalBytes.set(providers.gradleProperty("sample.maxTotalBytes").map { it.toLong() }.orElse(16L * 1024 * 1024))
-    // The performance monitors (docs/design/perf-monitors.md): registered for `hopi perf start`, none
-    // started, so the app pays nothing until an agent or a developer starts one.
+    // The performance monitors (docs/design/perf-monitors.md): registered for `hopi perf start` and
+    // for the perf lab's and bench's HopiPerf calls, none started, so the app pays nothing until an
+    // agent or a developer starts one. Without it HopiPerf would do nothing in any variant.
     perf { enabled.set(true) }
 }
 
 dependencies {
-    // Hopi's Ktor plugin and HopiPerf come with the shared module, which names the real modules or
-    // the noop twins by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs
-    // noop"). The dev.koga.hopi plugin then resolves them per variant: real in debug, noop in
-    // release, whatever the property said, so the two are never both packaged. It also adds the
-    // capture runtime (hopi-android, or hopi-android-noop in release) and core, whose start
-    // registers the runtime behind HopiRules: hopi-api, which the shared module names in every
+    // Hopi's Ktor plugin comes with the shared module, which names the real module or the noop twin
+    // by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs noop"). The
+    // dev.koga.hopi plugin then resolves it per variant: real in debug, noop in release, whatever
+    // the property said, so the two are never both packaged. It also adds the capture runtime
+    // (hopi-android, or hopi-android-noop in release), core, whose start registers the runtime
+    // behind HopiRules, and, for `perf { enabled }`, hopi-perf, whose tool registers the runtime
+    // behind HopiPerf, the last two in debug only: hopi-api, which the shared module names in every
     // build, has no twin.
     implementation(project(":sample:shared"))
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
@@ -89,8 +91,9 @@ dependencies {
  * It reads the APK's dex files (classes, referenced types and methods, and each class's invoke
  * instructions, with the plugin's own `DexReader`, no SDK tool) and the merged manifest:
  *
- * - the release runtime classpath holds exactly the noop twins and `hopi-api` (HopiRules, no
- *   twin), and the APK's Hopi classes are exactly the classes their jars hold;
+ * - the release runtime classpath holds exactly the noop twins and `hopi-api` (`HopiRules` and
+ *   `HopiPerf`, no twin; no `hopi-perf`), and the APK's Hopi classes are exactly the classes their
+ *   jars hold;
  * - no type of `dev.koga.hopi.core` or `dev.koga.hopi.android.internal` is defined or even
  *   referenced (an instrumented call site would reference a hook type), and no class calls a hook;
  * - the negative control: OkHttp's `RealCall` still calls `OkHttpClient.interceptors()` and the fake
@@ -130,7 +133,7 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val problems = mutableListOf<String>()
 
         val projects = hopiProjects.get()
-        val expectedProjects = setOf(":hopi-api", ":hopi-ktor-noop", ":hopi-android-noop", ":hopi-perf-noop")
+        val expectedProjects = setOf(":hopi-api", ":hopi-ktor-noop", ":hopi-android-noop")
         if (projects != expectedProjects) {
             problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
         }
