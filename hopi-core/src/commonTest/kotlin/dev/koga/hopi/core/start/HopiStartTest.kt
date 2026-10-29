@@ -1,6 +1,9 @@
 package dev.koga.hopi.core.start
 
+import dev.koga.hopi.api.HopiRuntimes
+import dev.koga.hopi.core.rules.ApiRules
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.rules.HopiRules
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -14,7 +17,8 @@ import kotlin.test.assertTrue
 /**
  * The start sequence with fake tools and its notice lines read from a list. No test turns
  * `agentBridge` on: that would create the process's default store, which [HopiStore]'s own test
- * creates (the device check covers the bridge at start).
+ * creates (the device check covers the bridge at start). Each test starts with no rules runtime
+ * registered and none dropped, and adds no rule once one is.
  */
 class HopiStartTest {
     private val lines = ArrayList<String>()
@@ -39,11 +43,13 @@ class HopiStartTest {
     @BeforeTest
     fun setUp() {
         HopiStart.resetForTests()
+        HopiRuntimes.resetForTests()
     }
 
     @AfterTest
     fun tearDown() {
         HopiStart.resetForTests()
+        HopiRuntimes.resetForTests()
     }
 
     private fun start(config: StartConfig, vararg tools: HopiTool, platform: Any? = null): List<ToolStart>? =
@@ -132,6 +138,49 @@ class HopiStartTest {
         assertEquals(listOf("next"), started.map { it.name })
         assertEquals(1, next.contexts.size)
         assertEquals(listOf(notice("broken not started: IllegalStateException: boom")), lines)
+    }
+
+    @Test
+    fun theRulesRuntimeRegistersEvenWithInvalidCapsButNotWhenDisabled() {
+        assertNull(start(StartConfig(enabled = false)))
+        assertNull(HopiRuntimes.rules, "a disabled start registers nothing")
+        assertNull(start(StartConfig(maxEntries = 0, summaryLog = false)))
+        assertSame(ApiRules, HopiRuntimes.rules, "invalid caps still register, so HopiRules works")
+        assertNotNull(start(StartConfig(summaryLog = false)))
+        assertSame(ApiRules, HopiRuntimes.rules)
+        assertEquals(listOf(notice("not started, invalid configuration: maxEntries must be positive")), lines)
+    }
+
+    @Test
+    fun theRegistrationWritesOneNoticeWithTheDroppedRuleWhateverSummaryLogSays() {
+        assertEquals(-1, HopiRules.mock("GET */a?token=secret"))
+        // A disabled start neither registers nor writes: the count waits for the start.
+        assertNull(start(StartConfig(enabled = false)))
+        assertEquals(emptyList(), lines)
+        assertNotNull(start(StartConfig(summaryLog = false)))
+        val expected = notice("HopiRules: 1 rule added before Hopi started was dropped (its call returned -1)")
+        assertEquals(listOf(expected), lines, "the count, never the match")
+        // Later calls register nothing, so they never write it again.
+        assertNull(start(StartConfig(summaryLog = false)))
+        assertNull(start(StartConfig(maxEntries = 7)))
+        assertEquals(listOf(expected, notice("already started; this call's configuration is ignored")), lines)
+    }
+
+    @Test
+    fun theNoticeCountsEveryDroppedRule() {
+        HopiRules.mock("*/a")
+        HopiRules.edit("*/b") { request { path = "/c" } }
+        // Not counted: only the four adds are.
+        HopiRules.clear()
+        assertNull(start(StartConfig(maxEntries = 0, summaryLog = false)))
+        assertEquals(
+            listOf(
+                notice("HopiRules: 2 rules added before Hopi started were dropped (each call returned -1)"),
+                notice("not started, invalid configuration: maxEntries must be positive"),
+            ),
+            lines,
+            "the registration comes before the caps check",
+        )
     }
 
     @Test

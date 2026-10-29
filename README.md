@@ -27,7 +27,8 @@ More tools are planned (accessibility audit, analytics debugger, state tracker);
 
 It is built to cost nothing when nobody is looking: no timers, no polling, no request of its own,
 a rule check of one volatile read per request while no rule exists,
-and a `-noop` twin of every artifact, so release builds ship none of it. The design contract is
+and no runtime in a release build, which links only the `-noop` twins and, for `HopiRules`,
+`hopi-api`, an API that stores nothing without a runtime. The design contract is
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); what may come later is in
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -85,18 +86,17 @@ older ones are not tested):
 | `hopi-urlsession` | `HopiUrlSession.start()`, which starts URLSession capture alone; `hopi-start` does not need it (it stays until stage 9 of the runtime-split plan) |
 | `hopi-urlsession-noop` | Same public API as `hopi-urlsession`, does nothing |
 | `hopi-start`     | `Hopi.start { }`, the iOS start: URLSession capture and the performance monitors from one call; Debug frameworks only, no noop twin |
-| `hopi-rules`     | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus); the CLI and the desktop viewer need no dependency for rules |
-| `hopi-rules-noop` | Same public API as `hopi-rules`, does nothing |
+| `hopi-api`       | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), the same artifact in every build: until a debug build's start registers the runtime behind it (on Android and iOS; nothing starts one on the JVM yet), every call returns `-1`, `false` or an empty list. No noop twin. The CLI and the desktop viewer need no dependency for rules |
 | `hopi-perf`      | `HopiPerf`, the performance monitors (frames, hangs, CPU, memory), each off until started |
 | `hopi-perf-noop` | Same public API as `hopi-perf`, does nothing |
 | `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-android` to debug builds and `hopi-android-noop` to release builds |
 
-`hopi-core` (shared by the real modules), `hopi-api` (Hopi's opt-in annotation and runtime
-registry, which `hopi-core` brings), `hopi-android` and `hopi-android-noop` (added by the
-plugin) and `hopi-instrument` (the plugin's rewriter) are published too; you never name them. Each
-KMP artifact has its Android, JVM, `iosArm64` and `iosSimulatorArm64` publications with sources
-and Gradle module metadata (`hopi-start` has the two iOS ones only), so
-`dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right one per target.
+`hopi-core` (shared by the real modules, and the runtime behind `HopiRules`), `hopi-android` and
+`hopi-android-noop` (added by the plugin) and `hopi-instrument` (the plugin's rewriter) are
+published too; you never name them. Each KMP artifact has its Android, JVM, `iosArm64` and
+`iosSimulatorArm64` publications with sources and Gradle module metadata (`hopi-start` has the two
+iOS ones only), so `dev.koga.hopi:hopi-ktor:0.1.0` in `commonMain` resolves the right one per
+target.
 
 Pick the real artifacts or the noop twins with a Gradle property in the shared module, because a
 KMP module has no build types and iOS frameworks link the same klibs for debug and release:
@@ -110,8 +110,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(if (hopiEnabled) "dev.koga.hopi:hopi-ktor:$v" else "dev.koga.hopi:hopi-ktor-noop:$v")
-            // only to call HopiRules from code
-            implementation(if (hopiEnabled) "dev.koga.hopi:hopi-rules:$v" else "dev.koga.hopi:hopi-rules-noop:$v")
+            // only to call HopiRules from code: one artifact for every build, no twin
+            implementation("dev.koga.hopi:hopi-api:$v")
         }
     }
 }
@@ -119,14 +119,17 @@ kotlin {
 
 Debug runs pass `-Phopi.enabled=true` (the Xcode build phase for the Debug configuration, as in
 `sample/iosApp`). Anything built without it ships the noops, which contain no Hopi logic and no
-`hopi-core`. On Android, apply the `dev.koga.hopi` plugin (below) to the application module instead:
-it resolves the real modules in debug builds and the noops in release builds, whatever the
-property says. Without the plugin, an Android-only app can select by build type
-(`debugImplementation` real, `releaseImplementation` noop); an app module on top of a KMP shared
-module must not, since the shared module already brings one of the two. Such an app's debug build
-still merges `hopi-core`'s start provider, which finds no generated configuration and at each
-launch writes one notice line, `not started: no generated configuration; …`; the Ktor plugin
-records as before.
+`hopi-core`, and `hopi-api`, an API with no runtime behind it. Swift calling `HopiRules` needs
+`hopi-api` as `api` and exported from the framework (`export("dev.koga.hopi:hopi-api:$v")`) in
+every configuration, since those calls are not inside `#if HOPI`. On Android, apply the
+`dev.koga.hopi` plugin (below) to the application module instead: it resolves the real modules in
+debug builds and the noops in release builds, whatever the property says. Without the plugin, an
+Android-only app can select by build type (`debugImplementation` real, `releaseImplementation`
+noop); an app module on top of a KMP shared module must not, since the shared module already
+brings one of the two. Such an app's debug build still merges `hopi-core`'s start provider, which
+finds no generated configuration and at each launch writes one notice line, `not started: no
+generated configuration; …`; the Ktor plugin records as before, and `HopiRules` does nothing,
+since nothing started to register its runtime.
 
 Install the plugin on each `HttpClient` you want to see, when the app starts:
 
@@ -170,8 +173,10 @@ recorded once, by the capture (`"source":"okhttp"`), not also by the plugin. It 
 changes, and bodies are copied as your code reads them, up to `maxBodyBytes`, never read ahead.
 
 Release (non-debuggable) variants are not instrumented at all and get `hopi-android-noop`; with the
-plugin, the Ktor plugin, `hopi-rules` and `hopi-perf` are also resolved per variant (real in debug,
-noop in release), so an Android app needs no `-Phopi.enabled`. Optional settings:
+plugin, the Ktor plugin and `hopi-perf` are also resolved per variant (real in debug, noop in
+release), so an Android app needs no `-Phopi.enabled`. `hopi-api` (`HopiRules`) is the same in
+both; in debuggable variants the plugin holds it at its own version, that of the `hopi-core` it
+adds, whose rules runtime implements an internal interface of `hopi-api`. Optional settings:
 
 ```kotlin
 hopi {
@@ -260,7 +265,8 @@ sent as a stream or a file are recorded as skipped (they are single-use, Hopi ne
 downloads by their size. WebSocket and stream tasks, AVPlayer and WKWebView traffic are not
 recorded. `HopiUrlSession.shared.start { }` (`hopi-urlsession` or its noop, exported like the
 other twins) still starts URLSession capture alone, until stage 9 of the runtime-split plan
-merges it into the network runtime; `Hopi.shared.start` is the start to use.
+merges it into the network runtime; `Hopi.shared.start` is the start to use, and the only one
+that registers the runtime behind `HopiRules` (see [Rules](#rules-mock-fail-delay-edit)).
 
 There is no in-app screen: `HopiScreen`, `HopiLauncher` with its floating button, and the perf HUD
 were removed in stage 5 of the runtime-split plan (D7', `docs/design/api-runtime-split-plan.md`).
@@ -380,7 +386,8 @@ and on a selected request "Mock this response". The in-app rules list and its "M
 were removed with the in-app UI in stage 5 (D7'). Replay (Hopi re-sending a recorded request) is
 not part of the product; it is in the backlog with no priority ([`docs/ROADMAP.md`](docs/ROADMAP.md)).
 
-From code, for tests and debug menus (`hopi-rules`; its noop twin does nothing and returns `-1`):
+From code, for tests and debug menus (`hopi-api`; with no runtime registered, as in a release
+build, every call returns `-1`, `false` or an empty list):
 
 ```kotlin
 val id = HopiRules.mock("GET */users/*") {
@@ -395,7 +402,24 @@ HopiRules.edit("GET */v1/items") { request { setHeader("X-Env", "staging") }; re
 HopiRules.clear()                                                      // in a test's teardown
 ```
 
-Swift calls the same API as `HopiRules.shared` once the framework exports `hopi-rules`.
+Swift calls the same API as `HopiRules.shared` once the framework exports `hopi-api`.
+
+A debug build's start registers the runtime behind `HopiRules` before anything else, so a rule
+added before Hopi starts is dropped: its call returns `-1`, and the start writes one notice line
+with the number dropped, never a match (a match can carry a secret):
+`{"hopi":1,"notice":"HopiRules: 2 rules added before Hopi started were dropped (each call returned -1)"}`.
+On Android the start runs before `Application.onCreate`, so only code in the `Application`
+constructor, `attachBaseContext` or another content provider is that early. On iOS, call
+`Hopi.shared.start` first: a Debug binary also writes one line to the system log at the first
+rule added while no runtime is registered (`HopiRules: no Hopi runtime is registered, …`), which
+is also what an app that never calls the start sees. Without a runtime, in release builds, the
+block still runs and the builder keeps what it is given (a body is copied), so a call costs that
+much and nothing more. On the JVM nothing starts Hopi until stage 10 of the runtime-split plan
+adds its JVM entry, and a plain Android host unit test runs no provider: there (a JVM app
+recording with the Ktor plugin, a JVM test, an Android host unit test) nothing registers the
+runtime, so `HopiRules` returns `-1` and nothing reports it, where `hopi-rules` worked with no
+start before stage 7. Rules added over the bridge (the CLI, the desktop viewer) still apply to
+the requests a JVM app's Ktor plugin records.
 
 | | Ktor plugin | OkHttp | `HttpURLConnection` | URLSession |
 | --- | --- | --- | --- | --- |
@@ -569,7 +593,7 @@ python3 benchmark/perf/verify.py build/evidence/perf --platform ios
 # the Swift async/await capture tests (starts the dev server itself)
 sample/iosApp/scripts/capture-swift-test.sh 'platform=iOS Simulator,name=iPhone 17'
 
-# The release APK must ship only the noop twins; the iOS release framework no capture code
+# The release APK must ship only the noop twins and hopi-api; the iOS release framework no capture code
 ./gradlew :sample:androidApp:verifyReleaseUsesNoop
 ./gradlew :sample:shared:verifyIosReleaseExcludesCapture
 ```

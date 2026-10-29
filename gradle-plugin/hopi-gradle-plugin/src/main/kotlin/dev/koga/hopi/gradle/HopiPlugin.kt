@@ -19,8 +19,12 @@ import org.gradle.api.artifacts.Configuration
  *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
  *   `hopi { }` block generated into it as the start configuration and its tool list; other
  *   variants are not instrumented at all;
- * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-rules`/`hopi-perf` to the real
+ * - with `selectTwins` (the default), each variant resolves `hopi-ktor`/`hopi-perf` to the real
  *   module when debuggable and to the noop twin otherwise, whichever the app's modules name;
+ * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules`, which the app's modules
+ *   name in every build type) at this plugin's version, the version of the `hopi-core` it adds:
+ *   core's rules runtime implements an internal interface of `hopi-api`, and a mismatch would fail
+ *   at run time;
  * - with `perf { enabled = true }`, each debuggable build type gets `hopi-perf` (the others `hopi-perf-noop`)
  *   and the tool list names its tool, which starts the `autoStart` monitors (docs/design/perf-monitors.md).
  *
@@ -58,6 +62,7 @@ public class HopiPlugin : Plugin<Project> {
                 // HopiTool: javac needs core on the variant's compile classpath, and no runtime
                 // exposes it there.
                 if (real) project.dependencies.add("${buildType.name}Implementation", runtime(project, CORE))
+                if (real) alignApi(project, buildType.name)
                 if (extension.perf.enabled.get()) {
                     project.dependencies.add("${buildType.name}Implementation", runtime(project, if (real) PERF else PERF_NOOP))
                 }
@@ -137,6 +142,20 @@ public class HopiPlugin : Plugin<Project> {
         }
     }
 
+    /**
+     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core at that version: the app
+     * names `hopi-api` itself (it holds `HopiRules`), at whatever version it chose, and core's rules
+     * runtime implements an internal interface of it. A constraint, so it adds nothing to a build
+     * that never names `hopi-api`; none for this repository's project, which is core's own version.
+     */
+    private fun alignApi(project: Project, buildType: String) {
+        if (project.rootProject.findProject(":$API") != null) return
+        project.dependencies.constraints.add("${buildType}Implementation", "$GROUP:$API") { constraint ->
+            constraint.version { it.strictly(HOPI_VERSION) }
+            constraint.because("dev.koga.hopi: hopi-core $HOPI_VERSION implements hopi-api $HOPI_VERSION's internal interfaces")
+        }
+    }
+
     /** This repository's project when it exists (Gradle substitutes only included builds' projects), else the coordinates. */
     private fun runtime(project: Project, name: String): Any =
         project.rootProject.findProject(":$name")?.let { project.dependencies.project(mapOf("path" to it.path)) } ?: "$GROUP:$name:$HOPI_VERSION"
@@ -167,10 +186,11 @@ public class HopiPlugin : Plugin<Project> {
         const val KTOR_ANDROID_ENGINE = "io/ktor/client/engine/android/AndroidClientEngine"
         const val GROUP = "dev.koga.hopi"
         const val CORE = "hopi-core"
+        const val API = "hopi-api"
         const val RUNTIME = "hopi-android"
         const val RUNTIME_NOOP = "hopi-android-noop"
         const val PERF = "hopi-perf"
         const val PERF_NOOP = "hopi-perf-noop"
-        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", "hopi-rules" to "hopi-rules-noop", PERF to PERF_NOOP)
+        val TWINS = listOf("hopi-ktor" to "hopi-ktor-noop", PERF to PERF_NOOP)
     }
 }

@@ -26,8 +26,11 @@ Goals:
 - **Bounded cost with rules.** At most 64 rules, compiled at `add` time, matched without
   backtracking blow-up. A request that matches nothing costs a stated, measured number.
 - **Zero production impact.** The engine lives in `hopi-core`, which a release build does not
-  contain. The consumer API (`HopiRules`) has a noop twin with the same API that does nothing.
-  Release builds are unchanged, and the existing release checks prove it.
+  contain. The consumer API (`HopiRules`) had a noop twin with the same API that does nothing;
+  since the runtime-split plan's stage 7 it lives in `hopi-api`, the same in every build, which
+  stores nothing until a debug build registers core's rules runtime. Release builds hold no rule
+  engine or runtime, and the release checks prove it; `HopiRules`' builders still run the block
+  and copy what they are given (see "In-process API").
 - **Offline, in memory, session only.** Rules and their bodies live in the app process and die
   with it. Nothing is written to disk, nothing is sent anywhere, no new transport is opened.
 - **Never weaken the app's security.** No action bypasses certificate pinning, custom TLS, a
@@ -790,15 +793,15 @@ mock from a record inside the app. Durations take `ms` and `s`. `add` prints the
 `unsupported` entry. `rules ls` prints `ID ON PRI HITS MATCH ACTION`. New exit code 4: unsupported
 (rules off or absent in the app). Validation errors from the app are exit 1, like `BAD_REQUEST` today.
 
-### In-process API (`hopi-rules`, `dev.koga.hopi.rules`; Swift: `HopiRules.shared`)
+### In-process API (`hopi-api`, `dev.koga.hopi.rules`; Swift: `HopiRules.shared`)
 
 ```kotlin
 public object HopiRules {
-    public fun mock(match: String, block: HopiMock.() -> Unit = {}): Long     // rule id; -1 in the noop
+    public fun mock(match: String, block: HopiMock.() -> Unit = {}): Long     // rule id; -1 with no runtime
     public fun fail(match: String, failure: HopiFailure, block: HopiRuleOptions.() -> Unit = {}): Long
     public fun delay(match: String, block: HopiDelay.() -> Unit): Long
     public fun edit(match: String, block: HopiEdit.() -> Unit): Long
-    public fun list(): List<HopiRuleInfo>          // empty in the noop
+    public fun list(): List<HopiRuleInfo>          // empty with no runtime
     public fun setEnabled(id: Long, enabled: Boolean): Boolean
     public fun remove(id: Long): Boolean
     public fun clear()
@@ -815,12 +818,32 @@ val id = HopiRules.mock("GET */users/*") {
 ```
 
 `HopiMock`, `HopiDelay`, `HopiEdit`, `HopiRequestEdit` and `HopiRuleOptions` (label, priority,
-times, sources, query and header predicates) are plain builder classes; `HopiFailure` is an enum.
-Validation errors throw `IllegalArgumentException` with the bridge's message (a Kotlin API); limits
-throw `IllegalStateException`. No `inline` function and no `const` (`:checkNoopParity` forbids
-both). Calls are thread-safe and take effect before they return. The module depends on `hopi-core`
-only; it works with any recorder (or none: a rule waits for one). Tests call `HopiRules.clear()` in
-their teardown; the engine is process-wide like `HopiStore.default`.
+times, sources, query and header predicates) are plain builder classes, which keep what they are
+given and validate nothing; `HopiFailure` is an enum. Validation errors throw
+`IllegalArgumentException` with the bridge's message (a Kotlin API); limits throw
+`IllegalStateException`. Calls are thread-safe and take effect before they return. Tests call
+`HopiRules.clear()` in their teardown; the engine is process-wide like `HopiStore.default`.
+
+Since the runtime-split plan's stage 7 (2026-10-28) the API is in `hopi-api`, which depends on
+nothing and is the same artifact in every build; before, it was `hopi-rules`, over `hopi-core`,
+with a noop twin, `hopi-rules-noop`. Behind it is core's rules runtime (`ApiRules`), which the
+start sequence registers in `hopi-api`'s registry before anything else (docs/ARCHITECTURE.md,
+"Start sequence"): `HopiRules` runs the block, reads the registry once and hands the builder to the
+runtime, which validates it and adds it to `RuleEngine`. Once registered it works with any recorder
+(or none: a rule waits for one), whatever a recorder's `rules` says. With no runtime registered, in
+a release build or in a debug build before its start, the block still runs and the builder keeps
+what it is given (a body is copied), so a call is not free there, and every call returns `-1`,
+`false` or an empty list. Nothing registers it on the JVM before the runtime-split plan's stage 10
+(its JVM entry), nor in an Android host unit test, which runs no provider: there `HopiRules`
+returns `-1` and nothing reports it, where `hopi-rules` worked with no start; rules added over the
+bridge still reach the Ktor plugin, since the bridge adds to `RuleEngine` itself. A rule added
+before the start is dropped, not kept for later: the start
+writes one notice line with the number dropped and never a match (a match can carry a secret),
+`HopiRules: 2 rules added before Hopi started were dropped (each call returned -1)`. On iOS, where
+the start is a call the app makes, a Debug binary also writes one `NSLog` line at the first rule
+added with no runtime (`HopiRules: no Hopi runtime is registered, …`). `mock { from(id) }` reads
+the store only when one exists and never creates it, so it cannot fix the store's caps before the
+start presets them; with no store it fails like an unknown id.
 
 ### Desktop viewer (`hopi-desktop`)
 
@@ -873,13 +896,22 @@ rebuild first fails the agent use case; the switch exists for the app whose code
 
 | Module | Content |
 | --- | --- |
-| `hopi-core` | `RuleEngine`, specs, compiled rules, matcher, the tree parser, bridge commands, record fields (all `@HopiInternalApi`; core's ABI dump updated) |
-| `hopi-rules` (new) | `HopiRules` and its builders over `RuleEngine`; depends on core; targets android, iosArm64, iosSimulatorArm64, jvm |
-| `hopi-rules-noop` (new) | The same public API, no dependency at all; every call returns `-1`, `false` or an empty list and stores nothing |
+| `hopi-core` | `RuleEngine`, specs, compiled rules, matcher, the tree parser, bridge commands, record fields, and since the runtime-split plan's stage 7 the rules runtime behind `HopiRules` (`ApiRules`), registered first by the start sequence (all `@HopiInternalApi`) |
+| `hopi-api` (since stage 7) | `HopiRules` and its builders, in every build: no dependency at all; with no runtime registered every call returns `-1`, `false` or an empty list and stores nothing; targets android, iosArm64, iosSimulatorArm64, jvm |
 | `hopi-ktor`, `hopi-android`, `hopi-urlsession` | The per-source application above; the ObjC protocol, factory hooks and C matcher live in core's ObjC library next to the capture code |
 | `hopi-connect`, `hopi-cli`, `hopi-desktop`, `hopi-ui` | Surfaces (`hopi-ui`: the desktop viewer's screens since the runtime-split plan's stage 5) |
 
-Knock-ons, all part of the change:
+Since the runtime-split plan's stage 7 (2026-10-28) `hopi-rules` and `hopi-rules-noop` are gone:
+the Gradle plugin swaps no rules pair (it holds `hopi-api` at its own version in debuggable
+variants instead, and its functional test finds `hopi-api` in both APKs), `:checkNoopParity` has
+no rules pair, and `hopi-api`'s ABI dump is the consumer API alone (its `@HopiInternalApi`
+declarations excluded), the declarations `hopi-rules` had. KMP shared modules take `hopi-api` in
+every build and export it from the iOS framework. `verifyReleaseUsesNoop` and
+`verifyHopiSelection` expect `:hopi-api` on the release classpath where they expected
+`:hopi-rules-noop` (three noops and `hopi-api`), `verifyDebugCapture` `:hopi-api` where it
+expected `:hopi-rules`, and `verifyIosReleaseExcludesCapture` is unchanged.
+
+The knock-ons as built on 2026-10-25, before stage 7 (history):
 
 - `:checkNoopParity` gains the `hopi-rules` pair; both get `abiValidation` dumps (`updateKotlinAbi`
   on both, deliberately), and the parity task's `inline`/`const` ban applies.
@@ -993,10 +1025,16 @@ Base check (every item runs in it unless marked):
   twice; a delegate that rejects every server-trust challenge still rejects the edited request
   (loopback TLS in the test server); the factory hooks are absent until the first edit or delay
   rule; the C matcher against the shared vectors.
-- **Parity and release**: `:checkNoopParity` with the new pair; the noop's JVM test that no
-  `hopi-core` is on its classpath; `verifyReleaseUsesNoop`, `verifyHopiSelection`,
+- **API and release** (since the runtime-split plan's stage 7; before it, `:checkNoopParity` with
+  the rules pair, the noop's JVM test and the plugin's third pair): `:hopi-api:jvmTest` (every
+  call inert with no runtime, the builders keeping every setting, delegation to a fake runtime,
+  only the adds counted, one registration, no `hopi-core` on the classpath),
+  `:hopi-api:iosSimulatorArm64Test` (a Debug binary's one line for a dropped rule),
+  `:hopi-api:checkKotlinAbi` (the consumer API's dump), core's `ApiRulesTest` (`HopiRules` over
+  the engine, `from(id)` with no store) and `HopiStartTest` (the registration first, whatever the
+  caps; the notice with the count); `verifyReleaseUsesNoop`, `verifyHopiSelection`,
   `verifyDebugCapture` and `verifyIosReleaseExcludesCapture` as extended; the Gradle plugin's
-  `functionalTest` for the third pair.
+  `functionalTest` (`hopi-api` in both APKs).
 - **CLI and connect** (`:hopi-cli:test`, `:hopi-connect:test`): argument parsing of every new
   command, blob upload windows against the scripted bridge, the warnings, exit code 4, `--wait`,
   no write line sent before `hello` was verified (a scripted Android squatter whose `hello` lacks the

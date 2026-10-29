@@ -211,9 +211,11 @@ so the app pays no extra cost.
   Replay was built too and then removed (see "Replay (no priority)").
 - Zero cost with no rule: one volatile read and a reference comparison per request (one
   `canInitWithTask:` answer per task on a URLSession session created after `start()`). Rules live
-  in memory for the session only, never persisted, and exist only in the real artifacts
-  (`hopi-core`); `hopi-rules-noop` has the same API and does nothing; the release checks cover it.
-  `rules = false` on every recorder (Ktor, `HopiUrlSession`, `hopi { }`).
+  in memory for the session only, never persisted, and exist only in the runtime (`hopi-core`):
+  since the runtime-split plan's stage 7 `HopiRules` is in `hopi-api`, in every build, and does
+  nothing until a debug build's start registers core's rules runtime (a rule added before it is
+  dropped and counted in one notice line); the release checks cover it.
+  `rules = false` on every recorder (Ktor, `Hopi.start { }` and `HopiUrlSession` on iOS, `hopi { }`).
 - Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
   bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
   `rules ls|rm|clear|enable|disable|reset`, exit code 4); `HopiRules` (Kotlin, Swift

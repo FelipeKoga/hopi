@@ -93,8 +93,9 @@ private suspend fun ktorSend(client: HttpClient, call: RulesCall, passThrough: B
  * another's requests or a rule the host added. One `{"rules":…}` line per scenario under
  * `HopiSample`, with `ok`, what the app saw, and the time; the dev server's log is the other half
  * of the oracle (a mocked or failed request never reaches it, an edited one arrives edited).
- * The rules it adds are removed again, whatever happens. With the noop twins every rule id is
- * `-1` and nothing applies, so every line says `"ok":false`: the release control.
+ * The rules it adds are removed again, whatever happens. With no rules runtime registered (a
+ * release build, or one built without the flag) every rule id is `-1` and nothing applies, so
+ * every line says `"ok":false`: the control.
  */
 public suspend fun runRulesVerify(targets: List<RulesTarget>): String {
     var failed = 0

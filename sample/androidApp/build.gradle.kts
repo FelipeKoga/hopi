@@ -70,11 +70,13 @@ hopi {
 }
 
 dependencies {
-    // Hopi's Ktor plugin, HopiRules and HopiPerf come with the shared module, which names the real
-    // modules or the noop twins by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs
+    // Hopi's Ktor plugin and HopiPerf come with the shared module, which names the real modules or
+    // the noop twins by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs
     // noop"). The dev.koga.hopi plugin then resolves them per variant: real in debug, noop in
     // release, whatever the property said, so the two are never both packaged. It also adds the
-    // capture runtime (hopi-android, or hopi-android-noop in release).
+    // capture runtime (hopi-android, or hopi-android-noop in release) and core, whose start
+    // registers the runtime behind HopiRules: hopi-api, which the shared module names in every
+    // build, has no twin.
     implementation(project(":sample:shared"))
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
     implementation(project(":sample:fakesdk"))
@@ -87,8 +89,8 @@ dependencies {
  * It reads the APK's dex files (classes, referenced types and methods, and each class's invoke
  * instructions, with the plugin's own `DexReader`, no SDK tool) and the merged manifest:
  *
- * - the release runtime classpath holds exactly the noop twins, and the APK's Hopi classes are
- *   exactly the classes their jars hold;
+ * - the release runtime classpath holds exactly the noop twins and `hopi-api` (HopiRules, no
+ *   twin), and the APK's Hopi classes are exactly the classes their jars hold;
  * - no type of `dev.koga.hopi.core` or `dev.koga.hopi.android.internal` is defined or even
  *   referenced (an instrumented call site would reference a hook type), and no class calls a hook;
  * - the negative control: OkHttp's `RealCall` still calls `OkHttpClient.interceptors()` and the fake
@@ -128,7 +130,7 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val problems = mutableListOf<String>()
 
         val projects = hopiProjects.get()
-        val expectedProjects = setOf(":hopi-ktor-noop", ":hopi-rules-noop", ":hopi-android-noop", ":hopi-perf-noop")
+        val expectedProjects = setOf(":hopi-api", ":hopi-ktor-noop", ":hopi-android-noop", ":hopi-perf-noop")
         if (projects != expectedProjects) {
             problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
         }
@@ -161,7 +163,7 @@ abstract class VerifyHopiSelection : DefaultTask() {
 
         val summary = buildString {
             appendLine("apk: ${apk.name}")
-            appendLine("expected: the noop twins, no capture code, no instrumentation")
+            appendLine("expected: the noop twins and hopi-api, no capture code, no instrumentation")
             appendLine("hopi projects on the release classpath: ${projects.sorted().joinToString()}")
             appendLine("hopi classes in the apk: ${apkClasses.size}; referenced core/capture types: ${forbidden.size}; classes calling a hook: ${hookCalls.size}")
             appendLine("negative control: RealCall calls OkHttpClient.interceptors(): ${realCallCalls.filter { it in HookDescriptors.REAL_CALL_CLASSES }}; fake SDK classes calling URL.openConnection(): $sdkCalls")
@@ -231,7 +233,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val dex = DexReader.ofApk(apk)
         val problems = mutableListOf<String>()
         val projects = hopiProjects.get()
-        val required = setOf(":hopi-android", ":hopi-core", ":hopi-ktor", ":hopi-rules", ":hopi-perf")
+        val required = setOf(":hopi-android", ":hopi-api", ":hopi-core", ":hopi-ktor", ":hopi-perf")
         if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
 
         val hookCallers = dex.callersOf(OKHTTP_HOOK)
@@ -302,10 +304,10 @@ fun VerifyHopiSelection.configureSelectionCheck(reportName: String) {
     report.set(layout.buildDirectory.file("reports/hopi/$reportName.txt"))
 }
 
-// The default every consumer relies on: the release APK ships the noop twins, no hopi-core and no
-// instrumentation.
+// The default every consumer relies on: the release APK ships the noop twins and hopi-api, no
+// hopi-core and no instrumentation.
 val verifyReleaseUsesNoop = tasks.register<VerifyHopiSelection>("verifyReleaseUsesNoop") {
-    description = "Checks that the release APK ships only the noop twins and holds no capture code and no instrumentation."
+    description = "Checks that the release APK ships only the noop twins and hopi-api and holds no capture code and no instrumentation."
     configureSelectionCheck(reportName = "release-uses-noop")
 }
 

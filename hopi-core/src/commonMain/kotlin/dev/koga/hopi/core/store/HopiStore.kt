@@ -770,12 +770,20 @@ public class HopiStore(
             get() = defaultStore.load() ?: configureDefault()
 
         /**
+         * The process-wide store when one exists, else null: never creates it. For a reader that
+         * must not fix the store's caps by being first (`HopiRules`' `from(id)`, which finds no
+         * record in a store that does not exist yet).
+         */
+        public val defaultOrNull: HopiStore?
+            get() = defaultStore.load()
+
+        /**
          * Sets the caps the process-wide store will be created with, without creating it (its
          * constructor starts the `hopi-store` thread), so the first reader (a recorder's
-         * installation, a rule's `from(id)`, the bridge) no longer fixes the caps. The first preset
-         * wins; a later one returns false and changes nothing, and a store that already exists keeps
-         * its caps. Valid caps only. The start sequence presets through [DefaultStoreCaps] itself,
-         * which keeps this class unloaded on Android's main thread.
+         * installation, the bridge) no longer fixes the caps. The first preset wins; a later one
+         * returns false and changes nothing, and a store that already exists keeps its caps. Valid
+         * caps only. The start sequence presets through [DefaultStoreCaps] itself, which keeps this
+         * class unloaded on Android's main thread.
          */
         public fun presetDefault(maxEntries: Int, maxTotalBytes: Long): Boolean =
             DefaultStoreCaps.preset(maxEntries, maxTotalBytes)

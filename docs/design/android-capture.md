@@ -745,7 +745,8 @@ plugin is applied to a library. A second fixture has no `hopi-*` project, so the
 coordinates a consumer of Maven Local gets: stand-in jars, published by a build of their own into a
 fixture repository, for the runtime, `hopi-perf` and two twin pairs, which a library names in both
 directions (`hopi-ktor-noop`, `hopi-rules`); the debug APK must hold every real stand-in and the
-release APK every noop. The TestKit directory is a dedicated one under the plugin's
+release APK every noop. (Since the runtime-split plan's stage 7 the library names `hopi-ktor-noop`
+and `hopi-perf` instead, and `hopi-api`, which has no twin and must be in both APKs.) The TestKit directory is a dedicated one under the plugin's
 `build/`, never the developer's Gradle user home. A `--stop` there would also stop the outer
 build's daemon, which has the same Gradle version and the same home. AGP is not downloaded: the
 nested build runs `--offline`, and its environment sets

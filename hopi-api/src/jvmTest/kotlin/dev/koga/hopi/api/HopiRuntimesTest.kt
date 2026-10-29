@@ -1,7 +1,10 @@
 package dev.koga.hopi.api
 
+import dev.koga.hopi.rules.FakeRulesRuntime
+import dev.koga.hopi.rules.HopiRules
 import java.io.File
 import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -11,6 +14,11 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class HopiRuntimesTest {
+    @BeforeTest
+    fun setUp() {
+        HopiRuntimes.resetForTests()
+    }
+
     @AfterTest
     fun reset() {
         HopiRuntimes.resetForTests()
@@ -30,11 +38,26 @@ class HopiRuntimesTest {
     }
 
     @Test
-    fun resetEmptiesTheSlot() {
+    fun theRulesSlotIsWrittenOnce() {
+        assertNull(HopiRuntimes.rules)
+        val first = FakeRulesRuntime()
+        assertTrue(HopiRuntimes.registerRules(first))
+        assertFalse(HopiRuntimes.registerRules(FakeRulesRuntime()), "a second registration is refused")
+        assertSame(first, HopiRuntimes.rules)
+    }
+
+    @Test
+    fun resetEmptiesTheSlotsAndTheDroppedCount() {
         HopiRuntimes.registerKtorHooks(Any())
+        HopiRules.mock("*/a")
+        HopiRuntimes.registerRules(FakeRulesRuntime())
+        assertEquals(1, HopiRuntimes.droppedRules)
         HopiRuntimes.resetForTests()
         assertNull(HopiRuntimes.ktorHooks)
+        assertNull(HopiRuntimes.rules)
+        assertEquals(0, HopiRuntimes.droppedRules)
         assertTrue(HopiRuntimes.registerKtorHooks(Any()))
+        assertTrue(HopiRuntimes.registerRules(FakeRulesRuntime()))
     }
 
     @Test

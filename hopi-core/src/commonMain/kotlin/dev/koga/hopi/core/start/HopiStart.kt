@@ -5,6 +5,7 @@ import dev.koga.hopi.core.capture.CaptureInstallation
 import dev.koga.hopi.core.concurrent.startBackgroundThread
 import dev.koga.hopi.core.log.emitPlatformLogLine
 import dev.koga.hopi.core.log.noticeLine
+import dev.koga.hopi.core.rules.ApiRules
 import dev.koga.hopi.core.store.DefaultStoreCaps
 import dev.koga.hopi.core.store.HopiStore
 import kotlin.concurrent.atomics.AtomicReference
@@ -37,10 +38,10 @@ public class ToolStart(public val name: String, public val note: String?, public
 
 /**
  * The one start sequence of a debug build (docs/ARCHITECTURE.md, "Start sequence"): the global
- * configuration and a list of tools in, each tool started in list order. On Android the provider
- * runs it with the plugin's generated tool list, on the main thread before `Application.onCreate`;
- * on iOS `hopi-start`'s `Hopi.start`, with the network tool and perf's; JVM tests call it
- * directly. Once per process: the first valid call wins.
+ * configuration and a list of tools in, the rules runtime registered first, then each tool started
+ * in list order. On Android the provider runs it with the plugin's generated tool list, on the main
+ * thread before `Application.onCreate`; on iOS `hopi-start`'s `Hopi.start`, with the network tool
+ * and perf's; JVM tests call it directly. Once per process: the first valid call wins.
  */
 @HopiInternalApi
 public object HopiStart {
@@ -52,14 +53,18 @@ public object HopiStart {
     /**
      * Starts [tools] with [config]; returns each started tool, or null when nothing started.
      *
-     * `enabled = false` does nothing and writes nothing. Invalid caps write one notice line whatever
-     * `summaryLog` says and start nothing, without using up the first call (iOS's rule: a Swift
-     * caller cannot catch). A later call starts nothing, and writes one notice line (with its
-     * `summaryLog`) when its configuration differs from the first one. The first valid call presets
-     * the default store's caps without creating the store, starts the installation on a background
-     * thread with `agentBridge`, then starts each tool in list order on this thread, timed. A tool
-     * that throws writes one notice line and the next one still starts: nothing throws to the
-     * caller. [platform] reaches every tool: the Android `Application`, null on the JVM and iOS.
+     * `enabled = false` does nothing and writes nothing. Any other call first registers core's rules
+     * runtime with `hopi-api`, whatever the caps and any tool's `rules` say, so `HopiRules` works
+     * from then on; it registers once per process, and the call that registers writes one notice
+     * line, whatever `summaryLog` says, when `HopiRules` dropped rules added before it (their number,
+     * no match). Invalid caps write one notice line whatever `summaryLog` says and start nothing,
+     * without using up the first call (iOS's rule: a Swift caller cannot catch). A later call starts
+     * nothing, and writes one notice line (with its `summaryLog`) when its configuration differs
+     * from the first one. The first valid call presets the default store's caps without creating
+     * the store, starts the installation on a background thread with `agentBridge`, then starts each
+     * tool in list order on this thread, timed. A tool that throws writes one notice line and the
+     * next one still starts: nothing throws to the caller. [platform] reaches every tool: the
+     * Android `Application`, null on the JVM and iOS.
      */
     public fun start(config: StartConfig, tools: List<HopiTool>, platform: Any? = null): List<ToolStart>? =
         start(config, tools, platform, null)
@@ -70,8 +75,13 @@ public object HopiStart {
      * function-reference classes would load there.
      */
     internal fun start(config: StartConfig, tools: List<HopiTool>, platform: Any?, emit: ((String) -> Unit)?): List<ToolStart>? {
-        // The runtime-split plan's stage 7 registers the rules runtime here, before anything else.
         if (!config.enabled) return null
+        // The rules runtime first: before the caps check, so HopiRules works whatever they are (as
+        // hopi-rules did, with no start at all), and whatever a tool's `rules` says (that switch
+        // only keeps the recorders from reading the rules). Once per process; it loads no class of
+        // the engine or the store, since ApiRules only forwards.
+        val dropped = ApiRules.register()
+        if (dropped > 0) write(emit, noticeLine(droppedRulesNotice(dropped)))
         val problem = CaptureInstallation.invalidCaps(config.maxEntries, config.maxTotalBytes, config.maxBodyBytes)
         if (problem != null) {
             write(emit, noticeLine("$NOT_STARTED_NOTICE$problem"))
@@ -127,6 +137,14 @@ public object HopiStart {
             write(emit, noticeLine("agent bridge not started: ${describe(e)}"))
         }
     }
+
+    /** The count only: a rule's match can carry a secret (a token in the query, a header value). */
+    private fun droppedRulesNotice(count: Int): String =
+        if (count == 1) {
+            "HopiRules: 1 rule added before Hopi started was dropped (its call returned -1)"
+        } else {
+            "HopiRules: $count rules added before Hopi started were dropped (each call returned -1)"
+        }
 
     /** One notice line to [emit], or to the platform log without one. */
     private fun write(emit: ((String) -> Unit)?, line: String) {

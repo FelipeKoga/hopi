@@ -17,7 +17,9 @@ kotlin {
         optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
     }
 
-    // The consumer API dump; Hopi's own declarations (the registry) stay out of it.
+    // The consumer API dump (HopiRules and its builders, the same as hopi-rules' before the
+    // runtime-split plan's stage 7); Hopi's own declarations stay out of it: the registry, the rules
+    // runtime's interface and the builders' members that show the runtime what was set.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
         filters {
