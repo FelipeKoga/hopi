@@ -24,8 +24,10 @@ import kotlinx.coroutines.withTimeout
  * instrumented app runs, and reads the body to its end. Arms: capture not started (the hooks pass
  * through), and capture with a 256 KiB, 8 MiB and 16 MiB cap, the store twice the cap. Per request:
  * wall time and the bytes every live thread allocated, as `KtorGiantBodyBenchmark` measures the
- * Ktor plugin. The bound to expect: capture allocates about 1x the cap more than no capture with a
- * `Content-Length`, about 2x chunked, whatever the body.
+ * Ktor plugin; with capture, the allocation also counts the store's pass that builds the request's
+ * record (the join of a chunked body's blocks among it), which the scenario waits for after taking
+ * the wall time. The bound to expect: capture allocates about 1x the cap more than no capture with
+ * a `Content-Length`, about 2x chunked, whatever the body.
  *
  * Opt-in: `./gradlew :hopi-network:androidHostGiantBodyBenchmark` (excluded from
  * `testAndroidHostTest`); the table lands in `hopi-network/build/giant-body/android-request.md`.
@@ -83,6 +85,7 @@ class AndroidGiantBodyBenchmark {
         report.note("Arms run interleaved in $ROUNDS rounds per cell, after 2 warm-up requests each; each arm has a loader of its own, so its own rewritten OkHttp and its own capture, started with the cap or not at all.")
         report.note("'Δ alloc / cap' divides the extra allocation by the bytes capture may keep (min(cap, body)): a constant means the cost is bounded by the cap, not by the body. Expected about 1x with a Content-Length, about 2x chunked.")
         report.note("Allocation is summed over all live threads (JDK 17 has no total counter); the loopback server's threads, alive for the whole run, count alike in every arm.")
+        report.note("With capture, each request's allocation includes the store's pass that builds its record (the join of a chunked body's blocks among it): the scenario waits for that pass (awaitApplied) after taking the wall time, so the store's thread counts in its own request's window, not in a later request's or another arm's.")
         report.save()
     }
 

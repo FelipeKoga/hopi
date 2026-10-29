@@ -17,21 +17,29 @@ import okhttp3.Request
  * OkHttp client for the scenario's life, or `HttpURLConnection`), reads each body to its end, and
  * returns per request the wall time and the bytes every live thread allocated (`ThreadMXBean`).
  * Given a `store`, the first call starts capture with it and the `maxBodyBytes` cap; without one,
- * capture never starts in this loader, so the hooks only pass through.
+ * capture never starts in this loader, so the hooks only pass through. Once capture is started,
+ * each request's allocation also waits for the store to apply its record ([HopiStore.awaitApplied],
+ * after the wall time is taken): the store's thread builds the record, joining the body's blocks,
+ * in a pass that would otherwise fall in a later request's window, or another arm's.
  */
 class GiantBodyScenario : Function<Map<String, Any?>, Map<String, Any?>> {
     private val client by lazy { OkHttpClient() }
     private val buffer = ByteArray(64 * 1024)
 
+    /** The store capture records to, kept for the calls after the first, which pass none. */
+    private var store: HopiStore? = null
+
     override fun apply(args: Map<String, Any?>): Map<String, Any?> {
-        val store = args["store"] as HopiStore?
-        if (store != null && !AndroidCapture.started) {
+        val given = args["store"] as HopiStore?
+        if (given != null && !AndroidCapture.started) {
             AndroidCapture.start(
-                AndroidCapture.Settings(maxTotalBytes = store.maxTotalBytes, maxBodyBytes = args["maxBodyBytes"] as Long, summaryLog = false),
+                AndroidCapture.Settings(maxTotalBytes = given.maxTotalBytes, maxBodyBytes = args["maxBodyBytes"] as Long, summaryLog = false),
                 NetworkTool.okHttpState(javaClass.classLoader),
-                injectedStore = store,
+                injectedStore = given,
             )
+            store = given
         }
+        val store = this.store
         val url = args["url"] as String
         val okHttp = args["client"] == "okhttp"
         val runs = args["runs"] as Int
@@ -43,6 +51,8 @@ class GiantBodyScenario : Function<Map<String, Any?>, Map<String, Any?>> {
             val start = System.nanoTime()
             received = if (okHttp) okHttpRead(url) else urlRead(url)
             nanos[i] = System.nanoTime() - start
+            // Inside the allocation window, outside the timed one: the store's pass for this request.
+            if (store != null) check(store.awaitApplied(5_000)) { "the store did not apply request $i within 5 s" }
             allocated[i] = Measure.allocatedBytes() - before
         }
         return mapOf("nanos" to nanos, "allocated" to allocated, "received" to received, "started" to AndroidCapture.started)

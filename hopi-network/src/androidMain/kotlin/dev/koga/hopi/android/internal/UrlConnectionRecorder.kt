@@ -343,7 +343,7 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
     /**
      * Fails the record; after the response arrived it keeps the status, headers and what arrived of
      * the body in [partial]. A tee's body ([partial], [finish]'s [tee]) is built on the store's
-     * thread, not the app's: a capture's trimming copy never runs on the reader.
+     * thread, not the app's: a capture's join of its blocks never runs on the reader.
      */
     private fun failed(error: String, partial: TeeInputStream? = null) {
         val target = target ?: return
@@ -679,7 +679,7 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
             return CapturedBody.skipped(skip, responseType, capture.total)
         }
 
-        /** Bytes the capture's array takes ([BoundedCapture.held]). */
+        /** Bytes the capture's blocks take ([BoundedCapture.held]). */
         val held: Int get() = capture.held
 
         /** The body by its size alone, for [shedBodies]. */

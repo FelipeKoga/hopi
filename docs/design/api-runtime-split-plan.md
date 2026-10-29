@@ -2603,8 +2603,9 @@ API 35; simulator `iPhone 17`, iOS 27.0; evidence in `build/evidence/runtime-spl
   (`ensure`), so the arrays alone come to about twice the next power of two above the body (about
   4 MB for 1 MB, 16 MB for 5 MB), and the 4.20x cells hold one more copy of the body, the size of
   the copy `bytes()` trims to; README's "about 2x chunked" row measures the Ktor plugin, whose
-  capture grows in blocks. Not changed here (product code). Wall time: at most +5.8 ms median in
-  the first run (OkHttp, Content-Length, 50 MB, 16 MB cap, against 11.4 ms with no capture) and
+  capture grows in blocks. Not changed here (product code): fixed in the commit after this stage's,
+  with R7 run again (below, "Stage 9 leaves for later stages"). Wall time: at most +5.8 ms median
+  in the first run (OkHttp, Content-Length, 50 MB, 16 MB cap, against 11.4 ms with no capture) and
   +4.9 ms in the second (OkHttp, chunked, 50 MB, 16 MB cap).
 - **The capture end to end** (`benchmark/android-capture/run.py e2e`, the capture build
   `after9-debug.apk` and a noop one, `assembleDebug -Psample.hopiCapture=false`, whose dex holds
@@ -2936,11 +2937,33 @@ Stage 8 leaves for later stages:
 
 Stage 9 leaves for later stages:
 
-- E1 R7 (section 9): Android's `BoundedCapture` grows a body of unknown size by doubling from 8 KB
-  up to the cap and trims once, so a chunked body under the cap allocates 3.2 to 4.2 times itself
-  (up to 2.6 times an 8 MB cap); a `Content-Length` body or one past the cap stays near 1x and 2x.
-  The Ktor plugin's capture grows in blocks. A commit after this stage makes Android's grow in
-  blocks too, with R7 run again.
+- E1 R7 (section 9): Android's `BoundedCapture` grew a body of unknown size by doubling from 8 KB
+  up to the cap and trimmed it once, so a chunked body under the cap allocated 3.2 to 4.2 times
+  itself (up to 2.6 times an 8 MB cap); a `Content-Length` body or one past the cap stayed near 1x
+  and 2x. Fixed 2026-10-29 in the commit that follows stage 9's: such a body grows in blocks, as
+  the Ktor plugin's `BoundedBuffer` does (8 KB, then each as large as what is kept, up to 64 KB,
+  the last clamped to the cap), so growing never copies a kept byte, and the store's thread joins
+  the blocks once; a body of its `Content-Length` is still one block (the cap when the body
+  reaches it), which needs no join. Past the cap the 2x moved from the reader alone to 1x on the
+  reader and a 1x join on the store's thread. `BoundedCaptureTest` pins the blocks, `held` and the
+  join, a known size past the cap as one cap-sized block, and a 1,000,000 B chunked body's
+  allocation (its blocks under the body plus 128 KB, its join the body: about 2.05x in all).
+
+  R7 run three times after the fix (`e1r7-after-run1.md` to `-run3.md`, logs
+  `e1r7-after-benchmark-run1.log` to `-run3.log`). Runs 1 and 2 counted the store's thread only
+  in the window its pass fell in: the store builds records in batches, after its 50 ms doze or
+  once half its bytes are queued (at once for a body that reaches the cap, half the store), so
+  under the cap most requests' windows held no join and the median showed the reader alone. They
+  read 0.99x to 1.01x with a `Content-Length`, 1.16x to 2.01x chunked past the cap, and 1.00x to
+  1.06x chunked under it (2.00x once, `HttpURLConnection` 5 MB at the 8 MB cap, run 1); the stage 9
+  runs had the same blind spot (only their 4.20x cells counted the trim). Since run 3 the scenario
+  waits for the store's pass (`awaitApplied`) after taking each request's wall time, inside its
+  allocation window, so every request counts its own record build and join: 1.00x to 1.04x the
+  kept bytes with a `Content-Length`; chunked under the cap 2.00x to 2.07x (2.06x and 2.07x for
+  the 1,048,607 B body, whose last 64 KB block holds 31 bytes); chunked past the cap 1.98x to
+  2.20x (the 2.20x, OkHttp's 50 MB at the 256 KB cap, sits on a 51.6 MB baseline, where 0.1 MB is
+  0.4x): pass. Wall time: at most +3.54 ms median (OkHttp, `Content-Length`, 50 MB, 16 MB cap,
+  against 12.03 ms with no capture; +4.68 and +5.52 ms in runs 1 and 2, the same cell).
 - E1 R8 (section 9): with an 8 MiB cap, the bodies the iOS capture now keeps whole cost process CPU
   past the noop band (+1.71 ms at 1 MB, +8.66 ms at 5 MB per run), with wall time inside its noise;
   the first measurement at that cap, for the owner to read.

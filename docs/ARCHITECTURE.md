@@ -1250,11 +1250,13 @@ reading a byte is `Complete` with the body `"not read"`, one closed part-way is 
 closes stays `Pending`, as with the Ktor plugin.
 
 **Threads.** The app's request thread allocates the per-request state, copies body bytes below the
-cap as its own reads move them (one bounded array per body, allocated by the first copy and sized
-to the cap when `Content-Length` says the body reaches it) and queues two writes
-(`store.submitDeferred`). The store's consumer thread builds the records (converts headers, trims
-the array), applies them and writes the summary line in the same pass. The main thread runs only the provider; if an app reads a body
-on the main thread, its bounded copy runs there, as with the Ktor plugin.
+cap as its own reads move them (bounded blocks per body, the first allocated by the first copy: one
+block of the `Content-Length`'s size when it is known, at most the cap, else 8 KB and then blocks of
+up to 64 KB, so growing never copies what was kept) and queues the record itself twice
+(`store.submitStart`, then `store.submitEnd`). The store's consumer thread builds the records
+(converts headers, joins each body's blocks into one array), applies them and writes the summary
+line in the same pass. The main thread runs only the provider; if an app reads a body on the main
+thread, its bounded copy runs there, as with the Ktor plugin.
 
 **Not recorded:** shaded or relocated OkHttp, code outside the APK (Play services dynamite modules,
 code loaded at run time), Cronet's native API, WebView, `DownloadManager`, native HTTP stacks,

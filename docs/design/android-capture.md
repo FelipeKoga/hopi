@@ -314,13 +314,13 @@ Rules for the wrapper:
 - **The app's request thread** (OkHttp's, or whatever thread calls the `URLConnection`): one state
   object per request (id, two times, references to the immutable request/headers, the capture
   `okio.Buffer` or a `ByteArray` block list for the `URLConnection` tee, counters, one
-  `AtomicBoolean` for "terminal posted"), and two queued writes (`store.submitDeferred`). The body
-  copy below the cap happens on the reader's thread: zero-copy segment sharing for OkHttp, one
-  bounded array copy per chunk for `URLConnection`. Hopi converts no header, trims no array and
-  formats nothing on this thread.
+  `AtomicBoolean` for "terminal posted"), and the record queued twice as itself
+  (`store.submitStart`, then `store.submitEnd`). The body copy below the cap happens on the
+  reader's thread: zero-copy segment sharing for OkHttp, one bounded array copy per chunk for
+  `URLConnection`. Hopi converts no header, joins no blocks and formats nothing on this thread.
 - **The store's consumer thread** (`hopi-store`, background priority, core's, see ARCHITECTURE.md
   "Store"): builds each record from the request's state (converts `Headers`/the header strings to
-  `List<Pair>`, trims the bodies' arrays, `source = "okhttp"`/`"urlconnection"`), applies it and,
+  `List<Pair>`, joins each body's blocks into one array, `source = "okhttp"`/`"urlconnection"`), applies it and,
   in the same pass, writes its summary line: one thread. While no viewer is attached
   (`HopiStore.attachViewer`: a bridge connection, the UI on screen) a request's start wakes
   nothing, and its end wakes the consumer only from its untimed sleep: after a pass it dozes 50 ms,
@@ -965,11 +965,20 @@ Built as designed, with the deviations below; each has its reason. Files: `gradl
   JSON parser stops after the last byte without asking for more). The same rules hold for the
   `URLConnection` wrapper, and `disconnect()` with a response whose stream was never opened is
   `Complete`, `"not read"`.
-- **Capture buffer.** The tee copies with `Buffer.copyTo(OutputStream, …)` into one bounded
-  `ByteArray` per body, not into a shared-segment `okio.Buffer` (the spike item): it keeps no
-  segment of the app's alive, and the array starts at the cap when `Content-Length` says the body
-  reaches it (no growth copies; the first device run, which grew from 8 KB, cost the reader about
-  0.5 ms more per 1 MB body).
+- **Capture buffer.** The tee copies with `Buffer.copyTo(OutputStream, …)` into bounded `ByteArray`
+  blocks per body (`BoundedCapture`), not into a shared-segment `okio.Buffer` (the spike item): it
+  keeps no segment of the app's alive. A body whose `Content-Length` is known is one block of that
+  size, the cap when the body reaches it (no growth copies; the first device run, which grew from
+  8 KB, cost the reader about 0.5 ms more per 1 MB body); a body of unknown size starts at 8 KB and
+  goes on in blocks as large as what is kept, up to 64 KB, as the Ktor plugin's capture does, so
+  growing never copies what was kept, and the store's thread joins the blocks once. Until
+  2026-10-29 such a body grew one array by doubling up to the cap and the store's thread trimmed
+  it, so a chunked body under the cap allocated 3.2 to 4.2 times itself (E1 R7 of the
+  runtime-split plan); in blocks the reader allocates the body and less than one 64 KB block more,
+  and the join the body once more (`BoundedCaptureTest`), about twice in all. R7, run again with
+  each request's allocation window waiting for the store's pass that builds its record, reads
+  2.00x to 2.07x for those bodies, 1.98x to 2.20x past the cap and 1.00x to 1.04x with a
+  `Content-Length` (the runtime-split plan, "Stage 9 leaves for later stages").
 - **The URLConnection header maps** (`getRequestProperties()` before the connection,
   `getHeaderFields()` after it) are kept as the returned maps and flattened on the capture
   dispatcher, not on the app's thread.
@@ -1125,8 +1134,8 @@ logcat lines to the host during the block. Changes:
 - `responded` reads the raw `Content-Type` header instead of OkHttp's parsed `MediaType`;
   `ResponseSkip.reason` matches the MIME type in place without allocating; `HttpURLConnection`
   response headers are read by index instead of through the per-call map; the redirect check
-  compares the URL object first; a body's trimming copy runs on the store's thread, never the
-  reader's.
+  compares the URL object first; a body's trimming copy (since 2026-10-29 the join of its blocks)
+  runs on the store's thread, never the reader's.
 - Binary and `text/event-stream` bodies are wrapped with a counting-only capture (cap 0), so
   their records end with the body: exact size, duration and failure state; an SSE stream stays
   `Pending` until the app closes it (`AndroidCaptureTest`: chunked binary, a connection dropped
