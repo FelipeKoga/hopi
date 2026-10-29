@@ -36,6 +36,7 @@ import platform.Foundation.NSFileManager
 import platform.Foundation.NSInputStream
 import platform.Foundation.NSMakeRange
 import platform.Foundation.NSMutableData
+import platform.Foundation.NSMutableURLRequest
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.NSURL
@@ -52,6 +53,7 @@ import platform.Foundation.resetBytesInRange
 import platform.Foundation.uploadTaskWithRequest
 import platform.Foundation.setHTTPBodyStream
 import platform.Foundation.setHTTPMethod
+import platform.Foundation.setValue
 import platform.Foundation.writeToURL
 
 /**
@@ -432,6 +434,23 @@ class UrlSessionCaptureTest {
         assertEquals(ResponseSkip.BINARY, skipped.skippedReason)
         assertEquals(30000L, skipped.totalBytes)
         assertEquals("image/png", skipped.contentType)
+    }
+
+    @Test
+    fun aRequestThatNamesItsOwnAcceptEncodingIsRecordedAsTheAppReadsIt() {
+        // URLSession decodes gzip whoever asked for it (stage 10's R3): the app reads the decoded
+        // body, and so does the record, which keeps the wire's Content-Encoding over it (so no
+        // decoder may trust a urlsession record's header, BodyDecoding.kt's heldCodings).
+        val url = Capture.url("/gzip?n=40000")
+        val watch = Watch(url)
+        val request = NSMutableURLRequest(uRL = nsUrl(url)).apply { setValue("gzip", forHTTPHeaderField = "Accept-Encoding") }
+        val done = HopiFxCompletion()
+        NSURLSession.sharedSession.dataTaskWithRequest(request, done.dataHandler()!!).resume()
+        done.awaitDone()
+        assertContentEquals(expectedBytes(40000), done.data!!.toBytes())
+        val tx = assertComplete(watch.single(), "GET", 200, response = expectedBytes(40000))
+        assertEquals(listOf("gzip"), tx.requestHeaders.filter { it.first.equals("Accept-Encoding", ignoreCase = true) }.map { it.second })
+        assertEquals(listOf("gzip"), tx.responseHeaders.filter { it.first.equals("Content-Encoding", ignoreCase = true) }.map { it.second })
     }
 
     @Test

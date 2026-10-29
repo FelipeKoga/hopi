@@ -3,7 +3,6 @@ package dev.koga.hopi.network.internal
 import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.body.ResponseSkip
 import dev.koga.hopi.core.capture.CaptureInstallation
-import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.log.emitPlatformLogLine
 import dev.koga.hopi.core.model.CapturedBody
@@ -91,9 +90,6 @@ public object UrlSessionCapture {
         val rules: Boolean = true,
     )
 
-    /** The engine package of Ktor's Darwin client, which sends through URLSession. */
-    public const val KTOR_DARWIN_ENGINE_PACKAGE: String = "io.ktor.client.engine.darwin."
-
     private val modeOrdinal = AtomicInt(Mode.NotStarted.ordinal)
     private val first = AtomicReference<Settings?>(null)
     private val target = AtomicReference<Target?>(null)
@@ -137,11 +133,6 @@ public object UrlSessionCapture {
             injectedStore = injectedStore,
         )
         target.store(Target(installed.store, installed.maxBodyBytes))
-        // From now on the Ktor plugin leaves Darwin clients' requests to this capture. Covered before
-        // the hooks go live: a request the plugin finds still uncovered once the engine answered was
-        // resumed before them, so a Ktor request in flight across this call is recorded once or
-        // missed, never twice (the plugin withdraws its record when it finds the engine covered).
-        PlatformCapture.cover(KTOR_DARWIN_ENGINE_PACKAGE)
         val result = hopi_us_start(installed.maxBodyBytes.toLong(), staticCFunction(::captureStarted), staticCFunction(::captureFinished))
         val started = when (result) {
             HOPI_US_BYTE_PATH -> Mode.Bytes

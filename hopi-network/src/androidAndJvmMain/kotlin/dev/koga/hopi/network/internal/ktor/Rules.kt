@@ -236,12 +236,13 @@ private class EditedResponse(
 
 /**
  * With [HttpCache] installed, which stores what passes the receive pipeline after Hopi, a rule's
- * response carries `Cache-Control: no-store` in place of any it gave, so no cache keeps it after
- * the rule is gone (docs/design/rules.md, "Mock").
+ * response carries `Cache-Control: no-store` in place of any it gave ([ResponseEdits.noStore]), so
+ * no cache keeps it after the rule is gone (docs/design/rules.md, "Mock"). Conditional here, unlike
+ * the platform sources: the recorder sees its client.
  */
 private fun noStoreIfCached(client: HttpClient, headers: List<Pair<String, String>>): List<Pair<String, String>> {
     if (client.pluginOrNull(HttpCache) == null) return headers
-    return headers.filterNot { it.first.equals(HttpHeaders.CacheControl, ignoreCase = true) } + (HttpHeaders.CacheControl to "no-store")
+    return ResponseEdits.noStore(headers)
 }
 
 /**

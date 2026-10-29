@@ -35,8 +35,11 @@ import dev.koga.hopi.urlsession.fixtures.hopi_fx_private_data_task
 import dev.koga.hopi.urlsession.fixtures.hopi_fx_server_requests
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.plugins.cache.HttpCache
 import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -598,6 +601,33 @@ class UrlSessionRulesTest {
         val info = RuleEngine.get(id)!!
         assertEquals(1L, info.hits)
         assertTrue(info.exhausted)
+    }
+
+    @Test
+    fun ktorsHttpCacheKeepsNoUrlSessionMock() = runBlocking {
+        // A platform rule cannot see a cache above URLSession, so its mock says no-store, whatever
+        // the rule set: without it, Ktor's HttpCache stored this mock (max-age=600) and served it
+        // again after the rule was gone, without a request (stage 10's R5).
+        val mock = MockSpec(200, listOf("Cache-Control" to "max-age=600", "Content-Type" to "text/plain"), RuleBody.text("mocked"))
+        val id = add(RuleSpec(match("/bytes"), times = 1, mock = mock))
+        HttpClient(Darwin) { install(HttpCache) }.use { client ->
+            // One URL for both requests: Capture.url adds a fresh t= on every call.
+            val url = Capture.url("/bytes?n=4")
+            val watch = Watch(url)
+            val before = requests("/bytes")
+            val first = client.get(url)
+            assertEquals("mocked", first.bodyAsText())
+            assertEquals(listOf("no-store"), first.headers.getAll(HttpHeaders.CacheControl))
+            // The record holds the response as delivered: no-store in place of the rule's max-age.
+            // single() stops watching before the second GET, which shares the URL.
+            val cacheControl = watch.single().responseHeaders.filter { it.first.equals("Cache-Control", ignoreCase = true) }
+            assertEquals(listOf("no-store"), cacheControl.map { it.second })
+            assertTrue(RuleEngine.remove(id))
+            awaitEmptyState()
+            val second = client.get(url)
+            assertContentEquals(expectedBytes(4), second.bodyAsBytes(), "the second GET is real, not the cached mock")
+            assertEquals(before + 1, requests("/bytes"), "only the second GET reached the server")
+        }
     }
 
     @Test

@@ -252,7 +252,7 @@ class DeviceViewerUiTest {
         waitUntil(timeoutMillis = 120_000) { store.value.transactions.value.count { it.url.contains("/giant") && it.state.isTerminal } >= 3 }
         val rows = store.value.transactions.value
         record(out, "rows appear live", rows.size >= 3, "${rows.size} rows: ${rows.map { "${it.method} ${it.url.substringAfter("8765")} ${it.responseCode} ${it.source}" }}")
-        // The Darwin client's requests are recorded by URLSession capture, which the plugin defers to.
+        // The Darwin client's requests are recorded by URLSession capture: the plugin installs nothing on iOS.
         record(out, "rows come from URLSession capture", rows.all { it.source == "urlsession" }, rows.groupingBy { it.source }.eachCount().toString())
         waitFor("/giant")
         onAllNodes(hasText("/giant", substring = true)).onFirst().performClick()

@@ -78,7 +78,11 @@ Coming from an earlier build of this repository, by stage of the runtime-split p
   and the network tool's (`hopi { network { rules } }`, on the JVM `Hopi.start { rules }`) are true;
   one a platform capture records (on Android an OkHttp-engine or rewritten Android-engine request
   that names no `Accept-Encoding` of its own, on iOS every Darwin request) follows the network
-  tool's alone (on iOS `Hopi.start { rules }`).
+  tool's alone (on iOS `Hopi.start { rules }`). Every mock and response edit on OkHttp,
+  `HttpURLConnection` and URLSession now reaches the app with `Cache-Control: no-store` in place of
+  the rule's or the server's (Ktor's `HttpCache` kept a platform mock after its rule was gone), so
+  a rule can no longer exercise your app's own HTTP cache there (see
+  [Rules](#rules-mock-fail-delay-edit)).
 
 Hopi is published to Maven Local only: no remote repository, nothing downloaded from anywhere but
 the repositories your build already uses. Every artifact has the group `dev.koga.hopi` and the
@@ -288,8 +292,9 @@ module, not to a library: it instruments the libraries from there.
 
 One call, `Hopi.shared.start` from `hopi-start`, records every URLSession request of the process:
 your own code, the SDKs you do not own (analytics, ads, crash reporters), `URLSession.shared`,
-custom delegates, Swift `async`/`await`, and Ktor's Darwin engine (the plugin then leaves those
-requests to it, so each request is recorded once). The same call registers the performance
+custom delegates, Swift `async`/`await`, and Ktor's Darwin engine (the Ktor plugin installs
+nothing on iOS, so each request is recorded once, by URLSession capture; a Ktor engine that does
+not send through URLSession, such as CIO, is not recorded). The same call registers the performance
 monitors for the CLI, the desktop viewer and `HopiPerf`, none started (see
 [Performance monitors](#performance-monitors-frames-hangs-cpu-memory)). It only observes: nothing
 is re-sent and nothing your app sees changes, unless a rule you added applies (and with rules on,
@@ -572,14 +577,17 @@ constructor, `attachBaseContext` or another content provider is that early. On i
 rule added while no runtime is registered (`HopiRules: no Hopi runtime is registered, …`), which
 is also what an app that never calls the start sees. Without a runtime, in release builds, the
 block still runs and the builder keeps what it is given (a body is copied), so a call costs that
-much and nothing more. On the JVM nothing starts Hopi until stage 10 of the runtime-split plan
-adds its JVM entry, and a plain Android host unit test runs no provider: there (a JVM app
-recording with the Ktor plugin, a JVM test, an Android host unit test) nothing registers the
-runtime, so `HopiRules` returns `-1` and nothing reports it, where `hopi-rules` worked with no
-start before stage 7. Rules added over the bridge (the CLI, the desktop viewer) still apply to
-the requests a JVM app's Ktor plugin records.
+much and nothing more. On the JVM `hopi-start`'s `Hopi.start` registers the runtime (since
+stage 10 of the runtime-split plan; see [JVM](#jvm-compose-desktop-the-ktor-plugins-requests)),
+so a rule added before it is dropped and counted in the start's notice, with no line at the add; a
+JVM process that does not call it, and a plain Android host unit test, which runs no provider,
+register none, so `HopiRules` returns `-1` there and nothing reports it, where `hopi-rules` worked
+with no start before stage 7.
 
-| | Ktor plugin | OkHttp | `HttpURLConnection` | URLSession |
+The Ktor plugin applies rules on Android and the JVM, where its recorder records; on iOS it installs
+nothing, and URLSession capture rules Ktor's Darwin engine like any session:
+
+| | Ktor plugin (Android, JVM) | OkHttp | `HttpURLConnection` | URLSession |
 | --- | --- | --- | --- | --- |
 | mock, fail | yes | yes | yes | yes, except background sessions and sessions created before `start()` (`URLSession.shared` is covered) |
 | delay before request | yes | yes | yes | yes (adds to the session's timeouts) |
@@ -591,7 +599,12 @@ A rule never weakens the app's security. A mock or fail contacts nothing; an edi
 through the app's own client or session, with its TLS, certificate pins, `HostnameVerifier`, proxy
 and challenge delegate. The scheme cannot change, an edit to another host or port drops
 `Authorization`, `Cookie` and the redacted headers unless it sets them itself, a mock may not set a
-cookie, and no mocked or edited response enters an HTTP cache. What a source cannot do that way is
+cookie, and no mocked or edited response enters an HTTP cache: every mock and response edit on
+OkHttp and `HttpURLConnection`, and every mock on URLSession, reaches the app with
+`Cache-Control: no-store` in place of any `Cache-Control` the rule or the server gave, since a
+platform rule cannot see a cache above its stack (Ktor's `HttpCache` kept a platform mock after its
+rule was gone), so a rule cannot exercise your app's own HTTP cache there; the Ktor plugin's
+recorder does the same when its client has `HttpCache`. What a source cannot do that way is
 unsupported there, and the rule says so when it is added. A mocked 3xx, 401 or 407 is not
 followed by OkHttp, `HttpURLConnection` or URLSession themselves (their follow-up logic sits below
 Hopi); Ktor's sits above Hopi on every source, so a Ktor client follows them. Every recorder has a
@@ -660,8 +673,9 @@ starts nothing. The agent bridge and the summary log are the start's settings (`
 `Hopi.start { }`), and `summaryLog = false` there now silences perf's log lines too (its notices
 are always written); remote control is perf's own, set at start only
 (`perf { remoteControl }`, `perfRemoteControl`). A start with invalid caps registers nothing, so
-`HopiPerf` stays inert until a valid start runs. On the JVM nothing registers it before stage 10
-of the runtime-split plan.
+`HopiPerf` stays inert until a valid start runs. On the JVM `Hopi.start` registers it unless its
+`perf` is false (CPU and memory only; since stage 10 of the runtime-split plan), with perf's log
+lines on stderr; a JVM process that does not call it registers none.
 
 From an agent or a terminal (the app's bridge, as for the requests):
 
@@ -700,7 +714,7 @@ Measured so far (the methods and caveats are in the architecture doc):
 
 | What | Result |
 | --- | --- |
-| Added latency per request, JVM benchmark against `ktor-client-mock`, 1 KB JSON response (`HopiOverheadBenchmark`, 20 000 requests per arm) | median +8.4 µs (p95 +10.4 µs) with `Content-Length`, +4.7 µs (p95 +10.1 µs) chunked; budget < 50 µs |
+| Added latency per request, JVM benchmark against `ktor-client-mock`, 1 KB JSON response (`HopiOverheadBenchmark`, 20 000 requests per arm; in `:hopi-network:jvmTest` since stage 10 of the runtime-split plan, through the thin plugin's hooks; the figure is the earlier measurement, with the recorder inside the plugin) | median +8.4 µs (p95 +10.4 µs) with `Content-Length`, +4.7 µs (p95 +10.1 µs) chunked; budget < 50 µs |
 | Row model for 500 transactions, JVM, median of 41 runs | build all rows 0.45 ms, one transaction changed 0.021 ms, search plus filter 0.124 ms |
 | Idle, Android emulator (API 35), launcher on screen, 6 transactions stored | 0 frames over 10 s (`dumpsys gfxinfo`), 0 CPU ticks over 10 s (`/proc/<pid>/stat`) |
 | Idle, inspector screen open | 0 frames over 5 s |
@@ -773,9 +787,9 @@ python3 benchmark/perf/verify.py build/evidence/perf --platform ios
 # the Swift async/await capture tests (starts the dev server itself)
 sample/iosApp/scripts/capture-swift-test.sh 'platform=iOS Simulator,name=iPhone 17'
 
-# The release APK holds no runtime (only hopi-api and the Ktor noop twin: the sample keeps
-# selectTwins on, since until stage 10 the real hopi-ktor brings hopi-core); the iOS Release
-# framework no runtime or core symbol, and with the flag every one (the check's positive control).
+# The release APK holds no runtime (only hopi-api and the thin hopi-ktor, which brings no
+# hopi-core); the iOS Release framework no runtime or core symbol, and with the flag every one
+# (the check's positive control).
 # Both builds refuse a runtime before linking it: the release variant's hopiReleaseGuardRelease, and
 # the iOS guard on every Release link, which exempts only the link the iOS check consumes, while the
 # check is requested by name: run the positive control by its own name, since

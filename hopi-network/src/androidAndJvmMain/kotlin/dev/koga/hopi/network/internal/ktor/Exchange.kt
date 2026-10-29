@@ -91,9 +91,12 @@ internal class Exchange(
     }
 
     /**
-     * True when a platform recorder started covering the engine while the request was in it (URLSession
-     * capture's `start()`): its hook may have seen the request, and nothing here can tell, so this
-     * record is withdrawn. The request is then recorded once or missed, as for a task resumed during
+     * True when a platform recorder started covering the engine while the request was in it
+     * (URLSession capture's `start()` did; since the runtime-split plan's stage 10 no recorder
+     * covers an engine once this recorder is registered, Android's network tool covering first, so
+     * only the tests reach this, kept for a recorder that would): its hook may have seen the
+     * request, and nothing here can tell, so this record is withdrawn. The request is then recorded
+     * once or missed, as for a task resumed during
      * `start()`, which "may be missed, never recorded twice" (docs/design/urlsession-capture.md,
      * "Swizzling rules"). A recorder covers its engines before its hooks go live, so an engine still
      * not covered when it answers means no hook saw the request. Asked once, at the first response

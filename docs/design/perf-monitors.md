@@ -55,7 +55,8 @@ Non-goals (v1):
 - Leak detection, allocation tracking, heap dumps, method tracing, energy, network throughput,
   disk I/O, startup time. Each would be its own tool under the roadmap rule.
 - Physical iOS devices over the bridge (none in v1); the os_log lines work there.
-- Hang detection on the JVM target (no main looper; the JVM gets CPU and memory only, for tests).
+- Hang detection on the JVM target (no main looper; the JVM gets CPU and memory only, for tests
+  and, since the runtime-split plan's stage 10, for JVM apps through `hopi-start`'s `Hopi.start`).
 - Symbolicating native (C/C++) frames on Android; release-build symbolication on iOS.
 
 ## What the existing tools do, and what we take
@@ -75,7 +76,7 @@ Non-goals (v1):
 | --- | --- |
 | `hopi-core`, package `dev.koga.hopi.core.perf` (all `@HopiInternalApi`) | The model (rings, events, histograms, summaries), its JSON (bridge replies, log lines), the `perf.*` bridge commands, the rate-limited log sink, and `PerfHook`: a registry holding at most one `PerfController` (start, stop, status) that `hopi-perf` registers. Nothing here starts a thread. |
 | `hopi-api` | `HopiPerf`, its config and enum (the consumer API, since the runtime-split plan's stage 8), over the perf runtime registered in `HopiRuntimes`, the registry's perf slot with the starts dropped before it and the last `screen` label, and the runtime's interface `HopiPerfRuntime` (`@HopiInternalApi`) |
-| `hopi-perf` | The runtime: the monitors in `dev.koga.hopi.perf.internal`, with the start sequence's perf tool `PerfEntry` (Android, iOS since the runtime-split plan's stage 6, the JVM for tests since stage 8) and `ApiPerf`, the runtime behind `HopiPerf`; the iOS native library (`src/nativeInterop/objc`, as built: run-loop observers, main-thread stack walk, `task_info`/`thread_info` reads, the display link); depends on core; targets android, iosArm64, iosSimulatorArm64, jvm; no consumer API (its ABI dumps are empty), no twin |
+| `hopi-perf` | The runtime: the monitors in `dev.koga.hopi.perf.internal`, with the start sequence's perf tool `PerfEntry` (Android, iOS since the runtime-split plan's stage 6, the JVM since stage 8, which `hopi-start`'s `Hopi.start` lists there since stage 10, CPU and memory only) and `ApiPerf`, the runtime behind `HopiPerf`; the iOS native library (`src/nativeInterop/objc`, as built: run-loop observers, main-thread stack walk, `task_info`/`thread_info` reads, the display link); depends on core; targets android, iosArm64, iosSimulatorArm64, jvm; no consumer API (its ABI dumps are empty), no twin |
 | `hopi-ui` | Nothing since the runtime-split plan's stage 5: its HUD and Perf tab went with the in-app UI (see "In-app (removed)") |
 | `hopi-connect`, `hopi-cli`, `hopi-desktop` | `PerfClient` and decoders, `hopi perf …` / `hopi hangs`, the Perf panel |
 | `gradle-plugin` | `hopi { perf { … } }`: `hopi-perf` in debuggable build types and its tool in the tool list |
@@ -165,9 +166,10 @@ controller with the default settings and no bridge of its own (the start's `agen
 it); a launch argument `-hopiPerf frames,hangs` is read by the tool's first start (one
 `NSProcessInfo` lookup) so an agent can measure a cold start: `xcrun simctl launch <udid> <id>
 -hopiPerf hangs`. Work before the start runs (pre-main, `+load`, static initializers, the start of
-`didFinishLaunching`) is not covered. On the JVM a tool of the same shape exists for `hopi-perf`'s
-tests; no start lists it before stage 10 of the runtime-split plan, so there `HopiPerf` does
-nothing.
+`didFinishLaunching`) is not covered. On the JVM a tool of the same shape, CPU and memory only,
+is listed by `hopi-start`'s `Hopi.start` unless its `perf` is false (since stage 10 of the
+runtime-split plan; `hopi-perf`'s own tests start it directly), with its log lines on stderr; a JVM
+process that does not call `Hopi.start` registers no runtime, so there `HopiPerf` does nothing.
 
 **Gradle DSL** (Android, generated into the app's configuration class like the other settings, as
 the perf tool's constructor arguments; off by default):
@@ -732,8 +734,8 @@ There is no noop twin since the runtime-split plan's stage 8: a release build ho
   (ARCHITECTURE, "Release guards"); nothing swaps it.
 - `:sample:androidApp:verifyReleaseHasNoRuntime` (since stage 9; the two release checks before it):
   the release classpath holds no `hopi-perf` and its Hopi classes are the jars' of `hopi-api` and
-  the Ktor noop twin; no type of `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core` is defined
-  or referenced; no Hopi
+  the Ktor noop twin (since stage 10, the thin `hopi-ktor`); no type of
+  `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core` is defined or referenced; no Hopi
   class references `addOnFrameMetricsAvailableListener` or `setMessageLogging`; the release APK has
   no generated configuration and no provider. `verifyDebugCapture` adds the positive control
   (`PerfEntry`, its keep rule and the listener reference present).

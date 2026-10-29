@@ -7,6 +7,7 @@ import dev.koga.hopi.ktor.HopiLogSink
 import dev.koga.hopi.network.internal.UrlSessionCapture
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -47,6 +48,29 @@ class KtorDarwinTest {
             val tx = watch.single()
             assertEquals(TransactionSource.URL_SESSION, tx.source)
             assertContentEquals(expectedBytes(12345), tx.responseBody!!.bytes)
+        }
+    }
+
+    @Test
+    fun contentEncodingIsDecodedOnceAndRecordedAsTheAppReadsIt() = runBlocking {
+        // Stage 10's R3: Ktor's ContentEncoding names Accept-Encoding, URLSession decodes anyway and
+        // Ktor does not decode a second time, so the one urlsession record holds the decoded body
+        // the app reads: nothing to decode for the inert plugin on iOS.
+        val decoding = HttpClient(Darwin) {
+            install(ContentEncoding) {
+                gzip()
+                deflate()
+            }
+            install(Hopi) { logSink = HopiLogSink.Off }
+        }
+        decoding.use { client ->
+            val url = Capture.url("/gzip?n=40000")
+            val watch = Watch(url)
+            assertContentEquals(expectedBytes(40000), client.get(url).bodyAsBytes())
+            val tx = watch.single()
+            assertEquals(TransactionSource.URL_SESSION, tx.source)
+            assertContentEquals(expectedBytes(40000), tx.responseBody!!.bytes)
+            assertTrue(tx.requestHeaders.any { (name, value) -> name.equals("Accept-Encoding", ignoreCase = true) && "gzip" in value }, tx.requestHeaders.toString())
         }
     }
 

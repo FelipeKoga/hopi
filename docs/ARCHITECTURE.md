@@ -51,7 +51,10 @@ their stage lands. What a consumer changes:
   start also disabled redaction, and the start's `summaryLog` starts the summary lines at the first
   client's installation. A request the Ktor plugin records is ruled only when both its client's
   `rules` and the network tool's are true; one a platform capture records follows the network
-  tool's alone.
+  tool's alone. Every mock and response edit on OkHttp, `HttpURLConnection` and URLSession now
+  reaches the app with `Cache-Control: no-store` in place of the rule's or the server's (Ktor's
+  `HttpCache` kept a platform mock after its rule was gone), so a rule can no longer exercise the
+  app's own HTTP cache there (see "Rules").
 
 ## Non-negotiable principles
 
@@ -222,7 +225,7 @@ Hopi.isStarted                               // true once a call started the sta
 and starts two tools, in order. First the network tool, `NetworkTool`: on iOS `hopi-network`'s
 iosMain one, beside `UrlSessionCapture`, whose `start` it calls with these settings and its
 `rules`, so that start's order holds (the installation, the store as the callbacks' target, the
-Ktor Darwin cover, the hooks, then the rules' hooks); its note is `urlsession bytes` or
+hooks, then the rules' hooks; it registers no Ktor recorder); its note is `urlsession bytes` or
 `urlsession metadata`. On the JVM `hopi-network`'s jvmMain one, which makes no installation: it
 registers the Ktor plugin's recorder in `hopi-api`'s Ktor slot with the start's configuration and
 its `rules` (each client's install then makes the start's installation first, see "Ktor plugin"),
@@ -787,8 +790,11 @@ holds, counted while that start waited in its lane, takes the start's back when 
 after it (the same array, so letting it go freed nothing). An end that brings the queue to half
 of `maxTotalBytes` wakes the consumer out of its doze, as half the lane does, so a burst the
 consumer only dozed through keeps its bodies. `withdraw(last)` drops a record that another recorder
-may also have made (the Ktor plugin's, for a request the engine had when a platform recorder
-started, see URLSession capture) and ignores every later snapshot of its id. It is queued like an
+may also have made (the Ktor plugin's recorder's, for a request the engine had when a platform
+recorder started covering it; URLSession capture's start did, see URLSession capture, and since the
+runtime-split plan's stage 10 no recorder covers an engine once the Ktor recorder is registered,
+Android's network tool covering first, so only the tests reach it, kept for a recorder that
+would) and ignores every later snapshot of its id. It is queued like an
 end; `last`, the record's final snapshot (failed, the error says why), is published as `Completed`
 (not retained) only when an earlier pass published the record's start and a viewer is attached,
 since only then can a list or a tail show that start; otherwise nothing of the record goes out. A
@@ -1057,8 +1063,10 @@ How the plugin implements this (Ktor 3.5.2):
   (`HttpCallValidator` response validation, for example) leaves it `Complete`.
 - Exactly one terminal snapshot is submitted per transaction (an atomic flag), all through the
   store's non-suspending `submit`, or none when the record is withdrawn because a platform
-  recorder started while the engine had the request (see URLSession capture, "One record per
-  request").
+  recorder started covering the engine while it had the request (URLSession capture's start did,
+  see URLSession capture, "One record per request"; since the runtime-split plan's stage 10 no
+  recorder does once the Ktor recorder is registered, so only the tests reach the withdrawal,
+  kept for a recorder that would).
 - `enabled = false`, or no recorder registered (a release build, iOS, a JVM process before
   `Hopi.start`, a client built before the start): no hook, the store untouched, nothing of the
   recorder loaded.
@@ -1112,18 +1120,16 @@ encodings, the `_task` ivar typed `NSURLSessionTask`); otherwise, and for backgr
 (out of process), a metadata path records request, status, headers, sizes, timing and error with
 bodies `"not observable"`, using KVO on the task's `state` as its end, and a notice line says so.
 
-**One record per request.** Once capture runs, the Ktor plugin defers to it for the engines it
-covers: `PlatformCapture` (core) holds the covered engine packages, `start()` covers
-`io.ktor.client.engine.darwin.`, and the plugin checks its client's engine class on every send
-(one atomic read) and records nothing for a covered one, so a client built before `start()` defers
-from its next request. A request the engine already has when `start()` runs is never recorded
-twice: `start()` covers the engine before its hooks go live, and the plugin reads the coverage
-once more when the engine answers or fails (one more atomic read); covered by then, the request
-may have been seen by the resume hook, so the plugin withdraws its record (`HopiStore.withdraw`)
-and the request is recorded once by URLSession capture, or missed when it was resumed before the
-hooks (docs/design/urlsession-capture.md, "Dedupe with the Ktor plugin"). Other engines (CIO, OkHttp in an app without the Android plugin's instrumentation, MockEngine)
-are recorded by the plugin as before, `source = "ktor"`. The plugin's install-time work (caps,
-redaction, summary sink, bridge) still happens.
+**One record per request.** Ktor's Darwin engine sends through URLSession, so capture records its
+requests as any client's, `source = "urlsession"`, and nothing else records them: since the
+runtime-split plan's stage 10 the Ktor plugin installs nothing on iOS (its recorder is
+`hopi-network`'s, on Android and the JVM), so nothing defers to capture and `start()` covers no
+engine. Before, the plugin recorded every engine, deferred to capture for the Darwin one through
+`PlatformCapture` (`start()` covered `io.ktor.client.engine.darwin.` before its hooks went live),
+and withdrew a record whose engine `start()` covered while the request was in it
+(docs/design/urlsession-capture.md, "Dedupe with the Ktor plugin", a dated note now). A Ktor
+client on another engine (CIO) is not recorded on iOS, and the plugin's own settings do nothing
+there: the start's (`Hopi.start { }`) are the store's.
 
 **Threads.** The app's thread that calls `resume` pays an allocation, an associated object, two
 retains and one `dispatch_async`; it reads no header and copies no byte. The connection hooks run
@@ -1137,11 +1143,16 @@ itself are not seen); the request body when it is `HTTPBody` or upload data, els
 `"stream, not captured"`, `"file, not captured"` or `"not observed"` (an upload created before
 `start()`); the final response's status and headers (a native redirect is one record, with
 `finalUrl`); the response body as the app receives it (decoded), up to the cap, `totalBytes`
-exact (Hopi's own count, replays excluded); downloads `"download"` with their size and no bytes;
-binary and event-stream content types skipped by the same rule as the plugin (`ResponseSkip` in
-core, mirrored in the library and compared by a test); `protocol` as Ktor writes it (`HTTP/1.1`,
-`HTTP/2.0`); errors as `NSURLErrorDomain <code>: <description>`, `"cancelled"` for a cancel;
-`durationMs` from the first `resume` to the network's end (not to the app's delegate queue).
+exact (Hopi's own count, replays excluded), also when the request names its own `Accept-Encoding`
+(the app's, or Ktor's `ContentEncoding`): URLSession decodes whoever asked, and Ktor does not
+decode again, while the record keeps the wire's `Content-Encoding` and compressed
+`Content-Length` over the decoded body (the runtime-split plan's stage 10, R3), so no decoder
+trusts a `urlsession` record's header (`heldCodings` skips them); downloads `"download"` with
+their size and no bytes; binary and event-stream content types skipped by the same rule as the
+plugin (`ResponseSkip` in core, mirrored in the library and compared by a test); `protocol` as
+Ktor writes it (`HTTP/1.1`, `HTTP/2.0`); errors as `NSURLErrorDomain <code>: <description>`,
+`"cancelled"` for a cancel; `durationMs` from the first `resume` to the network's end (not to the
+app's delegate queue).
 CFNetwork can hand `_didReceiveData:` the same chunk object twice (seen on a redirect and a
 mid-body cancel); a chunk already counted is ignored by identity: kept chunks are compared
 directly, chunks past the cap through a ring of four `__weak` references, which keep nothing alive
@@ -1155,7 +1166,10 @@ full, partial, nil, `NSProxy` and subclass-calling-super delegates on the main a
 queue; Swift `data(for:)`, `data(from:)`, `upload(for:from:)`, `bytes(for:)`, `download(for:)`
 (XCTest target, iOS 27.0 only, see Sample app); sessions created before `start()` (their tasks
 resumed after it are recorded; a task resumed before it is not, even if suspended and resumed
-after it; created before and resumed after is); `HTTPBodyStream`; 204, 304, HEAD, a native redirect, gzip; reset, refused, timeout and cancel
+after it; created before and resumed after is); `HTTPBodyStream`; 204, 304, HEAD, a native
+redirect, gzip (since stage 10 also with the request's own `Accept-Encoding`, plain and under
+Ktor's `ContentEncoding`, in the Kotlin/Native tests on Gradle's simulator only); reset, refused,
+timeout and cancel
 (before the first byte and mid-body); 64 parallel uploads; an 8 MB body; Ktor Darwin (one record,
 concurrent POSTs, a channel body, redirects recorded per hop because Ktor follows them itself).
 Not recorded: WebSocket and stream tasks, `data:`, `file:` and custom-scheme loads, AVFoundation
@@ -1310,14 +1324,18 @@ so `instanceof` checks on them or reflection on `HttpURLConnection`'s private fi
 differently. Headers OkHttp's `BridgeInterceptor` and the platform stack add themselves (`Host`,
 `User-Agent`, `Accept-Encoding`, `Cookie`) are not recorded, as on iOS.
 
-**One record per request.** The Ktor plugin defers to Android capture through `PlatformCapture`, as
-on iOS: the network tool covers `io.ktor.client.engine.okhttp.` only when `RealCall` carries the
-annotation (and links: 3.14 or later), and `io.ktor.client.engine.android.` only when the
-generated configuration says the plugin rewrote that engine's `URL` calls, so the plugin can never
-defer to capture that is not there (an unknown OkHttp version writes a notice line and the plugin
-keeps recording, `source = "ktor"`). One exception keeps the body as the app reads it: a request of
+**One record per request.** The Ktor plugin's recorder (`hopi-network`'s, which the network tool
+registers; see "Ktor plugin") defers to Android capture through `PlatformCapture`, the only
+platform recorder that covers an engine since the runtime-split plan's stage 10 (iOS's Darwin
+cover went with the plugin's iOS recording): the network tool covers `io.ktor.client.engine.okhttp.`
+only when `RealCall` carries the annotation (and links: 3.14 or later), and
+`io.ktor.client.engine.android.` only when the generated configuration says the plugin rewrote that
+engine's `URL` calls, so the recorder can never defer to capture that is not there (an unknown
+OkHttp version writes a notice line and the recorder keeps recording, `source = "ktor"`). The tool
+covers before it registers the recorder, so no Ktor request is in flight when an engine becomes
+covered. One exception keeps the body as the app reads it: a request of
 a covered engine that names its own `Accept-Encoding` (Ktor's `ContentEncoding`) gets its body from
-OkHttp or the platform connection still encoded, and Ktor decodes it, so the plugin records it
+OkHttp or the platform connection still encoded, and Ktor decodes it, so the recorder records it
 itself (`"ktor"`, decoded) and marks it with `X-Hopi-Pass-Through`, which the interceptor removes
 before sending (the wrapper never sets it) and which makes them record nothing for that request.
 The app's own OkHttp interceptors see the marker on those requests; the wire does not. Ktor
@@ -1433,10 +1451,15 @@ whole cost without rules is one volatile read and one reference comparison
 capabilities per request. What a source cannot do of a rule is listed with it (`unsupported`,
 `applies` false for an exclusion, true for a stated difference) for the sources the rule names,
 or, when it names none, for those that can record on the platform (an expect/actual set: Ktor,
-OkHttp and `HttpURLConnection` on Android; Ktor and URLSession on iOS; Ktor on a plain JVM).
-The first enabled rule that matches and still has `times` left wins
-(higher `priority` first, then the newest); a claim is one compare-and-increment of the rule's
-shared hit counter, and the claim that exhausts a rule republishes the state without it.
+OkHttp and `HttpURLConnection` on Android; URLSession on iOS, where the Ktor plugin installs
+nothing since the runtime-split plan's stage 10; Ktor on a plain JVM). So on iOS a response edit,
+or a before-response delay on a real request, that names no sources applies nowhere
+(`Capabilities.appliesNowhere`), yet the hosts show it active, as before: they mark a rule
+inactive only when the sources it names all exclude it, since its line does not carry the
+platform; its `unsupported` entry for URLSession is the only sign. The first enabled rule that
+matches and still has `times` left wins (higher `priority` first, then the newest); a claim is
+one compare-and-increment of the rule's shared hit counter, and the claim that exhausts a rule
+republishes the state without it.
 Matching reads each stack's own request objects through a `RuleRequest` view, allocated only when
 the state is not `EMPTY`. Globs are compiled at `add` (two-pointer matching, patterns at most 256
 chars). Limits: 64 rules, 1 MiB per body, 8 MiB of rule bodies in all, 32 headers per side, 8
@@ -1450,12 +1473,14 @@ counter, and `hopi-network`'s URLSession library retains it and claims it throug
 library's).
 
 **Who applies a rule: the recorder.** Exactly one layer records each request (`PlatformCapture`'s
-one-record rule), and only that layer reads the rules for it: the Ktor plugin returns before
-reading them for a request a platform recorder covers, and the interceptor and the wrappers apply
-nothing to a request the plugin keeps (`X-Hopi-Pass-Through`). A rule can never be applied twice,
-and a record's mark always describes what its recorder did.
+one-record rule), and only that layer reads the rules for it: the Ktor plugin's recorder returns
+before reading them for a request a platform recorder covers, and the interceptor and the wrappers
+apply nothing to a request the recorder keeps (`X-Hopi-Pass-Through`). A rule can never be applied
+twice, and a record's mark always describes what its recorder did. The Ktor column is the
+recorder's, on Android and the JVM: on iOS the plugin installs nothing and URLSession rules Ktor's
+Darwin engine like any session.
 
-| | Ktor plugin | OkHttp | `HttpURLConnection` | URLSession |
+| | Ktor plugin (Android, JVM) | OkHttp | `HttpURLConnection` | URLSession |
 | --- | --- | --- | --- | --- |
 | mock, fail | yes | yes | yes | yes; not background sessions; not sessions created before `start()` (`URLSession.shared` excepted) |
 | delay before request | yes | yes | yes | yes (a deferred `resume`; adds to the session's timeouts) |
@@ -1463,10 +1488,11 @@ and a record's mark always describes what its recorder did.
 | edit request | yes | yes | yes | yes, for tasks from the hooked factories; a body only for `HTTPBody` and upload-from-data |
 | edit response | yes | yes | yes | **no** |
 
-Where it applies: the Ktor plugin at `HttpSendPipeline.Monitoring` (an edit rewrites the builder
-before the record's snapshot; a mock builds the call without calling the engine); OkHttp in the
-instrumented application interceptor (a mock answers without `proceed`; a before-response wait
-checks for cancel every 50 ms, only while a delayed request waits); `HttpURLConnection` in the
+Where it applies: the Ktor plugin's recorder at `HttpSendPipeline.Monitoring` (an edit rewrites
+the builder before the record's snapshot; a mock builds the call without calling the engine);
+OkHttp in the instrumented application interceptor (a mock answers without `proceed`; a
+before-response wait checks for cancel every 50 ms, only while a delayed request waits);
+`HttpURLConnection` in the
 wrappers (a mock never connects the delegate; a URL edit builds a new delegate with the app's
 `SSLSocketFactory` and `HostnameVerifier`); URLSession in `HopiUSRuleProtocol` (mock and fail,
 delivered on the run loop of the thread that called `startLoading`, never cached) and the factory
@@ -1475,7 +1501,17 @@ and `resume` hooks (edits, delays).
 **Marks.** A ruled record carries `ruleId` and `ruleApplied` (see Data model) and holds the request
 as sent and the response as delivered to the app. A mock's record has
 the recorder's `source`, `protocol` null and a duration that includes the delay; a fail's is
-`Failed` with the exception the app saw.
+`Failed` with the exception the app saw. A Ktor client over a platform source (on Android every
+request the recorder does not keep) sees that source's exception as its engine maps it, the same
+with `HttpTimeout` installed (the runtime-split plan's stage 10, R4, on the host): `timeout` a
+`java.net.SocketTimeoutException` ("Socket timeout has expired", OkHttp engine) or Ktor's
+`ConnectTimeoutException` (Android engine), `reset` `SocketException: Connection reset`,
+`unknown-host` `UnknownHostException`, `cancel` `IOException: Canceled` (OkHttp engine) or
+`SocketException: Socket closed` (Android engine); the recorder's own fails (the requests it keeps,
+and every request on the JVM) are `HttpRequestTimeoutException` with `HttpTimeout` (else Ktor's
+`SocketTimeoutException`), `SocketException("Connection reset")`, `UnknownHostException(host)` and
+`CancellationException`. A mocked 3xx, 401 or 407 is followed by Ktor's `HttpRedirect` and `Auth`
+over every source (R4: `Auth` retries a mocked 401 once), each follow-up a record of its own.
 
 **Security.** No action contacts the network outside the app's own stack: a mock and a fail
 contact nothing; an edited request goes through the app's client or session with its own TLS,
@@ -1483,9 +1519,15 @@ certificate pinning, verifier, proxy and challenge delegate. Hopi offers no acti
 trust, a verifier, a proxy or a challenge answer. The scheme cannot change; an edit that changes
 the origin removes `Authorization`, `Proxy-Authorization`, `Cookie` and every redacted header
 unless it sets them itself. Mocks and response edits never set a cookie (`Set-Cookie` rejected)
-and never enter an HTTP cache (OkHttp's and `HttpURLConnection`'s caches sit below Hopi; the
-URLSession protocol answers with `NSURLCacheStorageNotAllowed`; on Ktor a ruled response carries
-`Cache-Control: no-store` when the client has `HttpCache`). Rules, bodies and blobs live in memory
+and never enter an HTTP cache. OkHttp's and `HttpURLConnection`'s caches sit below Hopi and the
+URLSession protocol answers with `NSURLCacheStorageNotAllowed`; for a cache above the stack (Ktor's
+`HttpCache`, which in the runtime-split plan's stage 10 experiments stored a platform mock, a body
+edit and a header-only edit and served them after the rule was gone, R5) every platform mock and
+response edit carries `Cache-Control: no-store` in place of any the rule or the server gave
+(`ResponseEdits.noStore`), unconditionally, since a platform rule cannot see such a cache: so an
+app cannot exercise its own HTTP cache through a rule-set `Cache-Control` on OkHttp,
+`HttpURLConnection` or URLSession. The Ktor recorder, which sees its client, does the same only
+when the client has `HttpCache`. Rules, bodies and blobs live in memory
 only: nothing is written to a file, preferences, `NSUserDefaults`, the proof file or `bridge.json`,
 and no rule comes from a file, an intent, a deep link, a launch argument or an environment
 variable; the only ways in are the authenticated bridge and `HopiRules` (the in-app screen was one
@@ -1498,7 +1540,8 @@ task reads `Suspended` during the delay and its timeouts start after it; an OkHt
 handshake and skips the cache and network interceptors; a mocked 3xx, 401 or 407 is not
 followed by OkHttp, `HttpURLConnection` or URLSession themselves (their follow-up logic is below
 Hopi) and is followed by a Ktor client on any source (Ktor's is above it); an `HttpURLConnection`
-mock has no certificates; a mocked URLSession upload reports no send progress.
+mock has no certificates; a mocked URLSession upload reports no send progress; a platform mock or
+response edit carries `Cache-Control: no-store` in place of the rule's or the server's.
 
 **Switch.** Each recorder has `rules: Boolean = true` (the network tool's: on iOS and the JVM
 `HopiStartConfig`, which hands it to the network tool; the Gradle DSL's
@@ -1536,11 +1579,12 @@ A release build links `hopi-api`, whose `HopiRules` finds no runtime registered 
 7 it replaces `hopi-rules` and `hopi-rules-noop`, so the Gradle plugin swaps no rules pair and
 `:checkNoopParity` has none; `hopi-api`'s ABI dump holds the consumer API alone (its
 `@HopiInternalApi` declarations excluded), the declarations `hopi-rules` had.
-`:sample:androidApp:verifyReleaseHasNoRuntime` expects exactly `:hopi-api` and `:hopi-ktor-noop`
-on the release classpath and no `dev.koga.hopi.core` type in the APK, and `verifyDebugCapture`
-requires `:hopi-api` and `RuleEngine` in the debug APK; `:sample:shared:verifyIosReleaseExcludesCapture`
-fails on any `HopiUSRuleProtocol`, `_hopi_us_rule` or `_hopi_hits_` symbol and the rule queue's
-label without the flag and requires them with it. Both release guards refuse `hopi-core`, the
+`:sample:androidApp:verifyReleaseHasNoRuntime` expects exactly `:hopi-api` and `:hopi-ktor` (the
+thin plugin, since the runtime-split plan's stage 10) on the release classpath and no
+`dev.koga.hopi.core` type in the APK, and `verifyDebugCapture` requires `:hopi-api` and
+`RuleEngine` in the debug APK; `:sample:shared:verifyIosReleaseExcludesCapture` fails on any
+`HopiUSRuleProtocol`, `_hopi_us_rule` or `_hopi_hits_` symbol and the rule queue's label without
+the flag and requires them with it. Both release guards refuse `hopi-core`, the
 engine's module, on a release classpath (see "Release guards").
 
 ## Performance monitors (`hopi-core` model; `hopi-perf`)
@@ -2300,8 +2344,9 @@ A Compose Multiplatform app for Android and iOS that makes real requests to a de
 host, so the inspector, the log stream and the CLI can be exercised (and measured) end to end.
 
 - **`sample/shared`** (KMP: `android`, `iosArm64`, `iosSimulatorArm64`; foundation only, no
-  Material) holds everything both apps share. It selects `hopi-ktor` or its noop twin with the
-  `hopi.enabled` property exactly as in "Selecting the runtimes in a KMP project", takes `hopi-api`
+  Material) holds everything both apps share. It takes the thin `hopi-ktor` in every build (no
+  selection since the runtime-split plan's stage 10; see "Selecting the runtimes in a KMP
+  project"), takes `hopi-api`
   (`HopiRules`, `HopiPerf`) in every build and exports it from the framework, adds and exports the
   iOS entry `hopi-start`, which brings the runtimes, with the flag only, applies the iOS release
   guard (`gradle/ios-release-guard.gradle`, naming the link its release check consumes), and
@@ -2313,7 +2358,8 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   `"real"` of the rules self-test's `done` line) read `SampleBuild` on both platforms. One
   process-wide Ktor client (`SampleHttp`; OkHttp on Android, Darwin on iOS,
   `ContentNegotiation` with kotlinx-serialization JSON) installs Hopi with
-  `logSink = Summary` and `agentBridge = true`. The UI is a small shop with three tabs:
+  `logSink = Summary` and `agentBridge = true` (which do nothing on iOS, where the plugin installs
+  nothing and `Hopi.start` starts the bridge). The UI is a small shop with three tabs:
   **Items** (`GET /items`, a lazy list keyed by id, then `GET /items/{id}` for the detail),
   **New item** (a validated form that POSTs JSON to `/items` with an
   `Authorization` header and opens the created item), and **Diagnostics**, whose "Fire requests"
@@ -2372,13 +2418,14 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   `benchmark/perf/idle.py` reads every thread's CPU ticks and context switches over an idle minute.
 - **`sample/androidApp`** (`applicationId` `dev.koga.hopi.sample`) hosts the shared UI in one
   activity, applies `id("dev.koga.hopi")` (with `agentBridge = true`), and depends on
-  `sample/shared` and `sample/fakesdk`. The plugin gives its debug build the runtimes (the real
-  Ktor plugin, automatic capture, perf) and its release build none, with no flag, and fails a
-  release build that would link one; `-Psample.hopiCapture=false` builds the debug variant as
-  release is built (`hopi { enabled = false }`: no runtime, the Ktor noop twin), the control arm of
-  the capture A/B. **`sample/fakesdk`** is a Java-only Android library with neither the plugin nor any
-  Hopi dependency, the stand-in for a third-party SDK: a static `OkHttpClient` with its own
-  application and network interceptors (`enqueue` and `execute`), a subclass built by reflection, a
+  `sample/shared` and `sample/fakesdk`. The plugin gives its debug build the runtimes (automatic
+  capture with the Ktor plugin's recorder, perf) and its release build none, with no flag, and
+  fails a release build that would link one; `-Psample.hopiCapture=false` builds the debug variant
+  as release is built (`hopi { enabled = false }`: no runtime, the thin Ktor plugin and
+  `hopi-api`), the control arm of the capture A/B. **`sample/fakesdk`** is a Java-only Android
+  library with neither the plugin nor any Hopi dependency, the stand-in for a third-party SDK: a
+  static `OkHttpClient` with its own application and network interceptors (`enqueue` and
+  `execute`), a subclass built by reflection, a
   `newBuilder()` client, `HttpURLConnection` GET, fixed-length POST and a 404 read through
   `getErrorStream`, `URL.openStream()` and a `URL::openConnection` method reference; it is compiled
   against OkHttp 4.12 and runs on the 5.3.2 Ktor brings. The Diagnostics button "Third-party SDK and
@@ -2405,8 +2452,8 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   view hosts `MainViewController()`. `project.yml` describes it and the checked-in
   `iosApp.xcodeproj` is generated from it with XcodeGen (2.46.0); no CocoaPods, no SwiftPM. A
   pre-build phase runs `./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode`, with
-  `-Phopi.enabled=true` for the Debug configuration only, so Release links no runtime (the Ktor
-  noop twin and `hopi-api`), and the iOS release guard fails a Release link that would hold one.
+  `-Phopi.enabled=true` for the Debug configuration only, so Release links no runtime (the thin
+  Ktor plugin and `hopi-api`), and the iOS release guard fails a Release link that would hold one.
   Script sandboxing is off for that phase (Gradle writes to `sample/shared/build`). ATS: the Debug
   configuration's `Info-Debug.plist` allows insecure HTTP loads to `127.0.0.1` and `localhost`
   only (`NSExceptionDomains`; no `NSAllowsArbitraryLoads`, no `NSAllowsLocalNetworking`);
@@ -2442,7 +2489,7 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   `CaptureVerification.swift` (launch arguments `-verifyCapture`, `-captureBench <spec>`,
   `-idleCPU S`) and `-ktorVerify` (`KtorVerify.kt`, iosMain) drive the end-to-end check in
   `benchmark/urlsession/e2e/`; the build setting `HOPI_ENABLED=false` (`xcodebuild ...
-  HOPI_ENABLED=false`) builds the Debug app with no runtime (the Ktor noop twin and `hopi-api`)
+  HOPI_ENABLED=false`) builds the Debug app with no runtime (the thin Ktor plugin and `hopi-api`)
   and without `hopi-start` (its Swift start compiled out), for A/B runs at the same optimisation
   level.
 - **Rules scenarios.** `sample/shared` depends on `hopi-api` in every build, as `api` so the
@@ -2451,7 +2498,10 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   sending a request named by the source that records it: for each target, a mock, every fail
   kind, a before-request delay, a delayed mock, a request edit (path `/missing` to `/echo` plus a
   header, which the echo shows), a request body edit, a response edit (expected unsupported, and
-  the real response read, on URLSession) and `times = 1`, each rule limited to the target's
+  the real response read, on URLSession), `times = 1` and a mocked 302 to `/items/1` (since the
+  runtime-split plan's stage 10: a target that follows redirects, every Ktor one, reads the real
+  200 its `HttpRedirect` reaches, the fake SDK's OkHttp and `HttpURLConnection` read the 302, and
+  the line notes the status expected), each rule limited to the target's
   source and to its own `rv=<target>-<scenario>` query key and removed again afterwards; one
   `{"rules":…,"ok":…}` line per scenario and a `{"rules":"done","failed":N}` line under
   `HopiSample` (stdout on iOS). A build with no runtime registered (built without the flag, or
@@ -2471,8 +2521,8 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   and response edits on `URLSession.shared` with a completion handler, a full delegate session,
   async `data(for:)` and a download task through `HopiRules.shared`, then the same pinning check
   with a session delegate that cancels every server-trust challenge (`-verifyRulesHttps <url>`).
-  No Ktor-plugin target exists on iOS: with URLSession capture on, the Darwin engine is always
-  ruled by URLSession.
+  No Ktor-plugin target exists on iOS: the plugin installs nothing there, and the Darwin engine is
+  always recorded and ruled by URLSession capture.
 
 `sample/devserver/devserver.py` (Python 3 standard library, bound to `127.0.0.1:8765`; `--nodelay`
 sets `TCP_NODELAY`, for per-request benchmarks, since Python writes headers and body in separate
@@ -2598,7 +2648,8 @@ Measured with a JVM benchmark against `ktor-client-mock`, plugin installed vs no
 
 ### Giant bodies
 
-Opt-in JVM benchmarks (`./gradlew :hopi-ktor:jvmGiantBodyBenchmark`, and the same task in
+Opt-in JVM benchmarks (`./gradlew :hopi-network:jvmGiantBodyBenchmark`, the Ktor plugin's
+recorder, in `hopi-network` since the runtime-split plan's stage 10, and the same task in
 `:hopi-core` and `:hopi-ui`; `:hopi-cli:testGiantBodyBenchmark`), excluded from the
 normal test tasks, generate six JSON shapes in memory (minified and pretty records, nesting 128K+
 deep, one huge string, CJK/emoji with byte 262144 inside a sequence, a number array) at 256 KB,

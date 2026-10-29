@@ -165,11 +165,13 @@ so the app pays no extra cost.
 - **iOS, URLSession (built).** `hopi-network` (since the runtime-split plan's stage 9; no noop),
   started by `hopi-start`'s `Hopi.start { }`: records every URLSession request of the process,
   observe only, with no per-client setup (architecture doc, "URLSession capture"; design in
-  `docs/design/urlsession-capture.md`). Ktor's Darwin engine
-  defers to it (one record per request; a Ktor request in flight when `start()` runs is recorded
-  once or missed, never twice, since 2026-10-27; a viewer attached at that moment sees its start
-  end as failed, "withdrawn: …", and the desktop ends one it missed while away or behind as gone
-  when it resumes). Tested on iOS 18.2 and 27.0 simulators; per-hook cost
+  `docs/design/urlsession-capture.md`). Ktor's Darwin engine is one of its URLSession clients, one
+  record per request: since the runtime-split plan's stage 10 the Ktor plugin installs nothing on
+  iOS, so nothing defers to capture any more (from 2026-10-27 until then, a Ktor request in flight
+  when `start()` ran was recorded once or missed, never twice, and a viewer attached at that moment
+  saw its start end as failed, "withdrawn: …"; the desktop still ends a row it missed while away or
+  behind as gone when it resumes); a Ktor engine that does not send through URLSession (CIO) is not
+  recorded on iOS. Tested on iOS 18.2 and 27.0 simulators; per-hook cost
   and a per-request A/B measured on the simulator only. Open: a physical device run, background
   sessions beyond metadata, WebSocket tasks.
 - **Android, OkHttp and `HttpURLConnection` (built).** The `dev.koga.hopi` Gradle plugin
@@ -179,8 +181,9 @@ so the app pays no extra cost.
   debuggable variants only (architecture doc, "Android capture"; design and measurements in
   `docs/design/android-capture.md`).
   Ktor's OkHttp and Android engines defer to it, except a request Ktor itself decodes
-  (`ContentEncoding`), which the Ktor plugin keeps. OkHttp 3.14 is recorded, 3.12/3.13 are left
-  alone. Verified end to end and measured on the API 35 emulator only.
+  (`ContentEncoding`), which the Ktor plugin's recorder keeps (`hopi-network`'s since the
+  runtime-split plan's stage 10, registered by the network tool). OkHttp 3.14 is recorded,
+  3.12/3.13 are left alone. Verified end to end and measured on the API 35 emulator only.
   Open: the per-request cost after the speed fixes (2026-10-25, debuggable emulator, small
   request, capture minus noop): calling-thread CPU +16 to +26 µs on OkHttp and +26 to +31 µs on
   `HttpURLConnection` (the 30 µs target is met on OkHttp, at its limit on `HttpURLConnection`;
@@ -201,7 +204,8 @@ so the app pays no extra cost.
 - **Built** (architecture doc, "Rules"; design in `docs/design/rules.md`): **mock**, **fail**
   (timeout, reset, unknown host, cancel, each source's own error), **delay** (before request and/or
   response) and **edit** (request method, URL parts, headers, body; response status, headers,
-  body), on every source (Ktor plugin, OkHttp, `HttpURLConnection`, URLSession) as far as each can
+  body), on every source (the Ktor plugin on Android and the JVM, OkHttp, `HttpURLConnection`,
+  URLSession, which also rules Ktor's Darwin engine) as far as each can
   without weakening the app's TLS, pinning or challenge handling; unsupported pieces are reported
   when a rule is added (URLSession: response edits, a before-response delay on a real request, body
   edits of file and stream uploads, background sessions, sessions created before `start()` other
@@ -210,8 +214,12 @@ so the app pays no extra cost.
   runtime-split plan's stage 5) show a source
   that never applies a rule as "not applied on <source>: …" and a rule as "inactive" when every
   source it is checked against (the named ones, or the platform's when it names none) excludes it;
-  Ktor, on every platform, excludes nothing, so a rule naming none never reads "inactive". First
-  match wins, one recorder applies it, every touched record is marked.
+  a rule naming none never reads "inactive", since its line does not carry the app's platform
+  (on Android and the JVM the Ktor recorder excludes nothing anyway; on iOS, URLSession alone since
+  the runtime-split plan's stage 10, a response edit naming none applies nowhere, see Open). First
+  match wins, one recorder applies it, every touched record is marked. Every platform mock and
+  response edit carries `Cache-Control: no-store` (since stage 10), so a cache above the stack,
+  such as Ktor's `HttpCache`, never serves one after its rule is gone.
   Replay was built too and then removed (see "Replay (no priority)").
 - Zero cost with no rule: one volatile read and a reference comparison per request (one
   `canInitWithTask:` answer per task on a URLSession session created after `start()`). Rules live
@@ -219,7 +227,8 @@ so the app pays no extra cost.
   since the runtime-split plan's stage 7 `HopiRules` is in `hopi-api`, in every build, and does
   nothing until a debug build's start registers core's rules runtime (a rule added before it is
   dropped and counted in one notice line); the release checks cover it.
-  `rules = false` on every recorder (Ktor, `Hopi.start { }` on iOS, `hopi { network { } }`).
+  `rules = false` on every recorder (Ktor's `install(Hopi) { }`, `Hopi.start { }` on iOS and the
+  JVM, `hopi { network { } }`; the network tool's covers the Ktor recorder it registers).
 - Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
   bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
   `rules ls|rm|clear|enable|disable|reset`, exit code 4); `HopiRules` (Kotlin, Swift
@@ -244,11 +253,14 @@ so the app pays no extra cost.
   - The desktop's rule "edit" changes only priority, times and hits (`rules.update` supports
     nothing else); the desktop form has no field for header predicates.
   - The desktop's hits are the app's (re-listed on a ruled summary or `get` reply, 2026-10-27).
-  - No Ktor-plugin rule source exists on iOS while URLSession capture runs (the Darwin engine is
-    ruled by URLSession); sessions created before `start()` cannot be mocked.
-  - On iOS with URLSession capture, a response edit or a before-response delay that names no
-    sources still reads active (switch on, no "inactive"): its "not applied on urlsession" line is
-    the only sign, since the Ktor plugin defers for the Darwin engine.
+  - No Ktor-plugin rule source exists on iOS (since the runtime-split plan's stage 10 the plugin
+    installs nothing there; the Darwin engine is ruled by URLSession); sessions created before
+    `start()` cannot be mocked.
+  - On iOS a response edit, or a before-response delay on a real request, that names no sources
+    applies nowhere (URLSession, the platform's only source since stage 10, excludes both), yet
+    still reads active (switch on, no "inactive"): its "not applied on urlsession" line is the only
+    sign, since the rule line does not carry the app's platform and the hosts mark only a rule
+    whose named sources all exclude it.
   - A rule naming only sources the platform lacks (okhttp on iOS) reads active with no line, and
     the match shorthand does not show its sources.
   - On iOS an app without URLSession capture still gets the URLSession exclusion line for a rule
@@ -257,7 +269,8 @@ so the app pays no extra cost.
   - A mock copied from a record (`fromTransaction`, "Mock this response", `--from`) decodes the
     single gzip or deflate an OkHttp or `HttpURLConnection` record holds raw (up to 1 MiB) and
     refuses br, zstd and stacked codings; a Ktor client without `ContentEncoding` whose request
-    names its own `Accept-Encoding` records raw bytes under `ktor`, and those are still copied as held.
+    names its own `Accept-Encoding` records raw bytes under `ktor` (on Android and the JVM; on iOS
+    URLSession decodes, stage 10's R3), and those are still copied as held.
   - Later: live breakpoints (pause and edit a request in flight), matching on the request body,
     stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
 

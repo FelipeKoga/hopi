@@ -136,9 +136,11 @@ kotlin {
             implementation(libs.ktor.client.encoding)
         }
         iosTest.dependencies {
-            // Ktor's Darwin engine with the Ktor plugin: one record per request, the capture's.
+            // Ktor's Darwin engine with the Ktor plugin: one record per request, the capture's, and
+            // under ContentEncoding the body URLSession decoded (stage 10's R3).
             implementation(libs.ktor.client.darwin)
             implementation(project(":hopi-ktor"))
+            implementation(libs.ktor.client.encoding)
         }
         jvmTest.dependencies {
             // The recorder's tests (moved from hopi-ktor in the runtime-split plan's stage 10): the

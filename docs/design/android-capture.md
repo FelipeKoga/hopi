@@ -406,6 +406,19 @@ end of the start sequence, whatever tools ran: with `network { enabled = false }
 
 ## Dedupe with the Ktor plugin
 
+**Since the runtime-split plan's stage 10 (2026-10-29)** "the plugin" below is the Ktor plugin's
+recorder, `hopi-network`'s adapter (`dev.koga.hopi.network.internal.ktor`, compiled against Ktor
+and `hopi-ktor` `compileOnly`), which the network tool registers in `hopi-api`'s Ktor slot right
+after it starts capture, through one forwarder; the thin `hopi-ktor` installs it per client and
+installs nothing without it. Everything below holds for it, with three changes. Android capture is
+now the only coverer: on iOS the plugin installs nothing and URLSession capture covers no engine.
+An app without the Gradle plugin (the runtime added by hand, a Robolectric test where nothing is
+transformed) gets no recorder at all, so its Ktor plugin records nothing, rather than recording as
+`"ktor"`; with the Gradle plugin and nothing covered (an unknown OkHttp version, OkHttp excluded),
+the recorder records as `"ktor"`. And the tool covers the engines before it registers the
+recorder, so the in-flight window of the timing paragraph is gone; the withdrawal stays,
+unreachable outside tests. As designed and first built:
+
 The iOS rule is reused unchanged: **platform capture is the source of truth for the engines it
 covers, and the plugin defers.** The auto-start covers `io.ktor.client.engine.okhttp.` only when
 the `RealCall` annotation proves that rewrite 1 is in the APK. So a Ktor OkHttp client yields one
@@ -497,7 +510,9 @@ start, the configuration, the capture dispatcher and the store installation, and
 installs both rewrites. Two modules would mean two parity pairs and two providers for no
 selection a developer needs (`hopi { okhttp = false }` turns one off at build time instead).
 `hopi-android` is not a dependency of `hopi-ktor` or of any KMP module. Only the plugin adds it,
-to an Android application.
+to an Android application. (Since the runtime-split plan's stage 10 its successor, `hopi-network`,
+compiles the Ktor plugin's recorder against `hopi-ktor` `compileOnly`: neither brings the other
+at run time, and the thin `hopi-ktor` depends on `hopi-api` alone.)
 
 Public API (what the noop mirrors). Since stage 9 of the runtime-split plan (2026-10-29): deleted,
 with the noop; the status it held is the network status of `hopi-api`'s registry,
@@ -604,9 +619,20 @@ guards"). The wiring as designed and first built:
   (`-keep,allowoptimization,allowshrinking class okhttp3.internal.connection.RealCall`). They apply
   only where the real runtime is, which is debuggable variants only. Since stage 4 `hopi-core`'s
   consumer rules keep the same two packages, for the provider and the generated configuration it
-  loads by name.
+  loads by name. Since the runtime-split plan's stage 10 `hopi-network`'s consumer rules also hold
+  `-dontwarn io.ktor.**`, `-dontwarn dev.koga.hopi.ktor.**` and `-dontwarn kotlinx.io.**`: the Ktor
+  plugin's recorder is compiled against Ktor, `hopi-ktor` and kotlinx-io, which an app may not
+  have (the network tool catches the missing class), and R8 must not fail a minified debuggable
+  variant on them (the functional test's minified variant, which has no Ktor, keeps the references;
+  10.4 in the plan). The side effect, as `-dontwarn okhttp3.**` has for OkHttp: in a minified
+  debuggable variant, the only kind with `hopi-network`, they also mute R8's missing-class reports
+  for the app's own Ktor and kotlinx-io.
 
 ### Twin selection (why `-Phopi.enabled` is no longer needed on Android)
+
+Since the runtime-split plan's stage 10 (2026-10-29) no twin pair is left: `hopi-ktor-noop`, the
+last, was deleted, and the thin `hopi-ktor` is the same artifact in every variant, so
+`selectTwins` does nothing (stage 11 removes it). As designed and first built:
 
 With `selectTwins = true` (the default), the plugin adds a dependency substitution to each
 variant's `compileConfiguration` and `runtimeConfiguration`. Debuggable variants get
@@ -636,7 +662,8 @@ architecture doc's sample section changes accordingly.
 Since stage 9 of the runtime-split plan (2026-10-29): there is no noop twin; release variants get
 no runtime, the plugin's release guard fails one that resolves a runtime, and one task,
 `:sample:androidApp:verifyReleaseHasNoRuntime`, replaces both release checks below (the release
-classpath's Hopi components are exactly `:hopi-api` and `:hopi-ktor-noop`, no type of a runtime's
+classpath's Hopi components are exactly `:hopi-api` and `:hopi-ktor-noop` (since stage 10
+`:hopi-api` and the thin `:hopi-ktor`), no type of a runtime's
 package is referenced, the merged manifest declares no Hopi component); the contract is ARCHITECTURE's ("Release guards",
 "The sample's release checks"). As designed and first built:
 
@@ -766,7 +793,10 @@ classes pass through the `instrument` rewriter, so these are instrumentation-equ
 9. Ktor dedupe: Ktor's OkHttp engine in the instrumented loader with `hopi-ktor` installed gives
    one record per request, `"okhttp"`. Two concurrent POSTs with different bodies give the right
    bodies. A channel body is captured. Redirects are one record per hop. Without the annotation
-   (a non-rewritten OkHttp), the plugin records as `"ktor"`, and nothing is recorded twice.
+   (a non-rewritten OkHttp), the plugin records as `"ktor"`, and nothing is recorded twice. (Since
+   the runtime-split plan's stage 10 the scenarios register the recorder, bound to the test's store,
+   in `hopi-api`'s Ktor slot before `install(Hopi)`, through the test-only `ScenarioKtorHooks`; a
+   test with `hopi-ktor` hidden from the app checks that the network tool then registers none.)
 10. Concurrency: 64 parallel calls with distinct bodies, each record with its own body. The
     capture dispatcher's order holds: no `Started` after its terminal record.
 11. Allocation bound: with the cap at 1 byte and at 256 KB, the reader thread's allocation for an
@@ -792,7 +822,9 @@ fixture repository, for the runtime, `hopi-perf` and two twin pairs, which a lib
 directions (`hopi-ktor-noop`, `hopi-rules`); the debug APK must hold every real stand-in and the
 release APK every noop. (Since the runtime-split plan's stage 7 the library names `hopi-ktor-noop`
 and `hopi-api`, which has no twin and must be in both APKs, and since stage 8 no `hopi-perf`:
-`perf { enabled = true }` adds it, so the debug APK holds it and the release APK none.) The TestKit directory is a dedicated one under the plugin's
+`perf { enabled = true }` adds it, so the debug APK holds it and the release APK none. Since stage
+10 the library names the thin `hopi-ktor` and `hopi-api`, both in both APKs, and no twin pair is
+left.) The TestKit directory is a dedicated one under the plugin's
 `build/`, never the developer's Gradle user home. A `--stop` there would also stop the outer
 build's daemon, which has the same Gradle version and the same home. AGP is not downloaded: the
 nested build runs `--offline`, and its environment sets
@@ -820,7 +852,9 @@ the same (the same server log) and that `hopi` finds no bridge.
   C = `hopi { enabled = false }` through a sample property (`-Psample.hopiCapture=false`), which
   means noop runtime and no transform. The Ktor/UI selection is the same in both (real, so the
   difference is capture and its instrumentation only; the Ktor plugin defers in A and records in
-  C, so the Ktor rows also measure the swap).
+  C, so the Ktor rows also measure the swap). Since the runtime-split plan's stage 10 both arms
+  have the thin `hopi-ktor` and C registers no recorder, so the plugin records nothing in C: the
+  Ktor rows compare capture with no Hopi at all.
 - **Workload** (`--es captureBench <spec>`, the `GiantSpec` style): sequential requests through
   `FakeSdk`'s OkHttp client (`execute` on one worker thread), `FakeSdk`'s `HttpURLConnection`, and
   the app's Ktor client, at 1 KB, 64 KB, 1 MB and 5 MB, `Content-Length` and chunked. It records

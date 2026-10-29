@@ -10,9 +10,10 @@ import dev.koga.hopi.core.start.HopiToolContext
  * it with its own setting ([rules]), the global ones come from the start configuration. Its start
  * is [UrlSessionCapture.start], which keeps the order the native library needs: the installation
  * (the store, with the caps the start sequence preset), the store as the callbacks' target, the
- * Ktor Darwin cover, the hooks, `RuleEngine.recorderStarted`, then the rules' hooks. It is that
- * start's only caller; once capture runs it writes the network status to `hopi-api`'s registry
- * (`HopiRuntimes.networkStarted`; OkHttp is Android's, so never instrumented here).
+ * hooks, `RuleEngine.recorderStarted`, then the rules' hooks. It is that start's only caller; once
+ * capture runs it writes the network status to `hopi-api`'s registry (`HopiRuntimes.networkStarted`;
+ * OkHttp is Android's, so never instrumented here). It registers no Ktor recorder: the Ktor plugin
+ * installs nothing on iOS, where this capture records the Darwin engine like any URLSession client.
  */
 @HopiInternalApi
 public class NetworkTool(

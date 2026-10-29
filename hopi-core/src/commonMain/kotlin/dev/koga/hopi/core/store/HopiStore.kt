@@ -299,10 +299,11 @@ public class HopiStore(
     public fun submitEnd(record: DeferredRecord): Boolean = enqueue(record, terminal = true)
 
     /**
-     * Withdraws a record that another recorder may also have made (the Ktor plugin's, when a
-     * platform recorder started while the request was in the engine): the store drops the entry
-     * and ignores every later snapshot of its id, so the request is never listed twice, at the cost
-     * of maybe missing it. Queued like an end, after the record's start, and never suspends; false
+     * Withdraws a record that another recorder may also have made (the Ktor plugin's recorder's,
+     * when a platform recorder started covering the engine while the request was in it, which no
+     * recorder does since the runtime-split plan's stage 10; kept for one that would): the store
+     * drops the entry and ignores every later snapshot of its id, so the request is never listed
+     * twice, at the cost of maybe missing it. Queued like an end, after the record's start, and never suspends; false
      * when the store is closed or the lane is full (counted in [droppedTerminalWrites]). [last] is
      * the record's final snapshot, failed with an error that says why. Nothing is published for it,
      * except when a pass before this one published the start and a viewer is attached: a viewer or

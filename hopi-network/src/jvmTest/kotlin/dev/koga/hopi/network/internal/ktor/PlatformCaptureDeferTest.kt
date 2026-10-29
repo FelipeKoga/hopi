@@ -32,9 +32,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
 /**
- * One record per request: when a platform recorder covers the client's engine (URLSession capture
- * covers Darwin), the plugin records nothing for it and leaves the call untouched; otherwise it
- * records as before, marked `ktor`. MockEngine stands in for a covered engine here.
+ * One record per request: when a platform recorder covers the client's engine (Android capture
+ * covers Ktor's OkHttp and, rewritten, Android engines; URLSession capture covered Darwin, and
+ * since the runtime-split plan's stage 10 covers no engine), the plugin records nothing for it and
+ * leaves the call untouched; otherwise it records as before, marked `ktor`. MockEngine stands in
+ * for a covered engine here.
  */
 class PlatformCaptureDeferTest {
     private val mockEngine = "io.ktor.client.engine.mock."
@@ -109,8 +111,9 @@ class PlatformCaptureDeferTest {
                 markers += request.headers[PlatformCapture.PASS_THROUGH_HEADER]
                 respond("ok", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/plain"))
             }
-            // URLSession capture: it records what URLSession decoded, Accept-Encoding or not, and
-            // nothing would remove a marker from the wire.
+            // A coverer without the pass-through, as URLSession capture was (since stage 10 it covers
+            // no engine): it records what URLSession decoded, Accept-Encoding or not, and nothing
+            // would remove a marker from the wire.
             PlatformCapture.cover(mockEngine)
             client.get("https://api.example.com/encoded") { header(HttpHeaders.AcceptEncoding, "gzip") }.bodyAsText()
             delay(200)
@@ -126,7 +129,9 @@ class PlatformCaptureDeferTest {
             t.store.addEventListener { events += it }
             val payload = asciiBytes(100_000)
             val client = mockClient(t.store) { request ->
-                // URLSession capture's start() while the engine has the request: its hook may see it.
+                // A recorder's start covering the engine while it has the request, as URLSession
+                // capture's start() did: its hook may see it. None does since stage 10; the
+                // withdrawal is kept for a recorder that would.
                 if (request.url.encodedPath == "/in-flight") PlatformCapture.cover(mockEngine)
                 // No Content-Length: the body is teed, and its end would come before the call returns.
                 respond(ByteReadChannel(payload), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/plain"))

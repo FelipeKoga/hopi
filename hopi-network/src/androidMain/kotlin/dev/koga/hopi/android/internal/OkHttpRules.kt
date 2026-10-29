@@ -146,11 +146,13 @@ internal object OkHttpRules {
 
     /**
      * The mock as a response to [request] (the request as the app's interceptors left it): HTTP/1.1,
-     * the standard reason phrase, no handshake (no TLS happened, so none is faked).
+     * the standard reason phrase, no handshake (no TLS happened, so none is faked), and
+     * `Cache-Control: no-store` in place of the rule's ([ResponseEdits.noStore]: a cache above
+     * OkHttp, such as Ktor's `HttpCache`, must not keep it after the rule is gone).
      */
     private fun mockResponse(request: Request, mock: MockSpec): Response {
         val now = System.currentTimeMillis()
-        val headers = headersOf(ResponseEdits.mockHeaders(mock))
+        val headers = headersOf(ResponseEdits.noStore(ResponseEdits.mockHeaders(mock)))
         val bytes = mock.body?.bytes?.takeIf { ResponseEdits.hasBody(request.method, mock.status) } ?: EMPTY
         return Response.Builder()
             .request(request)
@@ -164,11 +166,14 @@ internal object OkHttpRules {
             .build()
     }
 
-    /** [response] with [edit] applied; a replaced body closes the original first, so OkHttp releases or discards the connection. */
+    /**
+     * [response] with [edit] applied, under `Cache-Control: no-store` ([ResponseEdits.noStore]); a
+     * replaced body closes the original first, so OkHttp releases or discards the connection.
+     */
     private fun editResponse(response: Response, edit: ResponseEdit): Response {
         val pairs = ArrayList<Pair<String, String>>(response.headers.size)
         for (i in 0 until response.headers.size) pairs += response.headers.name(i) to response.headers.value(i)
-        val headers = headersOf(ResponseEdits.editHeaders(pairs, edit))
+        val headers = headersOf(ResponseEdits.noStore(ResponseEdits.editHeaders(pairs, edit)))
         val builder = response.newBuilder().headers(headers)
         edit.status?.let { builder.code(it).message(ResponseEdits.reasonPhrase(it)) }
         val body = edit.body

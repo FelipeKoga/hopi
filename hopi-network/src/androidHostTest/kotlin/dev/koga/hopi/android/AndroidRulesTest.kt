@@ -595,6 +595,117 @@ class AndroidRulesTest {
         assertEquals("mock", store.awaitTerminal(2).last().ruleApplied)
     }
 
+    // Cache-Control: no-store on every platform mock and response edit (ResponseEdits.noStore)
+
+    /**
+     * A mock with the rule's own `Cache-Control` (two values, two cases), a body edit, and a
+     * header-only edit that adds a `Cache-Control` of its own over the server's (`/cacheable`'s
+     * `max-age=600`), each limited to [source]: the path it matches, the rule, and the start of the
+     * body the app must read.
+     */
+    private fun noStoreCases(source: RuleSource): List<Triple<String, RuleSpec, String>> = listOf(
+        Triple(
+            "/json",
+            rule("GET */json", source, mock = MockSpec(200, listOf("Cache-Control" to "max-age=600", "cache-control" to "public", "Content-Type" to "text/plain"), RuleBody.text("mocked"))),
+            "mocked",
+        ),
+        Triple("/cacheable", rule("GET */cacheable", source, edit = EditSpec(response = ResponseEdit(body = RuleBody.text("edited")))), "edited"),
+        Triple(
+            "/cacheable",
+            rule("GET */cacheable", source, edit = EditSpec(response = ResponseEdit(setHeaders = listOf("X-Edited" to "1"), addHeaders = listOf("Cache-Control" to "max-age=60")))),
+            "cacheable",
+        ),
+    )
+
+    /** Every `Cache-Control` value of [headers], whatever the name's case. */
+    private fun cacheControl(headers: List<Pair<String, String>>): List<String> =
+        headers.filter { it.first.equals("Cache-Control", ignoreCase = true) }.map { it.second }
+
+    @Test
+    fun okHttpMocksAndResponseEditsReachTheAppUnderNoStore() {
+        // A platform rule cannot see a cache above OkHttp (Ktor's HttpCache): no Cache-Control of the
+        // rule's or the server's reaches the app under a mock or a response edit, only no-store.
+        for ((path, spec, body) in noStoreCases(RuleSource.OKHTTP)) {
+            RuleEngine.resetForTests()
+            add(spec)
+            val observed = okhttp("path" to path)
+            @Suppress("UNCHECKED_CAST")
+            val headers = observed["headers"] as Map<String, List<String>>
+            assertEquals(listOf("no-store"), headers["cache-control"], "$path: $headers")
+            assertTrue((observed["body"] as String).startsWith(body), observed.toString())
+            if (body == "cacheable") assertEquals(listOf("1"), headers["x-edited"], headers.toString())
+        }
+        assertEquals(listOf("GET /cacheable", "GET /cacheable"), server.received.toList(), "the mock reached no server")
+        // The records hold the responses as delivered.
+        val records = store.awaitTerminal(3)
+        assertTrue(records.all { cacheControl(it.responseHeaders) == listOf("no-store") }, records.map { it.responseHeaders }.toString())
+    }
+
+    @Test
+    fun urlConnectionMocksAndResponseEditsReachTheAppUnderNoStore() {
+        for ((path, spec, body) in noStoreCases(RuleSource.URL_CONNECTION)) {
+            RuleEngine.resetForTests()
+            add(spec)
+            val observed = url("path" to path)
+            assertEquals(listOf("no-store"), observed["cacheControl"], "$path: $observed")
+            assertTrue((observed["body"] as String).startsWith(body), observed.toString())
+            if (body == "cacheable") assertEquals("1", observed["headerX"], observed.toString())
+        }
+        assertEquals(listOf("GET /cacheable", "GET /cacheable"), server.received.toList(), "the mock reached no server")
+        val records = store.awaitTerminal(3)
+        assertTrue(records.all { cacheControl(it.responseHeaders) == listOf("no-store") }, records.map { it.responseHeaders }.toString())
+    }
+
+    /**
+     * Ktor's `HttpCache` above a platform rule ([engine] `okhttp`: Ktor's OkHttp engine over the
+     * interceptor; `android`: its Android engine over the wrappers; no Hopi plugin): the client
+     * fetches [path] under the `times = 1` rule [spec], the rule is removed, and the client fetches
+     * [path] again. Returns both responses as the app read them.
+     */
+    private fun underHttpCache(engine: String, path: String, spec: RuleSpec): Pair<Map<String, Any?>, Map<String, Any?>> {
+        RuleEngine.resetForTests()
+        server.received.clear()
+        val id = add(spec)
+        val observed = runScenario(
+            "rule.httpCache", store, server.base,
+            extra = mapOf("engine" to engine, "path" to path, "between" to Runnable { check(RuleEngine.remove(id)) { "rule $id was gone already" } }),
+            jars = if (engine == "okhttp") testJars("ktorOkhttp") else emptyList(),
+        )
+        assertTrue((observed["engine"] as String).startsWith("io.ktor.client.engine.$engine."), observed.toString())
+        @Suppress("UNCHECKED_CAST")
+        return observed["first"] as Map<String, Any?> to observed["second"] as Map<String, Any?>
+    }
+
+    @Test
+    fun ktorsHttpCacheKeepsNoPlatformMockOrResponseEdit() {
+        // Stage 10's R5: without no-store, HttpCache stored each of these (max-age=600, the rule's or
+        // the server's) and served it again after the rule was gone, without a request.
+        for ((engine, source) in listOf("okhttp" to RuleSource.OKHTTP, "android" to RuleSource.URL_CONNECTION)) {
+            val mock = MockSpec(200, listOf("Cache-Control" to "max-age=600", "Content-Type" to "text/plain"), RuleBody.text("mocked"))
+            val (mocked, afterMock) = underHttpCache(engine, "/json", rule("GET */json", source, mock = mock, times = 1))
+            assertEquals("mocked", mocked["body"], engine)
+            assertEquals(listOf("no-store"), mocked["cacheControl"], engine)
+            assertEquals("""{"hello":"world"}""", afterMock["body"], "$engine: the second GET is real, not the cached mock")
+            assertEquals(listOf("GET /json"), server.received.toList(), engine)
+
+            val bodyEdit = EditSpec(response = ResponseEdit(body = RuleBody.text("edited")))
+            val (edited, afterEdit) = underHttpCache(engine, "/cacheable", rule("GET */cacheable", source, edit = bodyEdit, times = 1))
+            assertEquals("edited", edited["body"], engine)
+            assertEquals(listOf("no-store"), edited["cacheControl"], engine)
+            assertEquals("cacheable 2", afterEdit["body"], "$engine: the second GET is real, not the cached edit")
+            assertEquals(listOf("max-age=600"), afterEdit["cacheControl"], engine)
+
+            val headerEdit = EditSpec(response = ResponseEdit(setHeaders = listOf("X-Edited" to "1")))
+            val (headerEdited, afterHeaderEdit) = underHttpCache(engine, "/cacheable", rule("GET */cacheable", source, edit = headerEdit, times = 1))
+            assertEquals("cacheable 1", headerEdited["body"], engine)
+            assertEquals("1", headerEdited["xEdited"], engine)
+            assertEquals(listOf("no-store"), headerEdited["cacheControl"], engine)
+            assertEquals("cacheable 2", afterHeaderEdit["body"], "$engine: the second GET is real, not the cached edit")
+            assertNull(afterHeaderEdit["xEdited"], engine)
+            assertEquals(2, server.received.size, engine)
+        }
+    }
+
     @Test
     fun theRuledConnectionsAnswerEveryMethodOrInheritOneThatReadsTheirAnswers() {
         val androidJar = System.getProperty("hopi.androidJar")

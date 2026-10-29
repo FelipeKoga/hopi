@@ -739,8 +739,8 @@ Rules for every stage:
      (verified);
    - `sample/shared/build.gradle.kts` lines that name the module (:21, :24, :28, :83-86, :94-99,
      :116-120, verified);
-   - `README.md:560-564` (the base check) and section 7: one missing task path fails the whole
-     invocation (cross-check problem 14);
+   - `README.md:816-820` (the base check, "Building") and section 7: one missing task path fails
+     the whole invocation (cross-check problem 14);
    - the module's `api/` dumps.
 6. **Fast gate, then the full run.** Before the base check (43.5 min in stage 0) run
    `./gradlew check --dry-run`. It fails fast on a missing project or task ("Project with path
@@ -1963,7 +1963,7 @@ task path edits both (rule 5). As of stage 10a:
 ```
 
 - One task path that no longer exists fails the whole invocation: a stage that deletes or renames
-  one edits `README.md:560-564` and this section in the same commit (rule 5).
+  one edits `README.md:816-820` ("Building") and this section in the same commit (rule 5).
 - `:checkNoopParity`, `functionalTest` and `:checkPublication` already run inside `check` (root
   `build.gradle.kts:139`, `:143` with `gradle-plugin/hopi-gradle-plugin/build.gradle.kts:124`, and
   `:329`), and so does `verifyIosReleaseExcludesCapture` on macOS
@@ -1985,9 +1985,9 @@ task path edits both (rule 5). As of stage 10a:
 | 11 | `:checkNoopParity` | |
 
 Stages 2, 4, 6, 7 and 12 to 14 change no task path. The sample's sets that `check` asserts
-(`sample/androidApp/build.gradle.kts:125` and `:228`) after each stage:
+(`sample/androidApp/build.gradle.kts:207` and `:261`) after each stage:
 
-| After | Release set (`:125`, equal) | Debug set (`:228`, contains) |
+| After | Release set (`:207`, equal) | Debug set (`:261`, contains) |
 | --- | --- | --- |
 | today | `:hopi-ktor-noop`, `:hopi-ui-noop`, `:hopi-rules-noop`, `:hopi-android-noop`, `:hopi-perf-noop` | `:hopi-android`, `:hopi-core`, `:hopi-ktor`, `:hopi-ui`, `:hopi-rules`, `:hopi-perf` |
 | 5 | minus `:hopi-ui-noop` | minus `:hopi-ui` |
@@ -2060,7 +2060,7 @@ Rewritten after stage 1; stage numbers are the new section 6's.
 | A runtime reaches an Android release build through a manual dependency | high | Built in stage 9: the plugin's `hopiReleaseGuard<Variant>` fails a non-debuggable variant whose runtime classpath holds a runtime, before any dex task (E3.6-c), and the provider's `FLAG_DEBUGGABLE` check writes one notice and starts nothing in an unguarded release APK (E3.6-d, section 9); `verifyReleaseHasNoRuntime` |
 | A stage leaves `check` red because a hard-coded module set, fixture pair, plugin constant or task path was not edited (each full run takes about 45 min) | high | The same-commit list of section 6; the fast gate `./gradlew check --dry-run`, which cannot see module-set failures, so the full run decides |
 | A consumer with `mavenLocal()` silently resolves a deleted noop: `~/.m2/repository/dev/koga/hopi` holds every `*-noop` 0.1.0 and the plugin falls back to `dev.koga.hopi:<noop>:0.1.0` (`HopiPlugin.kt:134-135`) | medium | Each noop constant leaves the plugin in the stage that deletes its module; stage 14 publishes the new set and tells the owner the stale noops are theirs to delete |
-| Ktor's `HttpCache` stores a platform mock, or URLSession hands over encoded bodies for a request that names its own `Accept-Encoding` (the thin plugin is inert on iOS) | medium | E1 R3 and R5 run first in stage 10; the fixes are named there |
+| Ktor's `HttpCache` stores a platform mock, or URLSession hands over encoded bodies for a request that names its own `Accept-Encoding` | medium | Settled in stage 10: R5 measured `HttpCache` storing a platform mock and edits, so core's rules now answer every platform mock and edit with `Cache-Control: no-store`; R3 measured URLSession handing over decoded bodies, so no decoding was added |
 | compileOnly Ktor in a source set shared by android and jvm does not build (P1) | medium | Settled in stage 10's run: a shared `androidAndJvm` source set, grouped by the Android target's platform type (`withAndroidTarget()` does not select AGP's KMP target), builds with Ktor and `hopi-ktor` `compileOnly`; the fallback was not needed |
 | The Debug build made with `HOPI_ENABLED=false` (the A/B arm) stops compiling once Swift calls `Hopi` | medium | Swift's `#if HOPI` tied to `HOPI_ENABLED` (P3); E7 X5 in stage 6 |
 | Perf loses its start on iOS, or frames on Android, between stages | medium | Current-activity tracking moved into core (P5, stage 4) before the in-app UI went (stage 5); since stage 8 perf's only start is its tool (Android's provider, iOS's `Hopi.start`), which registers `HopiPerf`'s runtime, and a `HopiPerf.start` before it is dropped and counted in one notice; stage 8's P5 check and `-verifyPerf` pass (section 9) |
@@ -2753,6 +2753,44 @@ API 35; simulator `iPhone 17`, iOS 27.0; evidence in `build/evidence/runtime-spl
   37]`, an extra 37 ms stall with the host 3.7 GB into swap), which passed 3 of 3 reruns alone;
   every other task was green. 9b's run was green.
 
+Stage 10 (2026-10-29; 10a `cad60c3` on `80f1a46`, then 10b's edits on it; emulator
+`Hopi_API_35`, API 35; simulator `iPhone 17`, iOS 27.0; evidence in
+`build/evidence/runtime-split/stage10/` and `stage10-experiments.md` in the session's scratchpad):
+
+- **First ([run])**: the `compileOnly` probe builds a source set shared by Android and the JVM
+  (grouped by the Android target's platform type) with Ktor and `hopi-ktor` `compileOnly`, so P1's
+  fallback was not needed. R1: with `ContentEncoding` and no plugin, both Android engines record the
+  gzip bytes with their `Content-Encoding`. R2 (emulator): the header is present exactly when the
+  bytes are gzip. R3 (simulator): URLSession hands over decoded bodies when the request names its
+  own `Accept-Encoding`, plain and through Ktor Darwin, so no decoding was added. R4: the rules'
+  semantics through Ktor's engines without the plugin (a mocked 302 followed by `HttpRedirect`, a
+  401 retried once under `Auth`, each fail's exception type, `HttpTimeout` and `expectSuccess`). R5
+  and E4 X4: `HttpCache` stored a platform mock and edits on OkHttp, Android and Darwin, so 10b
+  answers them with `no-store`.
+- **10a's gates** (its implementer and fixer): `hopi-ktor` 8, `hopi-network`'s JVM tests 79 and
+  Android host tests 87, `hopi-start` on the JVM and iOS, `hopi-network`'s iOS tests 49,
+  `CliBridgeTest` 17; the plugin's unit and functional tests, with an R8 positive control; the
+  sample's release report (`:hopi-api`, `:hopi-ktor`; 32 Hopi classes) and dependency graphs; a
+  javap gate on what the Android provider initializes; the publication grep (no Ktor edge in
+  `hopi-network` or `hopi-start`). Two read-only reviews found 14 problems before the commit,
+  among them the client redaction iOS lost with the plugin's own installation (now documented
+  with its remedy) and a JVM snippet in README that did not compile without the flag.
+- **10b's gates**: core's JVM tests 290 and iOS tests 199, `hopi-network`'s JVM 79, host and iOS
+  52 (with `ktorsHttpCacheKeepsNoUrlSessionMock` and R3's two cases); a mutation run showed the new
+  host tests fail without `no-store`. Two read-only reviews found 11 problems; 10 were fixed
+  before the commit (among them `mock-302`'s verdict, which a plain 200 could pass, and two live
+  risk items in urlsession-capture.md).
+- **Emulator** (a reduced set, at the owner's request to finish quickly): the capture end to end
+  (`benchmark/android-capture/e2e/run.sh`, `check.py`): 54 checks, 0 failed. `--es rulesVerify
+  all`: `{"rules":"done","real":true,"failed":0,"scenarios":48}` and the pinned check ok; `mock-302`
+  follows to 200 on the Ktor targets (recorded with `source` Ktor, through the recorder 10a
+  moved) and stays 302 on the others.
+- **Not run** (the memo's after-report list, left at the owner's request): the iOS simulator
+  app checks (`-thirdPartySDK`, `-verifyRules`, `capture-swift-test.sh`, the URLSession end to
+  end), the Xcode builds, the iOS release guard's cases, the ART probe and start-line A/B, both
+  capture A/Bs, and the device check of a JVM app started with `Hopi.start`.
+- **Base check**: green on 10a (3 min 55 s) and on 10b.
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2820,7 +2858,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 7. Rules into the API | done: `HopiRules`, its builders, `HopiFailure`, `HopiSource` and `HopiRuleInfo` in `hopi-api` (`dev.koga.hopi.rules`; its dumps hold `hopi-rules`' declarations), read by core's rules runtime through `@HopiInternalApi` members; the start sequence registers `ApiRules`, which only forwards (`ApiRuleCalls`), right after the `enabled` check (7.3); a rule added before it is dropped and counted in one notice, and an iOS Debug binary writes one `NSLog` line for a missing start; `from(id)` creates no store; the plugin aligns `hopi-api` (7.7); `hopi-rules` and `hopi-rules-noop` deleted; [run] results in section 9 | `10cfce9` (test fix), `ce57543` |
 | 8. Perf into API and runtime | done: `HopiPerf`, `HopiMonitor` and `HopiPerfConfig` in `hopi-api` (`dev.koga.hopi.perf`), with an `@HopiInternalApi` `HopiPerfRuntime` and the registry's perf slot, dropped-start count and kept label; `hopi-perf` is the runtime behind it (empty dumps): perf's tool registers `ApiPerf`, which only forwards (`ApiPerfCalls`), and writes the dropped-starts notice; `HopiPerf` no longer starts itself and only what a block sets applies (8.1); nothing on Android's start path loads a monitor class (the backend split); frames report `attaching` (8.6); `PerfLauncher` renamed `CurrentActivity`; `perf { remoteControl }` and `HopiStartConfig.perfRemoteControl` (8.5); `hopi-perf-noop` and the perf twin pair deleted; the plugin adds `hopi-perf` to debuggable build types; [run] results in section 9 | (this commit) |
 | 9. Network runtime and release guards | 9a done: `hopi-network` (android, iosArm64, iosSimulatorArm64; empty ABI dumps) holds `hopi-android`'s capture with its packages, and core's URLSession library and the iOS network tool (`dev.koga.hopi.network.internal`); core keeps the rule hit counter as a C library of its own (`hopi_hits`); `HopiAndroid` and `HopiUrlSession` deleted (9.4), the sample reads `HopiRuntimes`' network status; `hopi-android`, `hopi-android-noop`, `hopi-urlsession` and `hopi-urlsession-noop` deleted; the plugin's `RUNTIME` is `hopi-network`, with no noop. 9b done: the plugin's release guard (`hopiReleaseGuard<Variant>`, before any dex task) and the iOS release guard (`gradle/ios-release-guard.gradle`, before every Release link), `network { }` with generation split from instrumentation (a debuggable variant with every tool off still gets core and a generated configuration with no tool), `verifyReleaseHasNoRuntime` and the iOS check's new families, the giant-body benchmark on Android's host tests (E1 R7) and the R8 pass-through; [run] results in section 9 | `472fcd6` (9a), (this commit) |
-| 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b (no-store on platform mocks and edits, the iOS Ktor Darwin cover) follows (10.1) | (this commit) |
+| 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b done: core's rules answer every platform mock and edit with `Cache-Control: no-store` (`ResponseEdits.noStore`; R5), iOS's dead Ktor Darwin cover and `KTOR` among its platform sources removed, R3 and R5 regression tests, `mock-302` in the sample's self-test; [run] results in section 9, a reduced set | `cad60c3` (10a), (this commit) |
 | 11. Remove the remaining twin machinery | | |
 | 12. Physical devices | | |
 | 13. Documentation pass | | |
@@ -2984,6 +3022,14 @@ Stage 9 leaves for later stages:
   `ViewerTest.disconnectClosesTheSessionAndAnUnknownTargetIsNotThrown` (its first `Waiting` read
   `Reconnecting`, not `AppStopped`).
 
+
+Stage 10 leaves for later stages:
+
+- The after-report checks of section 9's "Not run" bullet, left at the owner's request: run them
+  before stage 14's report (the iOS simulator app checks and Xcode builds above all, since 10b
+  removed the iOS Ktor Darwin cover).
+- A `no-store` answer means an app cannot exercise its own HTTP cache through a rule on the
+  platform sources; an exemption for a rule's own `Cache-Control` is the owner's decision.
 ---
 
 ## Appendix A. Inventory already found (2026-10-27, narrow greps; re-grep in E1.1)

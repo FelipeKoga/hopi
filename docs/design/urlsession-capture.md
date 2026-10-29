@@ -137,11 +137,12 @@ cost is a private-API dependency, which the self-check, the metadata fallback an
 run turn into a visible degradation instead of a crash. This is a debug-only library, absent from
 release builds, so App Store review never sees it.
 
-Recorded URL: `originalRequest.URL`, what the app asked for, as the Ktor plugin records the URL
-as sent. After a native redirect the status, headers and body are the final hop's; the detail
-view shows the final URL (`currentRequest.URL`) on a separate line when it differs, carried in
-the transaction as `finalUrl` (nullable, additive on the wire like `source`). CFNetwork rewrites
-`currentRequest` even without a redirect: it lowercases the scheme and host and writes an empty
+Recorded URL: `originalRequest.URL`, what the app asked for, as the Ktor plugin's recorder (on
+Android and the JVM) records the URL as sent. After a native redirect the status, headers and
+body are the final hop's; the detail view shows the final URL (`currentRequest.URL`) on a
+separate line when it differs, carried in the transaction as `finalUrl` (nullable, additive on
+the wire like `source`). CFNetwork rewrites `currentRequest` even without a redirect: it
+lowercases the scheme and host and writes an empty
 path as `/` (checked: dot segments, escapes, user info and fragments stay as written), so both
 URLs are compared in that canonical form and `finalUrl` is set only when a redirect changed the
 URL. A redirect to the same URL in another case is not shown.
@@ -159,7 +160,7 @@ URL. A redirect to the same URL in another case is not shown.
 | `URLSession.shared`, default and ephemeral configurations | Byte path | |
 | Swift `data(for:)`, `data(from:)`, `upload(for:from:)`, `bytes(for:)`, `download(for:)` | Byte path | Spike covered all but `download(for:)`; the Swift test target covers all five |
 | Sessions created before `start()` | Byte path for every task **resumed** after `start()` | Hooks are class-level and need no session or delegate. A task resumed before `start()` is not recorded (a chunk for a task without state is ignored), nor is one resumed before, suspended, and resumed after it (it would show part of the transfer as all of it). A task created before and resumed after `start()` is recorded, but an upload-from-data body created before `start()` is skipped as `"not observed"`. |
-| Ktor Darwin engine | Byte path | One record per request, see Dedupe |
+| Ktor Darwin engine | Byte path | One record per request, see Dedupe (since the runtime-split plan's stage 10 the Ktor plugin installs nothing on iOS); under `ContentEncoding` the body is recorded decoded, as the app reads it (stage 10's R3, see Dedupe) |
 | Background sessions | Metadata path | While the app runs. Tasks finished while the app was suspended or relaunched by the system are not recorded. |
 | `NSURLSessionWebSocketTask` | Not recorded in v1 | Skipped at resume (class check). Frames and the handshake are a later "WebSocket inspection" item. |
 | `NSURLSessionStreamTask` | Not recorded | Not HTTP |
@@ -259,6 +260,17 @@ which ends when the app's reader takes in the body. The detail view labels it as
 
 ## Dedupe with the Ktor plugin
 
+**Since the runtime-split plan's stage 10 (2026-10-29) this section is history on iOS.** The Ktor
+plugin is thin: its recorder is `hopi-network`'s, which the network tool registers on Android and
+`Hopi.start` on the JVM, and on iOS nothing registers it, so the plugin installs nothing there and
+nothing defers. `UrlSessionCapture.start` covers no engine any more (its `cover` call and
+`KTOR_DARWIN_ENGINE_PACKAGE` were deleted): URLSession capture records Ktor's Darwin engine as any
+URLSession client, once, and another engine (CIO) is not recorded on iOS. The in-flight
+withdrawal below (`HopiStore.withdraw`) is kept in the recorder, unreachable outside tests, for a
+recorder that would cover an engine late (Android's network tool covers before it registers the
+recorder). The plugin's own settings (`redactHeaders`, `logSink`, `agentBridge`, the caps) do
+nothing on iOS: `Hopi.start { }` holds the store's. As designed and first built:
+
 Constraint: one record per request, without changing the wire (no marker header) and without
 changing any observable app state (no `taskDescription`, no `NSURLProtocol` property on a request
 Hopi does not own).
@@ -317,7 +329,13 @@ today); JSON bodies built with `setBody`/content negotiation are `ByteArrayConte
 and are captured. Ktor's `HttpRedirect` sends each hop as its own task (to be confirmed by the
 Ktor test; Ktor's delegate implements `willPerformHTTPRedirection`), so hops stay separate records
 as with the plugin. Ktor's response decoding happens after URLSession's, so the recorded body is
-URLSession's decoded body, as the app's Ktor reader receives it.
+URLSession's decoded body, as the app's Ktor reader receives it. Measured in the runtime-split
+plan's stage 10 (R3, 2026-10-29, `KtorDarwinTest` and `UrlSessionCaptureTest` since): URLSession
+decodes gzip whoever named `Accept-Encoding` (the app's own, or Ktor's under `ContentEncoding`),
+and the Darwin engine drops the compression headers, so Ktor does not decode a second time; the
+record holds the decoded body the app read, under the wire's `Content-Encoding: gzip` and
+compressed `Content-Length`. So nothing decodes `urlsession` records, and core's `heldCodings`
+excludes them: a header-driven decoder would fail on them.
 
 Rejected: "the plugin records, platform capture skips tasks whose session delegate is
 `KtorNSURLSessionDelegate`". It would miss Ktor clients without the plugin (a KMP SDK's own
@@ -328,7 +346,8 @@ client), and telling the two apart needs a per-request mark that changes app sta
 Backward compatible in both directions:
 
 - `HttpTransaction.source: String?`, default null. Values: `"ktor"`, `"urlsession"`, and the
-  Android part's `"okhttp"`, `"urlconnection"`. The Ktor plugin sets `"ktor"`.
+  Android part's `"okhttp"`, `"urlconnection"`. The Ktor plugin sets `"ktor"` (its recorder, on
+  Android and the JVM, since the runtime-split plan's stage 10; nothing records `"ktor"` on iOS).
 - `TransactionJson`: summary line, bridge summary and detail write `"source":"…"` right after
   `"state"` (before `error`, `reqHeld`, `resHeld`, `urlTruncated`, `errorTruncated`), omitted when
   null. The line budget logic counts it like any other fixed field (at most 24 bytes, within the
@@ -385,7 +404,9 @@ with only `hopi-perf` (so core, which then held the library) on its classpath an
 referenced held all 139 `_hopi_us_` symbols and `hopi_perf.o`'s 45, with no Hopi Kotlin symbol. Only
 a dynamic framework's own link drops both. The claim holds for dynamic frameworks alone, and the
 test above was never built. So the iOS release guard, not dead-code elimination, keeps a runtime
-out of a Release framework (ARCHITECTURE, "Release guards").
+out of a Release framework (ARCHITECTURE, "Release guards"). Since the runtime-split plan's stage
+10 the question no longer arises for `hopi-ktor`: the thin plugin brings `hopi-api` and Ktor only,
+no `hopi-core` and no native library, and the guard lets it through.
 
 ### Native build
 
@@ -478,7 +499,9 @@ it moves from `hopi-ktor` into `hopi-core` as one `@HopiInternalApi` function bo
 type of its own, instead of reusing `HopiConfig`/`HopiLogSink`, keeps `hopi-urlsession`
 independent of `hopi-ktor` (a pure-URLSession or Swift-first app has no Ktor). The name is not
 `Hopi`: that already names the Ktor plugin, and two `Hopi` declarations in one framework collide
-in the ObjC export.
+in the ObjC export. (That function is core's `CaptureInstallation.install`. Since the
+runtime-split plan's stage 10 the Ktor plugin's recorder, `hopi-network`'s, calls it on Android
+and the JVM, the start's settings first, and on iOS the plugin makes no installation at all.)
 
 Swift: a Kotlin framework exports only its own declarations and those it `export`s. The consumer
 adds, next to its `implementation`:
@@ -679,13 +702,16 @@ not exact. Here all arms are built the same way:
    to code that compares `object_getClass`.
 5. **Missed at `start()`.** Tasks resumed before `start()` are not recorded, even when
    suspended and resumed after it; an upload
-   body of a task created before `start()` is `"not observed"`; a Ktor request the engine has when
-   `start()` runs is recorded once or missed, never twice: the plugin withdraws its record when it
-   finds the engine covered by the time the engine answers (see Dedupe; until 2026-10-27 one
-   resumed after the hooks was recorded twice).
-6. **Ktor under deferral.** Channel request bodies (`HTTPBodyStream`) are no longer captured on iOS
-   once `start()` runs; the duration ends at the network's end, not at the reader's; Ktor-only
-   details (which client, Ktor's view of headers) are gone from those records.
+   body of a task created before `start()` is `"not observed"`; a Ktor Darwin request is
+   URLSession capture's like any other task, so one resumed before `start()` is missed (since the
+   runtime-split plan's stage 10 the plugin records nothing on iOS; it used to withdraw its record
+   when it found the engine covered by the time the engine answered, see Dedupe, and until
+   2026-10-27 one resumed after the hooks was recorded twice).
+6. **Ktor Darwin under URLSession capture.** Channel request bodies (`HTTPBodyStream`) are
+   recorded as `"stream, not captured"`; the duration ends at the network's end, not at the
+   reader's; Ktor-only details (which client, Ktor's view of headers) are absent from those
+   records. Since the runtime-split plan's stage 10 this holds for every Darwin request recorded:
+   the plugin, whose tee captured those bodies, installs nothing on iOS.
 7. **Request headers that URLSession adds** (configuration `HTTPAdditionalHeaders`, cookies,
    `User-Agent`, `Accept-Encoding`) are not seen, and header order and duplicates follow
    Foundation's dictionary.

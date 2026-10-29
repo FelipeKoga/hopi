@@ -54,10 +54,11 @@ internal class RuledResponse(
     private fun statusLine(): String = "HTTP/1.1 $code $message".trimEnd()
 
     companion object {
+        /** [mock] as the app receives it, under `Cache-Control: no-store` ([ResponseEdits.noStore]). */
         fun of(mock: MockSpec, method: String): RuledResponse = RuledResponse(
             mock.status,
             ResponseEdits.reasonPhrase(mock.status),
-            ResponseEdits.mockHeaders(mock),
+            ResponseEdits.noStore(ResponseEdits.mockHeaders(mock)),
             mock.body?.bytes?.takeIf { ResponseEdits.hasBody(method, mock.status) } ?: ByteArray(0),
         )
     }
@@ -96,7 +97,10 @@ internal class RuledCore(
         return Discarding
     }
 
-    /** The response the app sees: the mock, or the real one through the edit, read once. */
+    /**
+     * The response the app sees: the mock, or the real one through the edit, read once; either
+     * carries `Cache-Control: no-store` in place of the rule's or the server's.
+     */
     fun response(): RuledResponse {
         connected = true
         mock?.let { return it }
@@ -118,7 +122,7 @@ internal class RuledCore(
             closeQuietly { if (code >= 400) original.errorStream else original.inputStream }
             bytes.takeIf { ResponseEdits.hasBody(original.requestMethod ?: "GET", status) } ?: ByteArray(0)
         }
-        return RuledResponse(status, message, ResponseEdits.editHeaders(pairs, edit), body).also { edited = it }
+        return RuledResponse(status, message, ResponseEdits.noStore(ResponseEdits.editHeaders(pairs, edit)), body).also { edited = it }
     }
 
     fun inputStream(): InputStream {

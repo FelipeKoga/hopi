@@ -68,9 +68,8 @@ public object Capabilities {
     /**
      * True when every source [unsupported] checks [spec] against (the named ones, or
      * [platformSources] when it names none) excludes it, whatever its switch says (a response edit
-     * aimed at URLSession only). False does not mean a source applies it: a named source this
-     * platform lacks excludes nothing yet never reads its array, and on iOS the Ktor plugin defers
-     * to URLSession capture for the Darwin engine.
+     * aimed at URLSession only, or on iOS one that names no sources). False does not mean a source
+     * applies it: a named source this platform lacks excludes nothing yet never reads its array.
      */
     public fun appliesNowhere(spec: RuleSpec): Boolean = sourcesOf(spec).none { applies(it, spec) }
 

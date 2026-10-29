@@ -1,5 +1,13 @@
 package hopitest
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.HttpClientEngineConfig
+import io.ktor.client.engine.HttpClientEngineFactory
+import io.ktor.client.engine.android.Android
+import io.ktor.client.plugins.cache.HttpCache
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -9,6 +17,7 @@ import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
+import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
 import okhttp3.CertificatePinner
 import okhttp3.Interceptor
@@ -19,16 +28,56 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * What an app does under rules, as app code loaded through the rewriter (see [Scenarios]): one
- * OkHttp call and one `HttpURLConnection`, each shaped by its arguments, returning everything the
- * app observed. The rules themselves are set by the test, on the engine both loaders share.
+ * OkHttp call and one `HttpURLConnection`, each shaped by its arguments, and a Ktor client with
+ * `HttpCache` over either stack, returning everything the app observed. The rules themselves are
+ * set by the test, on the engine both loaders share.
  */
 internal object RuleScenarios {
     fun run(name: String, base: String, args: Map<String, Any?>, out: MutableMap<String, Any?>) {
         when (name) {
             "rule.okhttp" -> okhttp(base, args, out)
             "rule.url" -> url(base, args, out)
+            "rule.httpCache" -> httpCache(base, args, out)
             else -> error("no scenario $name")
         }
+    }
+
+    /**
+     * Ktor's `HttpCache` above a platform rule, with no Hopi plugin: `engine` `okhttp` (Ktor's OkHttp
+     * engine, from the scenario's jars) or `android` (Ktor's Android engine, whose `URL` calls are
+     * rewritten), one client, `path` fetched twice with `between` run in between (the test removes
+     * its rule there); each response as the app read it.
+     */
+    private fun httpCache(base: String, args: Map<String, Any?>, out: MutableMap<String, Any?>) {
+        val client = when (args["engine"]) {
+            "okhttp" -> {
+                // Loaded by name from the scenario's own loader: the engine and its OkHttp 5 are the jars'.
+                @Suppress("UNCHECKED_CAST")
+                val engine = javaClass.classLoader.loadClass("io.ktor.client.engine.okhttp.OkHttp").getField("INSTANCE").get(null) as HttpClientEngineFactory<HttpClientEngineConfig>
+                HttpClient(engine) { install(HttpCache) }
+            }
+            "android" -> HttpClient(Android) { install(HttpCache) }
+            else -> error("no engine ${args["engine"]}")
+        }
+        val url = "$base${args["path"]}"
+        runBlocking {
+            client.use {
+                out["engine"] = it.engine::class.qualifiedName
+                out["first"] = ktorGet(it, url)
+                (args["between"] as Runnable).run()
+                out["second"] = ktorGet(it, url)
+            }
+        }
+    }
+
+    private suspend fun ktorGet(client: HttpClient, url: String): Map<String, Any?> {
+        val response = client.get(url)
+        return mapOf(
+            "status" to response.status.value,
+            "body" to response.bodyAsText(),
+            "cacheControl" to response.headers.getAll(HttpHeaders.CacheControl),
+            "xEdited" to response.headers["X-Edited"],
+        )
     }
 
     private fun okhttp(base: String, args: Map<String, Any?>, out: MutableMap<String, Any?>) {
@@ -125,6 +174,8 @@ internal object RuleScenarios {
             out["contentEncoding"] = connection.contentEncoding
             out["header0"] = connection.getHeaderField(0)
             out["headerX"] = connection.getHeaderField("X-Mock") ?: connection.getHeaderField("X-Edited")
+            // Every Cache-Control value, whatever the name's case.
+            out["cacheControl"] = connection.headerFields.filterKeys { it.equals("Cache-Control", ignoreCase = true) }.values.flatten()
             out["usingProxy"] = connection.usingProxy()
             // Before the body is read: the JDK's connection forgets its session once the body ends.
             if (connection is HttpsURLConnection) {

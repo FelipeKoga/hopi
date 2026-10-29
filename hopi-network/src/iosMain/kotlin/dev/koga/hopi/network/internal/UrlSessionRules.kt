@@ -3,6 +3,7 @@ package dev.koga.hopi.network.internal
 import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.core.rules.CompiledRule
+import dev.koga.hopi.core.rules.ResponseEdits
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleState
@@ -143,7 +144,9 @@ public object UrlSessionRules {
             for (p in match.query) hopi_us_rules_predicate(builder, false, p.name, p.value?.takeIf { it != "*" }, p.absent)
             for (p in match.headers) hopi_us_rules_predicate(builder, true, p.name, p.value?.takeIf { it != "*" }, p.absent)
             rule.delay?.let { hopi_us_rules_delay(builder, it.beforeRequestMs, it.beforeResponseMs) }
-            rule.mock?.let { hopi_us_rules_mock(builder, it.status, flat(it.headers), it.body?.bytes?.let(::nsData)) }
+            // Under no-store, whatever the rule says: a cache above URLSession (Ktor's HttpCache)
+            // must not keep a mock after its rule is gone. The native side adds Content-Length.
+            rule.mock?.let { hopi_us_rules_mock(builder, it.status, flat(ResponseEdits.noStore(it.headers)), it.body?.bytes?.let(::nsData)) }
             rule.fail?.let { hopi_us_rules_fail(builder, it.ordinal) }
             rule.requestEdit?.let { edit ->
                 hopi_us_rules_edit(

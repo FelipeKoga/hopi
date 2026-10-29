@@ -4,11 +4,14 @@ import dev.koga.hopi.api.HopiInternalApi
 import kotlin.concurrent.atomics.AtomicReference
 
 /**
- * The HTTP stacks a platform recorder (URLSession capture on iOS) records by itself, so the Ktor
- * plugin does not record the same request a second time: a client whose engine is covered sends
- * through the platform stack, and the platform record is the one kept (one record per request).
- * Read on every request by the plugin, so a recorder started after a client was built takes effect
- * at that client's next request.
+ * The HTTP stacks a platform recorder records by itself, so the Ktor plugin's recorder does not
+ * record the same request a second time: a client whose engine is covered sends through the
+ * platform stack, and the platform record is the one kept (one record per request). The only
+ * coverer is Android's capture (Ktor's OkHttp and, rewritten, Android engines, with the
+ * pass-through), since the runtime-split plan's stage 10: on iOS the plugin installs nothing, so
+ * URLSession capture covers no engine. Read on every request by the recorder, so a coverer that
+ * started after a client was built would take effect at that client's next request (none does:
+ * Android's network tool covers before it registers the recorder).
  */
 @HopiInternalApi
 public object PlatformCapture {
@@ -37,7 +40,11 @@ public object PlatformCapture {
     private val covered = AtomicReference<List<String>>(emptyList())
     private val passThrough = AtomicReference<List<String>>(emptyList())
 
-    /** Marks Ktor engines whose class name starts with [enginePackage] as recorded by the platform. */
+    /**
+     * Marks Ktor engines whose class name starts with [enginePackage] as recorded by the platform,
+     * by a recorder that does not honor [PASS_THROUGH_HEADER] (no production caller since the
+     * runtime-split plan's stage 10, when URLSession capture's went; the tests use it).
+     */
     public fun cover(enginePackage: String) {
         add(covered, enginePackage)
     }

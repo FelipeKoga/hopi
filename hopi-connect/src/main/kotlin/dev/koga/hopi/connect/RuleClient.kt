@@ -166,7 +166,8 @@ public class RemoteRule(
     /**
      * True when every source the match names excludes the rule ([RemoteUnsupported.applies] false):
      * it applies to nothing in the app. Never for a rule that names no sources: the line does not
-     * say which sources the app's platform has (and Ktor, on every platform, excludes nothing).
+     * carry the app's platform, whose sources such a rule is checked against (on iOS, URLSession
+     * alone, a response edit that names none applies nowhere, yet reads active).
      */
     public val inactive: Boolean
         get() = !sources.isNullOrEmpty() && sources.all { source -> unsupported.any { it.source == source && !it.applies } }

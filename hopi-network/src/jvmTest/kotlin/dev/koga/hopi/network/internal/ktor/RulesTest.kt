@@ -466,6 +466,19 @@ class RulesTest {
     }
 
     @Test
+    fun withoutHttpCacheAMockKeepsTheRulesCacheControl() = runBlocking<Unit> {
+        // The recorder sees its client, so its no-store is conditional, unlike the platform sources':
+        // with no HttpCache the app reads the Cache-Control the rule gave.
+        TestStore().use { t ->
+            add(rule("GET */cached", mock = MockSpec(200, listOf("Cache-Control" to "max-age=600"), RuleBody.text("mocked"))))
+            val client = mockClient(t.store) { respond("real", HttpStatusCode.OK) }
+            val response = client.get("https://api.example.com/cached")
+            assertEquals("mocked", response.bodyAsText())
+            assertEquals(listOf("max-age=600"), response.headers.getAll(HttpHeaders.CacheControl))
+        }
+    }
+
+    @Test
     fun aRedirectMockIsFollowedToASeparatelyMatchedHop() = runBlocking<Unit> {
         TestStore().use { t ->
             add(rule("GET */old", mock = MockSpec(302, listOf("Location" to "https://api.example.com/new"))))
