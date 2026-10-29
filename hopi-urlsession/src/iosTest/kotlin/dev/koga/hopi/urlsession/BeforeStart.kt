@@ -76,8 +76,21 @@ internal object BeforeStart {
         suspendedBeforeUrl = Capture.url("/slow?n=3000&pieces=6&ms=100")
         suspendedBefore = preSession.dataTaskWithURL(nsUrl(suspendedBeforeUrl), suspendedBeforeHandler.dataHandler()!!)
         suspendedBefore.resume()
-        platform.posix.usleep(250_000u)
+        awaitResponse(suspendedBefore)
         suspendedBefore.suspend()
+    }
+
+    /**
+     * Waits, up to 10 s, until [task] has its response or a first byte, which is how the resume hook
+     * tells a task that ran before start(). A fixed 250 ms sleep was not always enough on a loaded
+     * host: the task then looked new when resumed after start() and was recorded.
+     */
+    private fun awaitResponse(task: NSURLSessionTask) {
+        repeat(1_000) {
+            if (task.response != null || task.countOfBytesReceived > 0) return
+            platform.posix.usleep(10_000u)
+        }
+        error("no response within 10 s for ${task.originalRequest?.URL?.absoluteString}")
     }
 
     /** A delegate-driven data task to the fixture server; returns the delegate's event sequence. */
