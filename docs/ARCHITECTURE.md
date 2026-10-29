@@ -1926,9 +1926,9 @@ bridge protocol unchanged, through `hopi-connect`: the app needs nothing new.
   viewer closes (no lease to renew); the new stream opens before the old one closes, so a monitor
   both name never restarts. A switch off is `perf.stop` (every owner). Three charts drawn with
   `Canvas` (frames per second with janky bars, CPU %, memory with its events as dashed ticks;
-  last five minutes, monochrome), each monitor's owners (a lease shown with its end), the hangs
-  with their stacks (expand, copy as text). Switches are hidden for an app with
-  `remoteControl = false`.
+  last five minutes; janky frames red, CPU blue, memory violet, its events amber), each monitor's
+  owners (a lease shown with its end), the hangs with their stacks (expand, copy as text).
+  Switches are hidden for an app with `remoteControl = false`.
 
 **Data.** A `RemoteSession` per target: its own `HopiStore` (2000 entries, 256 MB), keyed by
 the app's ids, with `Redactor.Default` on top of the app's redaction. The panes select through
@@ -1996,12 +1996,12 @@ focus, the arrows, Enter and Esc stay with it.
 
 **Rules.** `RulesPanel`, 420 dp beside the list (⌘L or the Rules menu), reads only
 `RemoteSession.rules`: one row per rule (switch, match, action, hits and `times`, label, one line
-per `unsupported` entry the app reported: "not applied on urlsession: …" in full contrast for an
-exclusion, a muted warning for a stated difference; "inactive" after the hits when every source
-the rule names excludes it), Update (priority, times, reset hits: `rules.update` changes
-nothing else, and bodies and header values come back as sizes and redacted, so changing a match or
-an action is remove and add), Remove, Clear. Forms for mock, fail, delay and edit
-(`RuleForm`, which validates what it can before anything is sent) take headers as a table and a
+per `unsupported` entry the app reported: "not applied on urlsession: …" in amber for an
+exclusion, a muted line for a stated difference; "exhausted" (amber) and "inactive" (red) after the
+hits, the latter when every source the rule names excludes it), Update (priority, times, reset hits:
+`rules.update` changes nothing else, and bodies and header values come back as sizes and redacted,
+so changing a match or an action is remove and add), Remove, Clear. Forms for mock, fail, delay and
+edit (`RuleForm`, which validates what it can before anything is sent) take headers as a table and a
 body from a text area or a file (at most 1 MiB, uploaded as a blob when it does not fit a line);
 the app's refusal is shown exactly as sent. The detail pane adds "Mock this response" (a mock form
 prefilled with the record's exact request and `fromTransaction`, so the body is copied inside the
@@ -2257,10 +2257,10 @@ reaches an external network.
 
 The desktop viewer's screens: the list and the detail that `hopi-desktop` composes through
 `HopiPanes`, JVM only and unpublished. Compose Multiplatform, no Material dependency (foundation
-only), monochrome, dense, fast. The in-app UI (`HopiScreen`, `HopiLauncher` and its floating button,
-the in-app rules list, the Perf tab and the HUD) and its twin `hopi-ui-noop` were removed in the
-runtime-split plan's stage 5 (D7'): the desktop viewer and the CLI are the surfaces, and nothing of
-Hopi draws in the app's window.
+only), a shadcn/ui-style design system with status in hue, dense, fast. The in-app UI (`HopiScreen`,
+`HopiLauncher` and its floating button, the in-app rules list, the Perf tab and the HUD) and its
+twin `hopi-ui-noop` were removed in the runtime-split plan's stage 5 (D7'): the desktop viewer and
+the CLI are the surfaces, and nothing of Hopi draws in the app's window.
 
 - **List:** newest first; method, status code, host + path, duration, size; Pending/Failed visible at
   a glance. Search by URL substring, filter by status class (2xx, 3xx, 4xx, 5xx, failed, pending,
@@ -2318,13 +2318,24 @@ Hopi draws in the app's window.
   to the caller (the app's store too). `HopiPanesState` carries the
   selection and the keyboard moves over the rows as shown. `HopiDesktopTheme`,
   `hopiDesktopColors` and `HopiDesktopType` (same package) give the desktop window's own chrome the
-  monochrome palette and text styles.
-- **Design:** foundation only, no Material; monochrome greys, light or dark following the system;
-  the platform's default and monospace fonts; controls of at least 48 dp; content descriptions on
-  icon-only controls and on the status badges; containers that hold text have minimum sizes,
-  never fixed ones, so a large font scale grows them instead of clipping their text, and a status
-  badge widens rather than wrapping its code; a binary body's hex dump scrolls sideways; nothing
-  animates but the confirmation's fade.
+  same palette (neutrals and status tones), text styles, hover and focus feedback
+  (`hopiHoverIndication`) and the fields' focus ring (`hopiFocusRing`).
+- **Design:** foundation only, no Material; a shadcn/ui-style design system (shadcn/ui zinc neutrals; radii
+  6, 8 and 12 dp and pills; 1 dp borders; Open Runde for the sans text, bundled in `hopi-ui` with
+  its OFL license; the platform monospace for code, headers and bodies), light or dark following
+  the system. Hue carries status and only status, by the owner's decision of 2026-10-28, which
+  ended the all-grey palette: success emerald, warning amber, error red, info blue; rule marks
+  MOCK violet, EDIT fuchsia, FAIL red, DELAY amber. At rest every text color reaches 4.5:1 on its
+  tinted fill and on the background (the hover, press and focus overlay covers the text as well, and
+  can take a pair below that while it shows), and every status also reads without hue (2xx and 3xx a
+  tinted fill, 4xx outlined, 5xx and failures solid, pending dashed; connected a filled dot, other
+  states a ring); hover, press and keyboard focus are drawn as that overlay, not animated (Compose
+  for desktop passes an indication only the focus that came from the keyboard, so a click leaves
+  nothing lit; the detail tabs and the panels' switches draw none, and fields show focus with their
+  ring); controls of at least 48 dp; content descriptions on icon-only controls and on the status
+  badges; containers that hold text have minimum sizes, never fixed ones, so a large font scale
+  grows them instead of clipping their text, and a status badge widens rather than wrapping its
+  code; a binary body's hex dump scrolls sideways; nothing animates but the confirmation's fade.
 
 **Rules.** A list row of a ruled record shows one badge, the strongest action first (`MOCK`,
 `FAIL`, `EDIT`, `DELAY`); the overview shows "Rule: #3: delay, mock". With `HopiPanesRules`,

@@ -1,9 +1,13 @@
 package dev.koga.hopi.ui.platform
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.font.FontFamily
 
 /** Local wall-clock time of [epochMs]: `14:03:22`, or `14:03:22.481` [withMillis]. */
 internal expect fun formatTimeOfDay(epochMs: Long, withMillis: Boolean): String
+
+/** The sans of every HopiType style but the monospace ones: Open Runde (OFL 1.1), bundled on the JVM. */
+internal expect fun hopiSans(): FontFamily
 
 /** Hands text to the platform share sheet. */
 internal fun interface ShareSheet {

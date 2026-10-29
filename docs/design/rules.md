@@ -866,11 +866,11 @@ request recorded just after the app wrote the first list of a connect costs one 
 hit short. Lists coalesce: a burst of
 ruled requests costs at most one `rules.list` in flight and one queued (while ruled requests keep
 coming, one list per round trip), a quiet app none, and nothing polls. Each `unsupported` entry the app reported shows under the row: an exclusion as its
-own line in full contrast, "not applied on urlsession: …", a stated difference as a muted warning
-line. A rule whose named sources all exclude it reads "inactive" after its hits, its match dimmed
-and its switch as set; a rule naming none never does, since the line does not say which sources
-the app's platform has. All of it goes through `hopi-connect`, which gains the commands, the blob
-upload and `BridgeDecoder` support for the rule line and the new fields.
+own line in amber, "not applied on urlsession: …", a stated difference as a muted warning
+line. A rule whose named sources all exclude it reads "inactive" (in red) after its hits, its
+match dimmed and its switch as set; a rule naming none never does, since the line does not say
+which sources the app's platform has. All of it goes through `hopi-connect`, which gains the
+commands, the blob upload and `BridgeDecoder` support for the rule line and the new fields.
 
 ### In-app screen (removed)
 

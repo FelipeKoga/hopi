@@ -5,10 +5,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
@@ -22,6 +26,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -29,6 +35,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.ui.component.Icon
 import dev.koga.hopi.ui.detail.BodyView
 import dev.koga.hopi.ui.detail.DetailActions
 import dev.koga.hopi.ui.detail.DetailFormatter
@@ -44,6 +51,8 @@ import dev.koga.hopi.ui.platform.MAX_SHARE_CHARS
 import dev.koga.hopi.ui.platform.cutAt
 import dev.koga.hopi.ui.platform.rememberShareSheet
 import dev.koga.hopi.ui.rules.RuleActions
+import dev.koga.hopi.ui.theme.HopiIcons
+import dev.koga.hopi.ui.theme.HopiRadius
 import dev.koga.hopi.ui.theme.HopiType
 import dev.koga.hopi.ui.theme.LocalHopiColors
 import kotlin.coroutines.cancellation.CancellationException
@@ -154,7 +163,7 @@ internal fun rememberDetailActions(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: RuntimeException) {
-                        Toast("$label could not be copied")
+                        Toast("$label could not be copied", isError = true)
                     },
                 )
             }
@@ -185,15 +194,16 @@ internal fun rememberDetailActions(
     }
 }
 
-/** A short confirmation; each instance is shown once. */
-internal class Toast(val text: String)
+/** A short confirmation, or a failure when [isError]; each instance is shown once. */
+internal class Toast(val text: String, val isError: Boolean = false)
 
+/** shadcn's sonner card: a check in the success green, or an alert on a red card when it failed. */
 @Composable
 internal fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {
     val colors = LocalHopiColors.current
-    // Keeps the last text while the toast fades out; plain memory, not state, so it never recomposes.
-    val last = remember { arrayOfNulls<String>(1) }
-    if (toast != null) last[0] = toast.text
+    // Keeps the last toast while it fades out; plain memory, not state, so it never recomposes.
+    val last = remember { arrayOfNulls<Toast>(1) }
+    if (toast != null) last[0] = toast
     LaunchedEffect(toast) {
         if (toast != null) {
             delay(TOAST_MS)
@@ -202,16 +212,27 @@ internal fun ToastHost(toast: Toast?, onShown: (Toast) -> Unit) {
     }
     Box(Modifier.fillMaxSize().padding(bottom = 24.dp), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(visible = toast != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(160))) {
-            BasicText(
-                last[0] ?: "",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(colors.text)
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            val shown = last[0]
+            val tone = if (shown?.isError == true) colors.error else null
+            Row(
+                Modifier
+                    .widthIn(max = 480.dp)
+                    .shadow(16.dp, HopiRadius.lg, ambientColor = Color.Black.copy(alpha = 0.1f), spotColor = Color.Black.copy(alpha = 0.15f))
+                    .clip(HopiRadius.lg)
+                    .background(tone?.bg ?: colors.background)
+                    .border(1.dp, tone?.border ?: colors.border, HopiRadius.lg)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (tone != null) HopiIcons.Alert else HopiIcons.Check, tone?.fg ?: colors.success.fg, size = 16.dp)
+                Spacer(Modifier.width(10.dp))
+                BasicText(
+                    shown?.text ?: "",
                     // Announced by screen readers: focus stays on the button that copied.
-                    .semantics { liveRegion = LiveRegionMode.Polite },
-                style = HopiType.label.copy(color = colors.onText),
-            )
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    style = HopiType.label.copy(color = tone?.fg ?: colors.text),
+                )
+            }
         }
     }
 }

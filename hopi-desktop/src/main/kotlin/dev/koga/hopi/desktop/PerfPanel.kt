@@ -2,8 +2,10 @@ package dev.koga.hopi.desktop
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,8 +13,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -25,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -110,14 +116,22 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
                 enabled = view.control && !view.status?.running.isNullOrEmpty(),
                 onClick = { perf?.stopAll() },
             )
-            ChromeButton("Close", onClick = { state.open = false })
+            ChromeButton("Close", onClick = { state.open = false }, variant = ButtonVariant.Ghost)
         }
         Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         view.message?.let {
+            // Only failures come here: a red callout.
             BasicText(
                 it,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag(PerfTags.MESSAGE),
-                style = HopiDesktopType.meta.copy(color = colors.text),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.error.bg)
+                    .border(1.dp, colors.error.border, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag(PerfTags.MESSAGE),
+                style = HopiDesktopType.meta.copy(color = colors.error.fg),
             )
         }
         when {
@@ -128,7 +142,13 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
                 Section("Frames per second", latest = view.frames.lastOrNull()?.let(::framesText) ?: idle(view, "frames"))
                 FramesChart(view.frames, Modifier.testTag(PerfTags.FRAMES_CHART))
                 Section("CPU", latest = view.samples.lastOrNull { it.cpu != null }?.let(::cpuText) ?: idle(view, "cpu"))
-                LineChart(listOf(view.samples.mapNotNull { s -> s.cpu?.let { s.atMs to it } }), markers = emptyList(), floor = 100.0, Modifier.testTag(PerfTags.CPU_CHART))
+                LineChart(
+                    listOf(view.samples.mapNotNull { s -> s.cpu?.let { s.atMs to it } }),
+                    markers = emptyList(),
+                    floor = 100.0,
+                    color = colors.info.fg,
+                    modifier = Modifier.testTag(PerfTags.CPU_CHART),
+                )
                 Section("Memory", latest = view.samples.lastOrNull { it.residentBytes != null }?.let(::memoryText) ?: idle(view, "memory"))
                 LineChart(
                     listOf(
@@ -137,10 +157,14 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
                     ),
                     markers = view.memoryEvents.filter { it.kind == "memory" }.map { it.atMs },
                     floor = 0.0,
-                    Modifier.testTag(PerfTags.MEMORY_CHART),
+                    color = colors.violet.fg,
+                    modifier = Modifier.testTag(PerfTags.MEMORY_CHART),
                 )
                 if (view.memoryEvents.isNotEmpty()) {
-                    for (event in view.memoryEvents.takeLast(5).asReversed()) PerfLine(eventText(event))
+                    // Memory events in the amber of their ticks; a previous run's ANR in red.
+                    for (event in view.memoryEvents.takeLast(5).asReversed()) {
+                        PerfLine(eventText(event), color = if (event.kind == "anr") colors.error.fg else colors.warning.fg)
+                    }
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     BasicText("THREADS", Modifier.weight(1f), style = HopiDesktopType.section.copy(color = colors.textFaint))
@@ -241,6 +265,14 @@ private fun HangRow(hang: RemotePerfEvent) {
             Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Red from a frozen frame's length (or while it lasts), amber below; grey when it says nothing (a debugger, no duration).
+            val ms = hang.ms
+            val severity = when {
+                hang.debugger || ms == null -> colors.neutral
+                hang.ongoing || ms >= SEVERE_HANG_MS -> colors.error
+                else -> colors.warning
+            }
+            Box(Modifier.padding(end = 8.dp).size(8.dp).background(severity.fg, CircleShape))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     "#${hang.seq}  ${hang.ms?.roundToLong() ?: "?"} ms${if (hang.ongoing) "  ongoing" else ""}  ${clock(hang.atMs)}",
@@ -288,8 +320,8 @@ private fun Section(title: String, latest: String?) {
 }
 
 @Composable
-private fun PerfLine(text: String) {
-    BasicText(text, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), style = HopiDesktopType.meta.copy(color = hopiDesktopColors.textMuted))
+private fun PerfLine(text: String, color: Color = hopiDesktopColors.textMuted) {
+    BasicText(text, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), style = HopiDesktopType.meta.copy(color = color))
 }
 
 @Composable
@@ -297,7 +329,7 @@ private fun PerfNote(text: String) {
     BasicText(text, Modifier.padding(12.dp), style = HopiDesktopType.body.copy(color = hopiDesktopColors.textMuted))
 }
 
-/** Frames per second as bars, the janky ones of each second drawn over them in the strong color. */
+/** Frames per second as bars, the janky ones of each second drawn over them in the error red. */
 @Composable
 private fun FramesChart(frames: List<RemoteFrameSecond>, modifier: Modifier = Modifier) {
     val colors = hopiDesktopColors
@@ -315,15 +347,15 @@ private fun FramesChart(frames: List<RemoteFrameSecond>, modifier: Modifier = Mo
             drawRect(colors.textFaint, Offset(x, size.height - h), Size(maxOf(1f, slot - 1f), h))
             if (second.janky > 0) {
                 val j = maxOf(2f, (second.janky / top * size.height).toFloat())
-                drawRect(colors.text, Offset(x, size.height - j), Size(maxOf(1f, slot - 1f), j))
+                drawRect(colors.error.fg, Offset(x, size.height - j), Size(maxOf(1f, slot - 1f), j))
             }
         }
     }
 }
 
-/** Lines over time (the first solid, the next dashed), scaled to their maximum or [floor]; [markers] as vertical ticks. */
+/** Lines over time in [color] (the first solid, the next dashed), scaled to their maximum or [floor]; [markers] as amber vertical ticks. */
 @Composable
-private fun LineChart(lines: List<List<Pair<Long, Double>>>, markers: List<Long>, floor: Double, modifier: Modifier = Modifier) {
+private fun LineChart(lines: List<List<Pair<Long, Double>>>, markers: List<Long>, floor: Double, color: Color, modifier: Modifier = Modifier) {
     val colors = hopiDesktopColors
     Canvas(modifier.fillMaxWidth().height(CHART_HEIGHT).padding(horizontal = 12.dp)) {
         frame(colors.border)
@@ -336,7 +368,7 @@ private fun LineChart(lines: List<List<Pair<Long, Double>>>, markers: List<Long>
         fun y(v: Double) = (size.height - v / top * size.height).toFloat()
         for (t in markers) {
             if (t < start) continue
-            drawLine(colors.textMuted, Offset(x(t), 0f), Offset(x(t), size.height), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f)))
+            drawLine(colors.warning.fg, Offset(x(t), 0f), Offset(x(t), size.height), strokeWidth = 1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f)))
         }
         lines.forEachIndexed { index, points ->
             val visible = points.filter { it.first >= start }
@@ -345,7 +377,7 @@ private fun LineChart(lines: List<List<Pair<Long, Double>>>, markers: List<Long>
             visible.forEachIndexed { i, (t, v) -> if (i == 0) path.moveTo(x(t), y(v)) else path.lineTo(x(t), y(v)) }
             drawPath(
                 path,
-                if (index == 0) colors.text else colors.textMuted,
+                color,
                 style = Stroke(width = 1.5f, pathEffect = if (index == 0) null else PathEffect.dashPathEffect(floatArrayOf(4f, 3f))),
             )
         }
@@ -379,3 +411,6 @@ private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").w
 /** The charts show the last five minutes. */
 private const val CHART_SECONDS = 300
 private val CHART_HEIGHT = 72.dp
+
+/** Android vitals' frozen frame: a hang this long or longer reads red. */
+private const val SEVERE_HANG_MS = 700.0

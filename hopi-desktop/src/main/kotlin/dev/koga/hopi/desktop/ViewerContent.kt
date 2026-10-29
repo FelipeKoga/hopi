@@ -33,14 +33,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.connect.Platform
 import dev.koga.hopi.core.model.TransactionState
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.ui.desktop.HopiDesktopColors
 import dev.koga.hopi.ui.desktop.HopiDesktopTheme
 import dev.koga.hopi.ui.desktop.HopiDesktopType
 import dev.koga.hopi.ui.desktop.HopiPanes
@@ -48,6 +53,7 @@ import dev.koga.hopi.ui.desktop.HopiPanesRules
 import dev.koga.hopi.ui.desktop.HopiPanesState
 import dev.koga.hopi.ui.desktop.hopiDesktopColors
 import dev.koga.hopi.ui.desktop.rememberHopiPanesState
+import dev.koga.hopi.ui.theme.HopiTone
 import java.nio.file.Path
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -211,7 +217,7 @@ private fun TargetBar(viewer: Viewer, status: ViewerStatus, onAppFieldFocus: (Bo
                 if (viewing != null && selected != null && viewing.sameAs(Target(selected, appId))) "Reconnect" else "Connect",
                 onClick = { selected?.let { viewer.connect(Target(it, appId)) } },
                 enabled = selected != null && targetProblem(selected, appId) == null,
-                primary = true,
+                variant = ButtonVariant.Primary,
                 modifier = Modifier.testTag(ViewerTags.CONNECT),
             )
             ChromeButton("Refresh", onClick = viewer::refresh)
@@ -231,7 +237,8 @@ private fun TargetBar(viewer: Viewer, status: ViewerStatus, onAppFieldFocus: (Bo
                         ChromeChip(bridge, selected = app.text.toString() == bridge, onClick = { app.setTextAndPlaceCursorAtEnd(bridge) })
                     }
                 }
-                hint?.let { BasicText(it, style = HopiDesktopType.meta.copy(color = colors.textMuted), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                // What stops a connect (adb missing, a bad app id): the warning amber.
+                hint?.let { BasicText(it, style = HopiDesktopType.meta.copy(color = colors.warning.fg), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }
@@ -261,17 +268,19 @@ private fun StatusBar(viewer: Viewer, status: ViewerStatus) {
         Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val connected = status is ViewerStatus.Connected
+        // A filled dot only when connected, a ring otherwise; its hue is the connection's state.
+        val tone = statusTone(status, colors)
         Box(
             Modifier.size(8.dp)
-                .background(if (connected) colors.text else colors.background, CircleShape)
-                .border(1.dp, if (connected) colors.text else colors.textFaint, CircleShape),
+                .background(if (status is ViewerStatus.Connected) tone.fg else Color.Transparent, CircleShape)
+                .border(1.5.dp, tone.fg, CircleShape),
         )
         Spacer(Modifier.width(8.dp))
         BasicText(
             statusText(status),
             modifier = Modifier.weight(1f).testTag(ViewerTags.STATUS),
-            style = HopiDesktopType.meta.copy(color = colors.textMuted),
+            // A link that is down and not just waiting for the app says so in its hue too.
+            style = HopiDesktopType.meta.copy(color = if (status is ViewerStatus.Waiting && status.kind != WaitKind.AppStopped) tone.fg else colors.textMuted),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -283,9 +292,36 @@ private fun StatusBar(viewer: Viewer, status: ViewerStatus) {
         } else {
             ""
         }
-        val right = listOfNotNull(notice, counts.ifEmpty { null }).joinToString("   ·   ")
+        // The same string as `notice   ·   counts`, the notice in its hue.
+        val right = buildAnnotatedString {
+            notice?.let { text ->
+                withStyle(SpanStyle(color = noticeTone(text, colors).fg)) { append(text) }
+                if (counts.isNotEmpty()) append("   ·   ")
+            }
+            append(counts)
+        }
         BasicText(right, modifier = Modifier.testTag(ViewerTags.COUNTS), style = HopiDesktopType.meta.copy(color = colors.textMuted), maxLines = 1)
     }
+}
+
+/** The connection's hue: connected success, connecting info, reconnecting or device offline warning, a failed connect error, idle and app stopped neutral. */
+private fun statusTone(status: ViewerStatus, colors: HopiDesktopColors): HopiTone = when (status) {
+    ViewerStatus.Idle -> colors.neutral
+    is ViewerStatus.Connecting -> colors.info
+    is ViewerStatus.Connected -> colors.success
+    is ViewerStatus.Waiting -> when (status.kind) {
+        WaitKind.Reconnecting, WaitKind.DeviceOffline -> colors.warning
+        WaitKind.AppStopped -> colors.neutral
+        WaitKind.Failed -> colors.error
+    }
+}
+
+/** The export notice's hue, by the words Viewer.export and ExportResult.describe begin it with. */
+private fun noticeTone(notice: String, colors: HopiDesktopColors): HopiTone = when {
+    notice.startsWith("Export failed") -> colors.error
+    notice.startsWith("Exported ") && " without bodies" in notice -> colors.warning
+    notice.startsWith("Exported ") -> colors.success
+    else -> colors.neutral
 }
 
 @Composable

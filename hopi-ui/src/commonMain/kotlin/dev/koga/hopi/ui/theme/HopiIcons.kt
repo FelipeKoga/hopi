@@ -44,6 +44,12 @@ internal object HopiIcons {
     /** A wand: a made-up response from this one. */
     val Mock by lazy { icon("Mock", "M15 4V2", "M15 16v-2", "M8 9h2", "M20 9h2", "M17.8 11.8L19 13", "M17.8 6.2L19 5", "M3 21l9-9", "M12.2 6.2L11 5") }
 
+    /** A toast that failed. */
+    val Alert by lazy { icon("Alert", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0", "M12 8v4", "M12 16h.01") }
+
+    /** A toast that worked. */
+    val Check by lazy { icon("Check", "M20 6 9 17l-5-5") }
+
     private fun icon(name: String, vararg paths: String): ImageVector {
         val builder = ImageVector.Builder(
             name = name,

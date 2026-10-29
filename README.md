@@ -356,6 +356,9 @@ crosses unless you open it. When the app restarts, or adb resets, the viewer rec
 Ctrl replaces ⌘ on Linux and Windows. An export fetches the bodies not opened yet, up to 32 MB
 per request and 256 MB in all; larger ones keep their sizes and a comment.
 
+The viewer's text is set in Open Runde (SIL Open Font License 1.1), bundled with its license in
+`hopi-ui/src/jvmMain/resources/dev/koga/hopi/ui/font/`.
+
 ## Rules: mock, fail, delay, edit
 
 A rule matches a request (methods, scheme, host glob, port, path glob, query and header

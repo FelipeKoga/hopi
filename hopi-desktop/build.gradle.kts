@@ -22,7 +22,7 @@ kotlin {
 dependencies {
     // Targets, adb tracking, bridge.json, RemoteSession and BridgeDecoder: shared with the CLI.
     implementation(project(":hopi-connect"))
-    // HopiPanes and the monochrome theme: the desktop viewer's screens (JVM only, unpublished).
+    // HopiPanes and its theme: the desktop viewer's screens (JVM only, unpublished).
     implementation(project(":hopi-ui"))
     // The viewer's own HopiStore, the JSON writer (exports) and the redactor.
     implementation(project(":hopi-core"))
