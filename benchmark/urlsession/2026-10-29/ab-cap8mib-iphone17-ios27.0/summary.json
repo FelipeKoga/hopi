@@ -1,0 +1,370 @@
+{
+ "rounds": {
+  "hopi-r1": {
+   "small request median (ms)": 0.72,
+   "small request p90 (ms)": 1.206,
+   "process CPU per small request (us)": 1458.9,
+   "URLSession 1 MB request+read (ms)": 4.603,
+   "URLSession 1 MB process CPU per run (ms)": 2.51,
+   "URLSession 5 MB request+read (ms)": 14.332,
+   "URLSession 5 MB process CPU per run (ms)": 16.97,
+   "URLSession 20 MB request+read (ms)": 53.389,
+   "URLSession 20 MB process CPU per run (ms)": 21.9,
+   "Ktor 1 MB fetch+parse (ms)": 77,
+   "Ktor 5 MB fetch+parse (ms)": 326,
+   "Ktor 20 MB fetch+parse (ms)": 1226
+  },
+  "noop-r1": {
+   "small request median (ms)": 0.59,
+   "small request p90 (ms)": 1.365,
+   "process CPU per small request (us)": 1014,
+   "URLSession 1 MB request+read (ms)": 6.19,
+   "URLSession 1 MB process CPU per run (ms)": 2.2,
+   "URLSession 5 MB request+read (ms)": 13.072,
+   "URLSession 5 MB process CPU per run (ms)": 8.05,
+   "URLSession 20 MB request+read (ms)": 49.683,
+   "URLSession 20 MB process CPU per run (ms)": 35.07,
+   "Ktor 1 MB fetch+parse (ms)": 69,
+   "Ktor 5 MB fetch+parse (ms)": 332,
+   "Ktor 20 MB fetch+parse (ms)": 1226
+  },
+  "hopi-r2": {
+   "small request median (ms)": 0.589,
+   "small request p90 (ms)": 0.908,
+   "process CPU per small request (us)": 1083.6,
+   "URLSession 1 MB request+read (ms)": 6.303,
+   "URLSession 1 MB process CPU per run (ms)": 3.21,
+   "URLSession 5 MB request+read (ms)": 14.059,
+   "URLSession 5 MB process CPU per run (ms)": 15.78,
+   "URLSession 20 MB request+read (ms)": 52.817,
+   "URLSession 20 MB process CPU per run (ms)": 24.47,
+   "Ktor 1 MB fetch+parse (ms)": 77,
+   "Ktor 5 MB fetch+parse (ms)": 324,
+   "Ktor 20 MB fetch+parse (ms)": 1238
+  },
+  "noop-r2": {
+   "small request median (ms)": 0.597,
+   "small request p90 (ms)": 1.014,
+   "process CPU per small request (us)": 1088.7,
+   "URLSession 1 MB request+read (ms)": 6.281,
+   "URLSession 1 MB process CPU per run (ms)": 2.59,
+   "URLSession 5 MB request+read (ms)": 14.892,
+   "URLSession 5 MB process CPU per run (ms)": 11.28,
+   "URLSession 20 MB request+read (ms)": 52.147,
+   "URLSession 20 MB process CPU per run (ms)": 17.77,
+   "Ktor 1 MB fetch+parse (ms)": 78,
+   "Ktor 5 MB fetch+parse (ms)": 324,
+   "Ktor 20 MB fetch+parse (ms)": 1230
+  },
+  "hopi-r3": {
+   "small request median (ms)": 0.602,
+   "small request p90 (ms)": 1.018,
+   "process CPU per small request (us)": 1183.8,
+   "URLSession 1 MB request+read (ms)": 6.871,
+   "URLSession 1 MB process CPU per run (ms)": 5,
+   "URLSession 5 MB request+read (ms)": 17.363,
+   "URLSession 5 MB process CPU per run (ms)": 19.55,
+   "URLSession 20 MB request+read (ms)": 52.83,
+   "URLSession 20 MB process CPU per run (ms)": 19.61,
+   "Ktor 1 MB fetch+parse (ms)": 77,
+   "Ktor 5 MB fetch+parse (ms)": 326,
+   "Ktor 20 MB fetch+parse (ms)": 1224
+  },
+  "noop-r3": {
+   "small request median (ms)": 0.608,
+   "small request p90 (ms)": 1.001,
+   "process CPU per small request (us)": 1087.7,
+   "URLSession 1 MB request+read (ms)": 6.493,
+   "URLSession 1 MB process CPU per run (ms)": 2.68,
+   "URLSession 5 MB request+read (ms)": 14.627,
+   "URLSession 5 MB process CPU per run (ms)": 10.1,
+   "URLSession 20 MB request+read (ms)": 53.868,
+   "URLSession 20 MB process CPU per run (ms)": 18.33,
+   "Ktor 1 MB fetch+parse (ms)": 68,
+   "Ktor 5 MB fetch+parse (ms)": 324,
+   "Ktor 20 MB fetch+parse (ms)": 1219
+  },
+  "hopi-r4": {
+   "small request median (ms)": 0.629,
+   "small request p90 (ms)": 1.138,
+   "process CPU per small request (us)": 1240.7,
+   "URLSession 1 MB request+read (ms)": 3.789,
+   "URLSession 1 MB process CPU per run (ms)": 6.04,
+   "URLSession 5 MB request+read (ms)": 22.09,
+   "URLSession 5 MB process CPU per run (ms)": 18.69,
+   "URLSession 20 MB request+read (ms)": 51.622,
+   "URLSession 20 MB process CPU per run (ms)": 21.82,
+   "Ktor 1 MB fetch+parse (ms)": 73,
+   "Ktor 5 MB fetch+parse (ms)": 328,
+   "Ktor 20 MB fetch+parse (ms)": 1240
+  },
+  "noop-r4": {
+   "small request median (ms)": 0.579,
+   "small request p90 (ms)": 0.811,
+   "process CPU per small request (us)": 831,
+   "URLSession 1 MB request+read (ms)": 6.189,
+   "URLSession 1 MB process CPU per run (ms)": 1.65,
+   "URLSession 5 MB request+read (ms)": 14.497,
+   "URLSession 5 MB process CPU per run (ms)": 8.24,
+   "URLSession 20 MB request+read (ms)": 52.603,
+   "URLSession 20 MB process CPU per run (ms)": 28.73,
+   "Ktor 1 MB fetch+parse (ms)": 78,
+   "Ktor 5 MB fetch+parse (ms)": 324,
+   "Ktor 20 MB fetch+parse (ms)": 1222
+  }
+ },
+ "metrics": {
+  "small request median (ms)": {
+   "noop": [
+    0.59,
+    0.597,
+    0.608,
+    0.579
+   ],
+   "hopi": [
+    0.72,
+    0.589,
+    0.602,
+    0.629
+   ],
+   "noopMedian": 0.5934999999999999,
+   "hopiMedian": 0.6154999999999999,
+   "delta": 0.022,
+   "noise": {
+    "spread": 0.029,
+    "maxConsecutiveDiff": 0.029
+   }
+  },
+  "small request p90 (ms)": {
+   "noop": [
+    1.365,
+    1.014,
+    1.001,
+    0.811
+   ],
+   "hopi": [
+    1.206,
+    0.908,
+    1.018,
+    1.138
+   ],
+   "noopMedian": 1.0074999999999998,
+   "hopiMedian": 1.0779999999999998,
+   "delta": 0.071,
+   "noise": {
+    "spread": 0.554,
+    "maxConsecutiveDiff": 0.351
+   }
+  },
+  "process CPU per small request (us)": {
+   "noop": [
+    1014,
+    1088.7,
+    1087.7,
+    831
+   ],
+   "hopi": [
+    1458.9,
+    1083.6,
+    1183.8,
+    1240.7
+   ],
+   "noopMedian": 1050.85,
+   "hopiMedian": 1212.25,
+   "delta": 161.4,
+   "noise": {
+    "spread": 257.7,
+    "maxConsecutiveDiff": 256.7
+   }
+  },
+  "URLSession 1 MB request+read (ms)": {
+   "noop": [
+    6.19,
+    6.281,
+    6.493,
+    6.189
+   ],
+   "hopi": [
+    4.603,
+    6.303,
+    6.871,
+    3.789
+   ],
+   "noopMedian": 6.2355,
+   "hopiMedian": 5.452999999999999,
+   "delta": -0.783,
+   "noise": {
+    "spread": 0.304,
+    "maxConsecutiveDiff": 0.304
+   }
+  },
+  "URLSession 1 MB process CPU per run (ms)": {
+   "noop": [
+    2.2,
+    2.59,
+    2.68,
+    1.65
+   ],
+   "hopi": [
+    2.51,
+    3.21,
+    5,
+    6.04
+   ],
+   "noopMedian": 2.395,
+   "hopiMedian": 4.105,
+   "delta": 1.71,
+   "noise": {
+    "spread": 1.03,
+    "maxConsecutiveDiff": 1.03
+   }
+  },
+  "URLSession 5 MB request+read (ms)": {
+   "noop": [
+    13.072,
+    14.892,
+    14.627,
+    14.497
+   ],
+   "hopi": [
+    14.332,
+    14.059,
+    17.363,
+    22.09
+   ],
+   "noopMedian": 14.562000000000001,
+   "hopiMedian": 15.8475,
+   "delta": 1.285,
+   "noise": {
+    "spread": 1.82,
+    "maxConsecutiveDiff": 1.82
+   }
+  },
+  "URLSession 5 MB process CPU per run (ms)": {
+   "noop": [
+    8.05,
+    11.28,
+    10.1,
+    8.24
+   ],
+   "hopi": [
+    16.97,
+    15.78,
+    19.55,
+    18.69
+   ],
+   "noopMedian": 9.17,
+   "hopiMedian": 17.83,
+   "delta": 8.66,
+   "noise": {
+    "spread": 3.23,
+    "maxConsecutiveDiff": 3.23
+   }
+  },
+  "URLSession 20 MB request+read (ms)": {
+   "noop": [
+    49.683,
+    52.147,
+    53.868,
+    52.603
+   ],
+   "hopi": [
+    53.389,
+    52.817,
+    52.83,
+    51.622
+   ],
+   "noopMedian": 52.375,
+   "hopiMedian": 52.823499999999996,
+   "delta": 0.448,
+   "noise": {
+    "spread": 4.185,
+    "maxConsecutiveDiff": 2.464
+   }
+  },
+  "URLSession 20 MB process CPU per run (ms)": {
+   "noop": [
+    35.07,
+    17.77,
+    18.33,
+    28.73
+   ],
+   "hopi": [
+    21.9,
+    24.47,
+    19.61,
+    21.82
+   ],
+   "noopMedian": 23.53,
+   "hopiMedian": 21.86,
+   "delta": -1.67,
+   "noise": {
+    "spread": 17.3,
+    "maxConsecutiveDiff": 17.3
+   }
+  },
+  "Ktor 1 MB fetch+parse (ms)": {
+   "noop": [
+    69,
+    78,
+    68,
+    78
+   ],
+   "hopi": [
+    77,
+    77,
+    77,
+    73
+   ],
+   "noopMedian": 73.5,
+   "hopiMedian": 77.0,
+   "delta": 3.5,
+   "noise": {
+    "spread": 10,
+    "maxConsecutiveDiff": 10
+   }
+  },
+  "Ktor 5 MB fetch+parse (ms)": {
+   "noop": [
+    332,
+    324,
+    324,
+    324
+   ],
+   "hopi": [
+    326,
+    324,
+    326,
+    328
+   ],
+   "noopMedian": 324.0,
+   "hopiMedian": 326.0,
+   "delta": 2.0,
+   "noise": {
+    "spread": 8,
+    "maxConsecutiveDiff": 8
+   }
+  },
+  "Ktor 20 MB fetch+parse (ms)": {
+   "noop": [
+    1226,
+    1230,
+    1219,
+    1222
+   ],
+   "hopi": [
+    1226,
+    1238,
+    1224,
+    1240
+   ],
+   "noopMedian": 1224.0,
+   "hopiMedian": 1232.0,
+   "delta": 8.0,
+   "noise": {
+    "spread": 11,
+    "maxConsecutiveDiff": 11
+   }
+  }
+ }
+}

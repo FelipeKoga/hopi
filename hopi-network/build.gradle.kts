@@ -94,6 +94,10 @@ kotlin {
             // The app brings its own OkHttp (4.x or 5.x); the lowest supported API is compiled against.
             compileOnly(libs.okhttp)
         }
+        getByName("androidHostTest") {
+            // The giant-body fixtures and probes, shared by every module's benchmark.
+            kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures"))
+        }
         getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.okhttp)
@@ -240,6 +244,11 @@ fun fixturesArchive(targetName: String): TaskProvider<Exec> {
         commandLine("xcrun", "libtool", "-static", "-o", archiveFile.get().asFile.absolutePath, objectFile.get().asFile.absolutePath)
     }
 }
+
+// The giant-body benchmark (AndroidGiantBodyBenchmark), beside the Android host tests, which skip
+// it: ./gradlew :hopi-network:androidHostGiantBodyBenchmark
+extra["hopi.giantBodyTestTask"] = "testAndroidHostTest"
+apply(from = rootProject.file("gradle/giant-body-benchmark.gradle.kts"))
 
 // `-Phopi.simulator=<udid>` runs the iOS tests on that already booted simulator (see hopi-core).
 providers.gradleProperty("hopi.simulator").orNull?.let { udid ->

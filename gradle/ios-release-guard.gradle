@@ -1,0 +1,165 @@
+// The iOS release guard (docs/ARCHITECTURE.md, "Release guards"; owner decision D9 of the
+// runtime-split plan). Every link of a RELEASE binary of a Kotlin/Native target of the module that
+// applies it (a JS or Wasm target, whose binaries have no build type, is left alone) first runs
+// hopiReleaseGuard<LinkTask> (hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64),
+// which fails when the binary's classpath holds one of Hopi's runtimes: hopi-core, hopi-network,
+// hopi-perf or hopi-start, as this repository's projects or as dev.koga.hopi coordinates, a
+// platform module (hopi-network-iossimulatorarm64) included; exact names, so hopi-api, hopi-ktor
+// and hopi-ktor-noop pass. That covers every way a Release framework is linked: Xcode's Release
+// configuration, a custom configuration with KOTLIN_FRAMEWORK_BUILD_TYPE=release, the Release half
+// of assemble<Name>XCFramework (assemble<Name>ReleaseXCFramework, every slice: one invocation of
+// assemble<Name>XCFramework links both build types, so it fails as a whole, while
+// assemble<Name>DebugXCFramework links Debug only), CocoaPods' pod frameworks and
+// link<…>Release<…> itself. A custom configuration a consumer maps to debug links a Debug binary,
+// which this does not guard.
+//
+// It reads the binary's compile classpath (its compilation's compileDependencyConfigurationName,
+// which the Debug and the Release binary of a target share, so it holds every runtime the build
+// adds) and, for a framework, its export configuration, through their resolution results: resolved
+// when the configuration cache stores the task, or when the task runs, never while projects are
+// configured (resolving there broke Kotlin's own configurations in the stage 9 experiments). A
+// static framework would show a runtime that is only on the classpath through its native archive
+// member only, and a dynamic one not at all, so this guard, not dead-code elimination, keeps a
+// runtime out of a Release framework.
+//
+// Groovy, because it reads the Kotlin plugin's objects dynamically: a script plugin does not see
+// their types (root build.gradle.kts). Apply it after the kotlin { } block:
+//
+//   apply(from = rootProject.file("gradle/ios-release-guard.gradle"))
+//
+// One exemption, for a release check's positive control, which links a Release framework with
+// every runtime on purpose: the link the applying script names before applying it,
+// extra["hopiIosReleaseGuardExemptLink"] = "<link task name>" (a build script value: a Gradle
+// property of that name exempts nothing), and only while verifyIosReleaseExcludesCapture is
+// requested by name (`verifyIosReleaseExcludesCapture` or `<path>:verifyIosReleaseExcludesCapture`,
+// no abbreviation): that guard still walks the classpath, logs what it would refuse and passes.
+// Every other Release link of the invocation stays guarded. No opt-out.
+
+import org.gradle.api.artifacts.component.ComponentIdentifier
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedComponentResult
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.work.DisableCachingByDefault
+
+/** Fails a Release link whose classpath holds a Hopi runtime. No outputs: it runs before every such link. */
+@DisableCachingByDefault(because = 'A check with no outputs')
+abstract class HopiIosReleaseGuard extends DefaultTask {
+    /** `<project path>:<link task>`, for the failure. */
+    @Input
+    abstract Property<String> getLinkPath()
+
+    /** This guards the link the release check consumes (the exempt link the applying script named). */
+    @Input
+    abstract Property<Boolean> getReleaseCheckLink()
+
+    /** The release check's positive control was requested by name and this guards its link. */
+    @Input
+    abstract Property<Boolean> getExempt()
+
+    /** The binary's compile classpath; a resolution result is not a value Gradle fingerprints. */
+    @Internal
+    abstract Property<ResolvedComponentResult> getCompileClasspath()
+
+    /** A framework's export configuration; unset for another binary. */
+    @Internal
+    abstract Property<ResolvedComponentResult> getExports()
+
+    @TaskAction
+    void check() {
+        // The walk runs for the exempt link too, so every invocation that reaches a guard runs it.
+        Set<String> found = new LinkedHashSet<String>()
+        found.addAll(HopiRuntimeComponents.refused(compileClasspath.get()))
+        if (exports.present) found.addAll(HopiRuntimeComponents.refused(exports.get()))
+        if (found.isEmpty()) return
+        if (exempt.get()) {
+            logger.lifecycle("Hopi's iOS release guard: ${linkPath.get()} is exempt (the release check's positive control, requested by name): ${found.join(', ')}")
+            return
+        }
+        // Until stage 10 of the runtime-split plan the real hopi-ktor brings hopi-core.
+        String message = "Hopi's iOS release guard: ${linkPath.get()} links a Release binary with Hopi's runtime on its classpath: " +
+            "${found.join(', ')}. A Release binary must hold none: build it without -Phopi.enabled=true (Xcode's build phase " +
+            "passes it for the Debug configuration only); name Hopi's runtimes (hopi-start) and the real hopi-ktor, which brings " +
+            "hopi-core, only under that flag (a module that names one outside it fails here with or without the flag); or link only " +
+            "the Debug binary (link<…>Debug…, assemble<Name>DebugXCFramework)."
+        if (releaseCheckLink.get()) {
+            message += " This is the link verifyIosReleaseExcludesCapture consumes: request that task by its own name for its positive control."
+        }
+        throw new GradleException(message)
+    }
+}
+
+/** Hopi's runtimes in a resolved dependency graph: the Android plugin's rule (HopiRuntimeGraph). */
+class HopiRuntimeComponents {
+    static final Set<String> RUNTIMES = ['hopi-core', 'hopi-network', 'hopi-perf', 'hopi-start'] as Set
+    static final List<String> PLATFORM_SUFFIXES = ['-android', '-jvm', '-iosarm64', '-iossimulatorarm64']
+
+    static boolean isRuntime(ComponentIdentifier id) {
+        if (id instanceof ProjectComponentIdentifier) return RUNTIMES.contains(id.projectPath.substring(1)) && id.projectPath.lastIndexOf(':') == 0
+        if (!(id instanceof ModuleComponentIdentifier) || id.group != 'dev.koga.hopi') return false
+        String module = id.module
+        RUNTIMES.contains(module) || PLATFORM_SUFFIXES.any { module.endsWith(it) && RUNTIMES.contains(module.substring(0, module.length() - it.length())) }
+    }
+
+    /** Each runtime under [root], as its display name followed by what depends on it, the root left out. */
+    static List<String> refused(ResolvedComponentResult root) {
+        List<String> found = []
+        Set<ComponentIdentifier> visited = new HashSet<ComponentIdentifier>()
+        visited.add(root.id)
+        ArrayDeque<ResolvedComponentResult> queue = new ArrayDeque<ResolvedComponentResult>()
+        queue.add(root)
+        while (!queue.isEmpty()) {
+            ResolvedComponentResult component = queue.removeFirst()
+            if (!component.is(root) && isRuntime(component.id)) {
+                List<String> via = component.dependents.collect { it.from.id }.findAll { it != root.id }.collect { it.displayName }.unique()
+                found.add(via.isEmpty() ? component.id.displayName : "${component.id.displayName} (via ${via.join(', ')})".toString())
+            }
+            for (dependency in component.dependencies) {
+                if (dependency instanceof ResolvedDependencyResult && visited.add(dependency.selected.id)) queue.add(dependency.selected)
+            }
+        }
+        found
+    }
+}
+
+pluginManager.withPlugin('org.jetbrains.kotlin.multiplatform') {
+    String exemptKey = 'hopiIosReleaseGuardExemptLink'
+    def extra = project.extensions.extraProperties
+    String exemptLink = extra.has(exemptKey) && !providers.gradleProperty(exemptKey).present ? extra.get(exemptKey) as String : null
+    boolean checkRequested = gradle.startParameter.taskNames.any { it == 'verifyIosReleaseExcludesCapture' || it.endsWith(':verifyIosReleaseExcludesCapture') }
+    String projectPrefix = project.path == ':' ? '' : project.path
+    project.extensions.getByName('kotlin').targets.all { target ->
+        // Kotlin/Native targets only, by the platform type's name: a JS or Wasm target has binaries
+        // too, with a mode and no build type, so the filter below would throw on them.
+        if (!target.hasProperty('binaries') || target.platformType.name() != 'native') return
+        target.binaries.matching { it.buildType.name() == 'RELEASE' }.all { binary ->
+            String link = binary.linkTaskName
+            def guard = project.tasks.register("hopiReleaseGuard${link.substring(0, 1).toUpperCase()}${link.substring(1)}", HopiIosReleaseGuard) { task ->
+                task.group = 'verification'
+                task.description = "Fails ${link} when the Release binary's classpath holds one of Hopi's runtimes."
+                task.linkPath.set("${projectPrefix}:${link}".toString())
+                task.releaseCheckLink.set(link == exemptLink)
+                task.exempt.set(checkRequested && link == exemptLink)
+            }
+            // Each configuration's resolution result goes straight into the task: no closure in a
+            // provider chain (its owner would be this script), and nothing resolves here.
+            List<String> names = [binary.compilation.compileDependencyConfigurationName]
+            if (binary.hasProperty('exportConfigurationName')) names.add(binary.exportConfigurationName)
+            names.eachWithIndex { String name, int index ->
+                def configuration = project.configurations.findByName(name)
+                if (configuration != null) {
+                    def root = configuration.incoming.resolutionResult.rootComponent
+                    guard.configure { task -> (index == 0 ? task.compileClasspath : task.exports).set(root) }
+                } else {
+                    // Not created yet when the binary is: wire it when it is.
+                    logger.lifecycle("Hopi's iOS release guard: ${projectPrefix}:${link} reads ${name}, created after its binary")
+                    project.configurations.named { it == name }.configureEach { created ->
+                        def root = created.incoming.resolutionResult.rootComponent
+                        guard.configure { task -> (index == 0 ? task.compileClasspath : task.exports).set(root) }
+                    }
+                }
+            }
+            binary.linkTaskProvider.configure { it.dependsOn(guard) }
+        }
+    }
+}

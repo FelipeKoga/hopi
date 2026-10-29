@@ -162,9 +162,10 @@ so the app pays no extra cost.
   is the main viewer.)
 
 ### Automatic platform capture (every request, third-party SDKs included)
-- **iOS, URLSession (built).** `hopi-urlsession` / `-noop`: `HopiUrlSession.start()` records every
-  URLSession request of the process, observe only, with no per-client setup (architecture doc,
-  "URLSession capture"; design in `docs/design/urlsession-capture.md`). Ktor's Darwin engine
+- **iOS, URLSession (built).** `hopi-network` (since the runtime-split plan's stage 9; no noop),
+  started by `hopi-start`'s `Hopi.start { }`: records every URLSession request of the process,
+  observe only, with no per-client setup (architecture doc, "URLSession capture"; design in
+  `docs/design/urlsession-capture.md`). Ktor's Darwin engine
   defers to it (one record per request; a Ktor request in flight when `start()` runs is recorded
   once or missed, never twice, since 2026-10-27; a viewer attached at that moment sees its start
   end as failed, "withdrawn: …", and the desktop ends one it missed while away or behind as gone
@@ -172,9 +173,11 @@ so the app pays no extra cost.
   and a per-request A/B measured on the simulator only. Open: a physical device run, background
   sessions beyond metadata, WebSocket tasks.
 - **Android, OkHttp and `HttpURLConnection` (built).** The `dev.koga.hopi` Gradle plugin
-  (`gradle-plugin/`) and `hopi-android` / `-noop`: one plugin line records every OkHttp call and
-  every `HttpURLConnection` of the app and its dependencies, observe only, debuggable variants only
-  (architecture doc, "Android capture"; design and measurements in `docs/design/android-capture.md`).
+  (`gradle-plugin/`) and `hopi-network` (since the runtime-split plan's stage 9; no noop, and the
+  plugin's release guard fails a release variant that resolves a runtime): one plugin line records
+  every OkHttp call and every `HttpURLConnection` of the app and its dependencies, observe only,
+  debuggable variants only (architecture doc, "Android capture"; design and measurements in
+  `docs/design/android-capture.md`).
   Ktor's OkHttp and Android engines defer to it, except a request Ktor itself decodes
   (`ContentEncoding`), which the Ktor plugin keeps. OkHttp 3.14 is recorded, 3.12/3.13 are left
   alone. Verified end to end and measured on the API 35 emulator only.
@@ -216,7 +219,7 @@ so the app pays no extra cost.
   since the runtime-split plan's stage 7 `HopiRules` is in `hopi-api`, in every build, and does
   nothing until a debug build's start registers core's rules runtime (a rule added before it is
   dropped and counted in one notice line); the release checks cover it.
-  `rules = false` on every recorder (Ktor, `Hopi.start { }` and `HopiUrlSession` on iOS, `hopi { }`).
+  `rules = false` on every recorder (Ktor, `Hopi.start { }` on iOS, `hopi { network { } }`).
 - Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
   bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
   `rules ls|rm|clear|enable|disable|reset`, exit code 4); `HopiRules` (Kotlin, Swift
@@ -249,8 +252,8 @@ so the app pays no extra cost.
   - A rule naming only sources the platform lacks (okhttp on iOS) reads active with no line, and
     the match shorthand does not show its sources.
   - On iOS an app without URLSession capture still gets the URLSession exclusion line for a rule
-    that names no sources: the platform's sources are a fixed set, whether `HopiUrlSession.start()`
-    ran or not.
+    that names no sources: the platform's sources are a fixed set, whether `Hopi.start` started
+    capture or not.
   - A mock copied from a record (`fromTransaction`, "Mock this response", `--from`) decodes the
     single gzip or deflate an OkHttp or `HttpURLConnection` record holds raw (up to 1 MiB) and
     refuses br, zstd and stacked codings; a Ktor client without `ContentEncoding` whose request

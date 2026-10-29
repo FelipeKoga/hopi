@@ -13,12 +13,16 @@ import org.gradle.api.tasks.TaskAction
  * Writes the `hopi { }` block into the app as `dev.koga.hopi.android.generated.HopiGeneratedConfig`,
  * a Java subclass of hopi-core's `HopiConfigValues` whose constructor passes the global settings,
  * then the tool list, each tool constructed with its own settings: hopi-network's `NetworkTool`
- * and, with `perf { enabled = true }`, hopi-perf's `PerfEntry`. The provider reads it once and
- * hands the list to the start sequence (docs/design/android-capture.md, "Auto-start"). Only
- * debuggable variants get it, and only they depend on hopi-core and the runtimes.
+ * with `network { enabled }` (the default) and hopi-perf's `PerfEntry` with
+ * `perf { enabled = true }`, possibly neither. The provider reads it once and hands the list to the
+ * start sequence (docs/design/android-capture.md, "Auto-start"). Every debuggable variant gets it
+ * (unless `hopi { enabled = false }`), and only they depend on hopi-core and the runtimes.
  */
 @CacheableTask
 public abstract class GenerateHopiConfig : DefaultTask() {
+    /** `network { enabled }`: the tool list names hopi-network's tool, with the three settings below. */
+    @get:Input public abstract val networkPresent: Property<Boolean>
+
     @get:Input public abstract val okhttp: Property<Boolean>
 
     /** The `URL` calls of Ktor's Android engine are rewritten: its requests are recorded by the wrapper. */
@@ -70,18 +74,21 @@ public abstract class GenerateHopiConfig : DefaultTask() {
         appendLine("            ${agentBridge.get()}, // agentBridge")
         appendLine("            ${redactionDisabled.get()}, // redactionDisabled")
         appendLine("            new String[] ${javaStrings(redactedHeaders.get())}, // redactHeaders")
-        appendLine("            new String[] ${javaStrings(redactedQueryParameters.get())}, // redactQueryParameters")
         // The tool list (the constructor's varargs): a new tool is one more element, never a parameter.
-        val perf = perfPresent.get()
-        appendLine(
-            "            new dev.koga.hopi.android.internal.NetworkTool(${okhttp.get()}, ${urlConnection.get()}, ${rules.get()})" +
-                (if (perf) "," else "") + " // okhttp, urlConnection, rules",
-        )
-        if (perf) {
-            appendLine(
-                "            new dev.koga.hopi.perf.internal.PerfEntry(${perfAutoStart.get()}, ${perfHangThresholdMs.get()}L, " +
-                    "${perfHangHeartbeat.get()}, ${perfRemoteControl.get()}) // perf { }: autoStart, hangThresholdMs, hangHeartbeat, remoteControl",
-            )
+        // Each tool is an expression and its comment; the list may be empty, and a comma follows an
+        // argument only when another one does (javac refuses `, )`).
+        val tools = ArrayList<Pair<String, String>>(2)
+        if (networkPresent.get()) {
+            tools += "new dev.koga.hopi.android.internal.NetworkTool(${okhttp.get()}, ${urlConnection.get()}, ${rules.get()})" to
+                "okhttp, urlConnection, rules"
+        }
+        if (perfPresent.get()) {
+            tools += "new dev.koga.hopi.perf.internal.PerfEntry(${perfAutoStart.get()}, ${perfHangThresholdMs.get()}L, " +
+                "${perfHangHeartbeat.get()}, ${perfRemoteControl.get()})" to "perf { }: autoStart, hangThresholdMs, hangHeartbeat, remoteControl"
+        }
+        appendLine("            new String[] ${javaStrings(redactedQueryParameters.get())}${if (tools.isEmpty()) "" else ","} // redactQueryParameters")
+        for ((index, tool) in tools.withIndex()) {
+            appendLine("            ${tool.first}${if (index < tools.lastIndex) "," else ""} // ${tool.second}")
         }
         appendLine("        );")
         appendLine("    }")

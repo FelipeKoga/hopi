@@ -1952,13 +1952,13 @@ Not part of this pass.
 ### Base check today
 
 Kept equal to the base check of `README.md` ("Building"); a stage that adds, deletes or renames a
-task path edits both (rule 5). As of stage 9a:
+task path edits both (rule 5). As of stage 9:
 
 ```bash
 ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-ktor-noop:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test \
   :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
-  :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseUsesNoop :hopi-network:testAndroidHostTest \
+  :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseHasNoRuntime :hopi-network:testAndroidHostTest \
   :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
 ```
 
@@ -2056,8 +2056,8 @@ Rewritten after stage 1; stage numbers are the new section 6's.
 
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
-| Hopi linked into an iOS Release framework because a runtime was on that link's classpath (`hopi.enabled` left on, one invocation linking both build types, `assembleXCFramework`): DebugSwift #202's failure mode (3.6.1) | high | The iOS release guard (stage 9, E2.8 run first); `verifyIosReleaseExcludesCapture` in `check`; later (O8) the plugin derives the choice from `CONFIGURATION` |
-| A runtime reaches an Android release build through a manual dependency | high | The plugin's build-time guard and the `FLAG_DEBUGGABLE` check (D9, stages 4 and 9); the renamed release check |
+| Hopi linked into an iOS Release framework because a runtime was on that link's classpath (`hopi.enabled` left on, one invocation linking both build types, `assembleXCFramework`): DebugSwift #202's failure mode (3.6.1) | high | Built in stage 9: the iOS release guard (`gradle/ios-release-guard.gradle`, applied by the sample, copied by a consumer) fails every Release `KotlinNativeLink` whose classpath holds a runtime, the Release half of an XCFramework included, before linking; `verifyIosReleaseExcludesCapture` in `check` (section 9); later (O8) the plugin applies it and derives the choice from `CONFIGURATION` |
+| A runtime reaches an Android release build through a manual dependency | high | Built in stage 9: the plugin's `hopiReleaseGuard<Variant>` fails a non-debuggable variant whose runtime classpath holds a runtime, before any dex task (E3.6-c), and the provider's `FLAG_DEBUGGABLE` check writes one notice and starts nothing in an unguarded release APK (E3.6-d, section 9); `verifyReleaseHasNoRuntime` |
 | A stage leaves `check` red because a hard-coded module set, fixture pair, plugin constant or task path was not edited (each full run takes about 45 min) | high | The same-commit list of section 6; the fast gate `./gradlew check --dry-run`, which cannot see module-set failures, so the full run decides |
 | A consumer with `mavenLocal()` silently resolves a deleted noop: `~/.m2/repository/dev/koga/hopi` holds every `*-noop` 0.1.0 and the plugin falls back to `dev.koga.hopi:<noop>:0.1.0` (`HopiPlugin.kt:134-135`) | medium | Each noop constant leaves the plugin in the stage that deletes its module; stage 14 publishes the new set and tells the owner the stale noops are theirs to delete |
 | Ktor's `HttpCache` stores a platform mock, or URLSession hands over encoded bodies for a request that names its own `Accept-Encoding` (the thin plugin is inert on iOS) | medium | E1 R3 and R5 run first in stage 10; the fixes are named there |
@@ -2508,6 +2508,250 @@ simulator `iPhone 17`, iOS 27.0; evidence in `build/evidence/runtime-split/stage
   `PerfClientTest.remotePerfStreamsOnlyWhileWatchedAndHoldsItsMonitors` (`hopi-connect`) timed
   out once, a 15 s await while three test JVMs ran, and passed on its rerun.
 
+Stage 9 (2026-10-29; 9a `472fcd6` on `15448b5`, then 9b's edits on it; emulator `Hopi_API_35`,
+API 35; simulator `iPhone 17`, iOS 27.0; evidence in `build/evidence/runtime-split/stage9/`):
+
+- **First ([run], before the memo; `stage9-experiments.md` in the session's scratchpad)**: E2.8
+  step 1: Xcode's `CONFIGURATION` selects `linkDebugFramework…` for Debug and
+  `linkReleaseFramework…` for Release (an exact, case-insensitive match first;
+  `KOTLIN_FRAMEWORK_BUILD_TYPE` is only a fallback), and a custom configuration without that
+  variable fails in KGP before linking; with `-Phopi.enabled=true` both links of a target read one
+  dependency set. E2.8 step 2: `assemble<Name>XCFramework` links both build types in one
+  invocation. E2.3 runs 1 to 4: an unreferenced runtime's native archive member lands whole in a
+  static framework, Debug and Release (its Kotlin is dropped); a dynamic framework's link drops it;
+  so `nm` sees a classpath-only runtime through its native families only, and the classpath guard
+  is required. E5 X1 was not run (it writes `~/.m2`).
+- **9a's gates** (its implementer; `stage9a.patch`): `hopi-network`'s Android host tests 77 (the
+  old `hopi-android` run's 4 classes and 77 tests), its iOS tests 49 (`HookCostTest` 1,
+  `KtorDarwinTest` 4, `UrlSessionCaptureTest` 20, `UrlSessionRulesTest` 24), core's iOS tests 196,
+  rules claiming through `hopi_hits`; the plugin's unit and functional tests; the release report
+  30 Hopi classes (stage 8's 31 less `HopiAndroid`); the dependency graphs: Android release
+  `:hopi-api`, `:hopi-ktor-noop`; debug `:hopi-api`, `:hopi-core`, `:hopi-ktor`, `:hopi-network`,
+  `:hopi-perf`; iOS without the flag `:hopi-api`, `:hopi-ktor-noop`, with it also `:hopi-core`,
+  `:hopi-ktor`, `:hopi-network` (through `hopi-start`), `:hopi-perf` and `:hopi-start`. One flagged
+  Debug framework link: `_hopi_hits_` resolved from core's archive, and the header declares nothing
+  internal.
+- **E3.6-c** (a temporary `releaseImplementation(project(":hopi-network"))` in `sample/androidApp`,
+  reverted after): `./gradlew :sample:androidApp:assembleRelease` fails in
+  `:sample:androidApp:hopiReleaseGuardRelease`: `dev.koga.hopi: variant release is not debuggable,
+  but its runtime classpath holds Hopi's runtime: project ':hopi-network', project ':hopi-core'
+  (via project ':hopi-network'). Hopi's runtimes belong in debuggable variants only, where this
+  plugin adds them: remove project ':hopi-network' from release (in this module or the one that
+  brings it: name it for debuggable build types only, as debugImplementation, not as
+  implementation or releaseImplementation).` Of the run's 73 tasks (`e36c-assembleRelease-tasks.txt`)
+  the app's were `preBuild` (up to date) and the guard: `preReleaseBuild` never ran, no task name
+  holds `Dex`, nothing compiled (the guard and five `kmpPartiallyResolvedDependenciesChecker`s
+  executed; every other task was up to date, skipped or without source), and no release APK was
+  written. `assembleDebug` with the same edit passes (debug has no guard).
+  `functionalTest --tests '*NonDebuggable*'`: 1 of 1 (`aRuntimeInANonDebuggableVariantFailsTheBuild`,
+  10.0 s); its three builds fail on `project ':hopi-network', project ':hopi-core' (via project
+  ':hopi-network')`, on `dev.koga.hopi:hopi-network:0.1.0, dev.koga.hopi:hopi-core:0.1.0 (via
+  dev.koga.hopi:hopi-network:0.1.0)` and on `dev.koga.hopi:hopi-network:0.1.0 (via project ':sdk'),
+  dev.koga.hopi:hopi-core:0.1.0 (via dev.koga.hopi:hopi-network:0.1.0)`.
+- **E3.6-d** (temporary edits instead of a scratch branch: the plugin's
+  `variant.lifecycleTasks.registerPreBuild(guard)` removed and the dependency above; reverted
+  after, `e36d-edits.diff`): `assembleRelease` passes with no guard task in its graph; the APK holds
+  345 `dev.koga.hopi.core` and 53 `dev.koga.hopi.android` classes, and its manifest declares
+  `HopiInitProvider` and no `debuggable`. Aligned and signed with the debug keystore (`zipalign`,
+  `apksigner`: v3, `CN=Android Debug`), installed on a clean package (flags `[ HAS_CODE
+  ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]`), `adb logcat -c`, launched: `adb logcat -d -s Hopi` holds
+  exactly one line, `{"hopi":1,"notice":"not started: dev.koga.hopi.sample is not debuggable
+  (FLAG_DEBUGGABLE unset); a Hopi runtime reached a non-debuggable build, check the app's
+  dependencies"}`, and no `android capture started`; the app ran, with no crash
+  (`e36d-logcat-Hopi.txt`). Uninstalled after, and the debug build reinstalled.
+- **The registration on Android's main thread** (the app runs from its APK: `dumpsys package
+  dexopt` reads `run-from-apk` for the debug build installed just before; a temporary probe in
+  the Android `NetworkTool.start` and, after `HopiStart.start`, in the provider,
+  reverted after, `probe-edits.diff`; 6 cold launches after a discarded one; `probe.txt`,
+  `probe-stats.txt`): `HopiRuntimes.registerNetwork` loaded no class in 4 of 6 launches (1 and 2 in
+  the first two, while another thread loaded classes) in a median 0.29 ms (0.10 to 0.43), and
+  returned true in 6 of 6. The tool's steps before it (`okHttpState`, the settings,
+  `AndroidCapture.start`) loaded 261 to 371 classes (median 335) in 9.4 to 84.8 ms (median 23.4):
+  most of the `network` part.
+- **No capture class at start** (the same probe: `Debug.getLoadedClassCount()` around each lookup
+  and its repeat, after `HopiStart.start`): `HopiOkHttpInterceptor` loaded 2 or 3 classes at its
+  first lookup in 5 of 6 launches (9 in the sixth), `UrlConnectionRecorder` and `OkHttpRules` 1
+  each in 5 of 6 (17 and 8 in the sixth), and every repeat +0, so the start had loaded none of the
+  three. The controls: `AndroidCapture`, which the tool initialized, +0 in 5 of 6 (22 once), and
+  `kotlin.io.path.PathTreeWalk`, which nothing uses, +1 in 3 of 6 (2 and 7 and 7 in the others; its
+  repeat +0 in 4 of 6, +2 and +5 in the two launches where another thread was loading classes).
+  Every lookup returned the class (`found=true`), which on ART says nothing, as in stage 8.
+- **The provider's start line** (an interleaved A/B against stage 8's `after8-debug.apk`, as stage
+  8's: 4 rounds of 5 cold starts per arm, `--es perfBench 'mode=idle;monitors=none'`; the after
+  arm `after9-debug.apk`, built from the tree before any probe edit; `ab-start.txt`,
+  `ab-start-analysis.txt`): the start sequence's own steps (the line less its parts) took a median
+  1.54 against 1.88 ms (p25 to p75 1.10 to 1.81 against 1.28 to 5.11), lower in every round (round
+  medians -0.32 to -1.19 ms). The `network` part, which now holds the registration, took a median
+  19.6 against 21.7 ms (p25 to p75 9.3 to 25.7 against 16.5 to 29.1; round medians +1.9, -6.5,
+  -18.2 and -0.2 ms: no change past its spread, single launches 4.0 to 44.5 against 8.0 to
+  84.7 ms). The whole line: medians 32.5 against 39.2 ms (p25 to p75 29.5 to 38.4 against 32.2 to
+  46.8; round medians -8.7, +1.8, -7.8, -7.6 ms). `am start -W`'s
+  TotalTime: 1220 against 1268 ms (p25 to p75 1192 to 1235 against 1232 to 1291), lower in every
+  round (-10 to -94 ms); the after arm ran second in every round, as in stage 8, whose TotalTimes
+  were equal.
+- **E1 R7** (`./gradlew :hopi-network:androidHostGiantBodyBenchmark`, host only, run twice; the
+  allocation deltas agree within 0.1 MB but for one cell, OkHttp chunked 5 MB at the 16 MB cap,
+  +21.0 then +16.0 MB; `e1r7-android-request.md`, `e1r7-android-request-run2.md`):
+  with a `Content-Length` capture allocates 0.97x to 1.01x the bytes it keeps (min(cap, body)) in
+  every cell of both transports: +0.3 MB at the 256 KB cap; +1.0 and +5.0 MB for the 1 and 5 MB
+  bodies under the 8 and 16 MB caps, and +8.0 and +16.0 MB once the body passes the cap (pass).
+  Chunked, a body longer than the cap: 1.94x to 2.15x (+0.5, +16.0, +32.0 MB; pass). Chunked, a
+  body shorter than the cap (1 and 5 MB under the 8 and 16 MB caps):
+  3.99x the 1 MB body (+4.0 MB) and 3.20x to 4.20x the 5 MB body (+16.0 to +21.0 MB, up to 2.6x the
+  8 MB cap), on both transports in both runs: the "2x chunked" bound fails there. The figures match
+  `BoundedCapture`'s growth: a body of unknown size starts at 8 KB and doubles up to the cap
+  (`ensure`), so the arrays alone come to about twice the next power of two above the body (about
+  4 MB for 1 MB, 16 MB for 5 MB), and the 4.20x cells hold one more copy of the body, the size of
+  the copy `bytes()` trims to; README's "about 2x chunked" row measures the Ktor plugin, whose
+  capture grows in blocks. Not changed here (product code). Wall time: at most +5.8 ms median in
+  the first run (OkHttp, Content-Length, 50 MB, 16 MB cap, against 11.4 ms with no capture) and
+  +4.9 ms in the second (OkHttp, chunked, 50 MB, 16 MB cap).
+- **The capture end to end** (`benchmark/android-capture/run.py e2e`, the capture build
+  `after9-debug.apk` and a noop one, `assembleDebug -Psample.hopiCapture=false`, whose dex holds
+  `hopi-api` and the Ktor noop twin, no `dev.koga.hopi.core` or `dev.koga.hopi.android` type, and
+  whose manifest has no provider; `run-e2e/`): `e2e: all checks passed`; the status lines read
+  `capture: started=true okHttpInstrumented=true` (both launches) and, for the noop build,
+  `capture: started=false okHttpInstrumented=false`; the server saw 11 requests from each build,
+  the capture build recorded 11 (okhttp 5, urlconnection 6), the noop build none.
+  `benchmark/android-capture/e2e/run.sh`, then `check.py` (`e2e/`, `e2e-check.log`): 54 checks, 0
+  failed: 44 scenarios, 45 records (okhttp 30, urlconnection 15, none ktor) for 38 server
+  requests, `list`, `get` and `tail` agree, one summary line per record; the noop build read the
+  same bytes in all 44 scenarios, the server saw the same 38 requests from both builds, and the
+  noop build recorded nothing.
+- **The rules self-test, emulator** (the early-rule probe of stage 7's E4 X6 not rerun):
+  `--es rulesVerify all` reads `{"rules":"done","real":true,"failed":0,
+  "scenarios":44}` (44 of 44 `"ok":true`) and the pinned check `{"rules":"pinned","ok":true,…}`
+  (the plain and the edited request fail the pin with `SSLPeerUnverifiedException`, the mock
+  answers 200; `rules-verify.txt`).
+- **The capture A/B** (`benchmark/android-capture/run.py ab`, the method of android-capture.md:
+  dev server `--nodelay`, `kinds=okhttp,urlconnection;path=/json;n=1000;warmup=1000`, blocks noop,
+  capture, noop2, 4 rounds; `abtable.py`; `capture-ab/ab.ndjson`, `capture-ab-table.md`): the
+  calling thread's CPU per request, capture less the mean of the round's two noop blocks, +24 µs on
+  OkHttp (rounds +21 to +30; noise noop2 - noop -8 to +9) and +28 µs on `HttpURLConnection` (+24
+  to +32; noise -9 to +1); median wall +29 µs (+19 to +36; noise -19 to +5) and +12 µs (+7 to +31;
+  noise -16 to -1). README's 2026-10-27 figures: +22.5 to +24 µs of CPU, +12 to +27 µs median wall
+  (medians of 8 rounds).
+- **Release APK with the flag** (`./gradlew :sample:androidApp:verifyReleaseHasNoRuntime
+  -Phopi.enabled=true`; the shared module then names `:hopi-ktor`,
+  `sample/shared/build.gradle.kts:86`): passes, with `hopiReleaseGuardRelease` run and passed in
+  the same build; the report (`release-has-no-runtime-flag.txt`) reads `hopi components on the
+  release classpath: :hopi-api, :hopi-ktor-noop` and `hopi classes in the apk: 30; referenced
+  runtime/capture types: 0; classes calling a hook: 0; Hopi manifest components: 0`, both negative
+  controls found (`RealCall` calls `OkHttpClient.interceptors()`, `FakeSdk` calls
+  `URL.openConnection()`): the plugin swapped the real `hopi-ktor` for its twin in release.
+- **E2.8 step 4 and E5 X2, the iOS release guard** (the Release framework output deleted first;
+  `e28-link-release-flag.log`): `./gradlew :sample:shared:linkReleaseFrameworkIosSimulatorArm64
+  -Phopi.enabled=true` fails in `:sample:shared:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64`
+  (3 s, the configuration cache entry reused): `Hopi's iOS release guard:
+  :sample:shared:linkReleaseFrameworkIosSimulatorArm64 links a Release binary with Hopi's runtime on
+  its classpath: project ':hopi-start', project ':hopi-core' (via project ':hopi-ktor', project
+  ':hopi-start', project ':hopi-network', project ':hopi-perf'), project ':hopi-network' (via project
+  ':hopi-start'), project ':hopi-perf' (via project ':hopi-start').`, then the three fixes and `This is
+  the link verifyIosReleaseExcludesCapture consumes: request that task by its own name for its
+  positive control.` Of its 64 task lines (34 actionable tasks), 9 executed: the seven
+  `kmpPartiallyResolvedDependenciesChecker`s, `checkIosSimulatorArm64MainComposeLibrariesCompatibility`
+  and the guard; the four compile tasks that started were up to date, no link task appears in the
+  output and no `releaseFramework` directory was written. E5 X2: the guard names `hopi-perf`, which
+  reaches the sample through `hopi-start`.
+- **The positive control** (`./gradlew :sample:shared:verifyIosReleaseExcludesCapture
+  -Phopi.enabled=true`, 2 min 55 s with the Release link; `e28-verify-release-flag.log`): the guard
+  logs `Hopi's iOS release guard: :sample:shared:linkReleaseFrameworkIosSimulatorArm64 is exempt (the
+  release check's positive control, requested by name):` with the same four components and passes,
+  the link runs, and the check passes: `Shared (with the flag): 171 _hopi_us_ symbols, 40 capture
+  classes, 52 rule symbols, 10 _hopi_hits_ symbols, 2071 runtime Kotlin symbols, 79 _hopi_perf_
+  symbols, 24 perf classes, 1 Hopi classes, 2 Hopi declarations, 2 HopiStartConfig declarations, 2
+  capture probe declarations, 0 module-prefixed Hopi declarations, 0 HopiRuntimes declarations;
+  strings {dev.koga.hopi.urlsession-capture=true, dev.koga.hopi.urlsession-rules=true,
+  _didReceiveData:=true, _didFinishWithError:=true, hopi-perf-hang=true, hopi-perf-samp=true}`. So
+  `hopi-perf-samp`, which section 6 left unmeasured, is in the Release framework and stays in the
+  list. `_hopi_us_` counts 171 symbols (stage 8: 180), and `_hopi_hits_` 10, in the hit counter's
+  own library since 9a. The 2071 runtime Kotlin symbols are 1666 `dev.koga.hopi.core`, 61
+  `.network`, 305 `.perf.internal` and 39 `.start` (`nm/release-framework-flag-counts.txt`).
+- **Without the flag** (`./gradlew :sample:shared:verifyIosReleaseExcludesCapture`, the previous
+  framework deleted first; 2 min 25 s; `e28-verify-release-noflag.log`): `Shared (without the flag):`
+  0 in every family, both never-families 0 and every string false; the guard ran and passed with
+  nothing to log. The framework still holds 44777 Kotlin symbols, among them `hopi-api`'s (5
+  `dev.koga.hopi.api`, 217 `.rules` and `.perf`), the Ktor noop twin's 24 and the sample's 1568.
+- **The probe** (the stage's experiment probe, `-I …/e2probe/init.gradle.kts`, variant `ref`, with
+  `apply(from = "/Users/koga/Documents/personal/hopi/gradle/ios-release-guard.gradle")` added after
+  its `kotlin { }` block and removed after; `e28-probe-release-xcf.log`, `e28-probe-debug-xcf.log`,
+  `e28-probe-edit.diff`): `:e2probe:assembleE2ProbeReleaseXCFramework` fails in
+  `:e2probe:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64` (`… links a Release binary with
+  Hopi's runtime on its classpath: project ':hopi-perf', project ':hopi-core' (via project
+  ':hopi-perf'). …`, without the release-check sentence: the probe names no exempt link), with no
+  link task in the run; `:e2probe:assembleE2ProbeDebugXCFramework` passes (8 s: the probe's compile,
+  `linkDebugFrameworkIosSimulatorArm64` and the XCFramework; no guard in its graph). Both stored
+  their configuration cache entry: the script applied by path from a project outside the
+  repository, through an init script, needed no fallback.
+- **E7 X5 and the Release app** (`xcodebuild -project sample/iosApp/iosApp.xcodeproj -scheme iosApp
+  -configuration <C> -derivedDataPath build/ios-derived -destination 'platform=iOS
+  Simulator,id=D81F1D89-DD79-48C6-B019-7983C5A53A27' build`; `xcb-release.log`, `xcb-debug-noop.log`,
+  `xcb-debug.log`): Release builds; its Release framework output was deleted first, so the build
+  phase linked: `> Task :sample:shared:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64`,
+  `> Task :sample:shared:linkReleaseFrameworkIosSimulatorArm64`, `BUILD SUCCESSFUL in 2m 38s`,
+  `** BUILD SUCCEEDED **`: the guard passes inside Xcode's phase. `xcrun nm -m` on
+  `Release-iphonesimulator/HopiSample.app/HopiSample` finds 0 `_hopi_(us|perf|hits)_` and 0
+  `_k[a-z]+:dev\.koga\.hopi\.(core|network|urlsession|android|ui|perf\.internal|start)[.#]`, and
+  its bytes hold none of the check's six strings, in a listing of 44737 Kotlin symbols with
+  `hopi-api`'s 5 and 217, the Ktor noop's 24 and the sample's 1568 (`nm/release-app-counts.txt`).
+  The same two patterns find 333 and 4750 in the Debug app's `HopiSample.debug.dylib` (the positive
+  control: the grep sees what it looks for) and 0 and 0 in the `HOPI_ENABLED=false` Debug dylib.
+  Debug with `HOPI_ENABLED=false` compiles (`BUILD SUCCESSFUL in 11s`, the shared compile reused), as
+  in stages 6 to 8, and the default Debug builds (12 s, the flagged compile from the build cache);
+  both were copied to `apps/noop.app` and `apps/hopi.app` for the runs below.
+- **On the simulator** (the Debug app; dev server `python3 sample/devserver/devserver.py`):
+  `-thirdPartySDK` (through `drive.py` with the CLI; `sdk/`, `sdk-records.txt`): 6 records, each
+  `source=urlsession`: the SDK's completion handler (`GET /json`), delegate upload and
+  `upload(for:from:)` (`POST /echo` twice), `data(for:)` (`GET /items`), `bytes(for:)` (`GET
+  /chunked`) and the app's own Ktor `GET /items`. `-verifyRules` (`verify-rules.log`):
+  `{"engine":"urlsession","failed":0,"rules":"done"}` and
+  `{"rules":"done","real":true,"failed":0,"scenarios":11}`, 32 of 32 `"ok":true` (21 URLSession lines
+  with the pinned check, 11 Ktor Darwin), no `HopiRules:` line; in the pinned check the plain and the
+  edited request are cancelled at the trust challenge (`NSURLErrorDomain -999`) and the mock answers
+  200. `capture-swift-test.sh 'platform=iOS Simulator,id=D81F1D89-DD79-48C6-B019-7983C5A53A27'` (with
+  its own dev server; `capture-swift-test.log`): 6 of 6 (`Executed 6 tests, with 0 failures`, `** TEST
+  SUCCEEDED **`), its Gradle phase reusing the Debug link. The capture end to end
+  (`benchmark/urlsession/e2e/run.sh`, `check.py`; `e2e/`, `e2e-check.log`): 47 of 47: the Swift
+  shapes (20 records for 19 scenarios), Ktor Darwin (10 for 9) and `-thirdPartySDK` (6), each request
+  recorded once with `source=urlsession`, the 20 MB bodies kept to the 256 KiB cap (`262144/20971479
+  B`), and the bytes the app read and the requests the server saw identical between the Hopi and the
+  noop build.
+- **The URLSession capture A/B** (`benchmark/urlsession/e2e/ab.sh <out> <apps>`: 4 rounds, noop then
+  Hopi, `abtable.py`; dev server without `--nodelay`; host load 3.7 to 6.9, the first round about
+  5 min after the simulator's boot; `ab/`, `ab-table.md`): every Hopi minus noop difference is inside
+  its noop-vs-noop band: the small-request median -0.014 ms (0.62 against 0.61 ms; band 0.118) and
+  its process CPU +282 µs (band 527: the noop rounds read 674 to 1202 µs); URLSession 1, 5 and 20 MB
+  request plus read -0.55, +1.58 and -0.19 ms (bands 1.8, 5.2 and 2.3), their process CPU per run
+  +0.46, +3.75 and -5.8 ms (bands 4.1, 11.6 and 12.4); Ktor Darwin 1, 5 and 20 MB fetch plus parse
+  +3.5, -8.5 and -6 ms (bands 6, 19 and 16). Every Ktor run's header reads `"capBytes":-1` (the
+  default caps; 168 lines). The 2026-10-24 run (`build/evidence/urlsession/ab/`, which predates that
+  day's hardening in `docs/design/urlsession-capture.md`) read +0.09 ms and +311 µs; this run's CPU
+  band is too wide to compare with it.
+- **E1 R8** (`benchmark/urlsession/e2e/ab.sh <out> <apps> 4 -maxBodyBytes 8388608 -maxTotalBytes
+  33554432`, the pass-through 9b added; the same apps and dev server; host load 2.3 to 2.8;
+  `ab-r8/`, `ab-r8-table.md`): every Ktor run's header reads
+  `"capBytes":8388608,"storeBytes":33554432` in both builds (168 lines), and a separate launch with
+  the CLI (`-captureBench 'n=1;mb=1,5,20;runs=1'` and the same arguments; `r8-cap/`,
+  `r8-cap-check.txt`) shows `hopi get` keeping the 1 and 5 MB bodies whole (1048554 and 5242766 B)
+  and the 20 MB body to 8388608 of 20971479 B, truncated. Wall time stays within noise: URLSession
+  5 and 20 MB request plus read +1.29 and +0.45 ms (bands 1.82 and 4.19), 1 MB -0.78 ms (band 0.30,
+  Hopi the faster); Ktor Darwin +3.5, +2 and +8 ms (bands 10, 8 and 11); the small requests +0.022 ms
+  (band 0.029) and +161 µs of CPU (band 258). Process CPU per run rises past the band for the bodies
+  now kept whole: +1.71 ms at 1 MB (band 1.03) and +8.66 ms at 5 MB (band 3.23), against +0.46 and
+  +3.75 ms, inside wider bands, at the default cap; at 20 MB (8 MiB kept) -1.67 ms, inside a 17.3 ms
+  band. Committed under `benchmark/urlsession/2026-10-29/`: `ab-cap8mib-iphone17-ios27.0.md` (the
+  table, with how it was run) and `ab-cap8mib-iphone17-ios27.0/` (the 16 app logs, `load.txt` and
+  `summary.json`).
+- **Review**: 9a's two read-only reviews found 12 problems; the six that asked for a change were
+  fixed before 9a's commit (the iOS tests' start now fails loudly when nothing starts, a negative
+  test of the network status, the hit counter's KDoc, three docs passages); 9b's found 14, all
+  fixed before its commit, among them the iOS guard's target filter, which also matched JS and
+  Wasm targets.
+- **Base check**: 9a's first run failed one test,
+  `IosHangTest.framesReportUnitsOverTwiceTheDeadlineAsStalls` on the simulator (`one stall: [81,
+  37]`, an extra 37 ms stall with the host 3.7 GB into swap), which passed 3 of 3 reruns alone;
+  every other task was green. 9b's run was green.
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2567,7 +2811,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 6. iOS entry | done: `hopi-start` (`Hopi.start { }`, `HopiStartConfig` with primitive members; iOS targets; published, with an ABI dump) runs the start sequence with the iOS network tool (core) and perf's tool; `@HopiInternalApi` hides from Swift (`HidesFromObjC`); Swift starts Hopi with one call inside `#if HOPI`, a condition `project.yml` derives from `HOPI_ENABLED`; [run] results in section 9 | `be7a80a`, `f114dea` (fix) |
 | 7. Rules into the API | done: `HopiRules`, its builders, `HopiFailure`, `HopiSource` and `HopiRuleInfo` in `hopi-api` (`dev.koga.hopi.rules`; its dumps hold `hopi-rules`' declarations), read by core's rules runtime through `@HopiInternalApi` members; the start sequence registers `ApiRules`, which only forwards (`ApiRuleCalls`), right after the `enabled` check (7.3); a rule added before it is dropped and counted in one notice, and an iOS Debug binary writes one `NSLog` line for a missing start; `from(id)` creates no store; the plugin aligns `hopi-api` (7.7); `hopi-rules` and `hopi-rules-noop` deleted; [run] results in section 9 | `10cfce9` (test fix), `ce57543` |
 | 8. Perf into API and runtime | done: `HopiPerf`, `HopiMonitor` and `HopiPerfConfig` in `hopi-api` (`dev.koga.hopi.perf`), with an `@HopiInternalApi` `HopiPerfRuntime` and the registry's perf slot, dropped-start count and kept label; `hopi-perf` is the runtime behind it (empty dumps): perf's tool registers `ApiPerf`, which only forwards (`ApiPerfCalls`), and writes the dropped-starts notice; `HopiPerf` no longer starts itself and only what a block sets applies (8.1); nothing on Android's start path loads a monitor class (the backend split); frames report `attaching` (8.6); `PerfLauncher` renamed `CurrentActivity`; `perf { remoteControl }` and `HopiStartConfig.perfRemoteControl` (8.5); `hopi-perf-noop` and the perf twin pair deleted; the plugin adds `hopi-perf` to debuggable build types; [run] results in section 9 | (this commit) |
-| 9. Network runtime and release guards | 9a done: `hopi-network` (android, iosArm64, iosSimulatorArm64; empty ABI dumps) holds `hopi-android`'s capture with its packages, and core's URLSession library and the iOS network tool (`dev.koga.hopi.network.internal`); core keeps the rule hit counter as a C library of its own (`hopi_hits`); `HopiAndroid` and `HopiUrlSession` deleted (9.4), the sample reads `HopiRuntimes`' network status; `hopi-android`, `hopi-android-noop`, `hopi-urlsession` and `hopi-urlsession-noop` deleted; the plugin's `RUNTIME` is `hopi-network`, with no noop. 9b (the guards, `network { }`, the renamed checks) follows (9.1) | (this commit) |
+| 9. Network runtime and release guards | 9a done: `hopi-network` (android, iosArm64, iosSimulatorArm64; empty ABI dumps) holds `hopi-android`'s capture with its packages, and core's URLSession library and the iOS network tool (`dev.koga.hopi.network.internal`); core keeps the rule hit counter as a C library of its own (`hopi_hits`); `HopiAndroid` and `HopiUrlSession` deleted (9.4), the sample reads `HopiRuntimes`' network status; `hopi-android`, `hopi-android-noop`, `hopi-urlsession` and `hopi-urlsession-noop` deleted; the plugin's `RUNTIME` is `hopi-network`, with no noop. 9b done: the plugin's release guard (`hopiReleaseGuard<Variant>`, before any dex task) and the iOS release guard (`gradle/ios-release-guard.gradle`, before every Release link), `network { }` with generation split from instrumentation (a debuggable variant with every tool off still gets core and a generated configuration with no tool), `verifyReleaseHasNoRuntime` and the iOS check's new families, the giant-body benchmark on Android's host tests (E1 R7) and the R8 pass-through; [run] results in section 9 | `472fcd6` (9a), (this commit) |
 | 10. Thin Ktor plugin | | |
 | 11. Remove the remaining twin machinery | | |
 | 12. Physical devices | | |
@@ -2689,6 +2933,26 @@ Stage 8 leaves for later stages:
   device. E5 X3's `autoStart(Hangs)` variant was not run.
 - `sample/iosApp/iosApp/iOSApp.swift`'s comment still says the monitors are "registered for the
   bridge" without naming `HopiPerf` (stage 13).
+
+Stage 9 leaves for later stages:
+
+- E1 R7 (section 9): Android's `BoundedCapture` grows a body of unknown size by doubling from 8 KB
+  up to the cap and trims once, so a chunked body under the cap allocates 3.2 to 4.2 times itself
+  (up to 2.6 times an 8 MB cap); a `Content-Length` body or one past the cap stays near 1x and 2x.
+  The Ktor plugin's capture grows in blocks. A commit after this stage makes Android's grow in
+  blocks too, with R7 run again.
+- E1 R8 (section 9): with an 8 MiB cap, the bodies the iOS capture now keeps whole cost process CPU
+  past the noop band (+1.71 ms at 1 MB, +8.66 ms at 5 MB per run), with wall time inside its noise;
+  the first measurement at that cap, for the owner to read.
+- The iOS release guard is a script the sample applies and a consumer copies
+  (`apply(from = …)`): nothing applies it for them until the plugin works on KMP modules (O8).
+- The network tool, like perf's (stage 8), loads about 335 classes on Android's main thread before
+  its registration (median 23.4 ms in the probe's runs; `AndroidCapture.start` and the settings),
+  none of them a capture class; moving that work off the main thread is a later E5.4 step.
+- Timing flakes seen once and passed on reruns: `IosHangTest.framesReportUnitsOverTwiceTheDeadlineAsStalls`
+  (9a's base check, an extra 37 ms stall with the host deep in swap) and, during stage 8,
+  `ViewerTest.disconnectClosesTheSessionAndAnUnknownTargetIsNotThrown` (its first `Waiting` read
+  `Reconnecting`, not `AppStopped`).
 
 ---
 

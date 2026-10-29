@@ -726,17 +726,22 @@ There is no noop twin since the runtime-split plan's stage 8: a release build ho
   entries with the runtime's. No parity check.
 - The Gradle plugin adds `hopi-perf` to debuggable build types only, with `perf { enabled = true }`
   (TestKit-checked: the debug APK has it, the release APK none), and lists `PerfEntry` in the
-  generated tool list (a Java class, not resources). Until the runtime-split plan's stage 9 adds the
-  release guard, a module that names `hopi-perf` itself ships it in release builds: nothing swaps it.
-- `:sample:androidApp:verifyReleaseUsesNoop` (and `verifyHopiSelection`): the release classpath
-  holds no `hopi-perf` and its Hopi classes are the jars' of the noop twins and `hopi-api`; no type
-  of `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core.perf` is defined or referenced; no Hopi
+  generated tool list (a Java class, not resources). Since the runtime-split plan's stage 9
+  (2026-10-29) a module that names `hopi-perf` itself fails its release build in the plugin's
+  release guard, and an iOS Release framework whose classpath holds it fails in the iOS one
+  (ARCHITECTURE, "Release guards"); nothing swaps it.
+- `:sample:androidApp:verifyReleaseHasNoRuntime` (since stage 9; the two release checks before it):
+  the release classpath holds no `hopi-perf` and its Hopi classes are the jars' of `hopi-api` and
+  the Ktor noop twin; no type of `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core` is defined
+  or referenced; no Hopi
   class references `addOnFrameMetricsAvailableListener` or `setMessageLogging`; the release APK has
   no generated configuration and no provider. `verifyDebugCapture` adds the positive control
   (`PerfEntry`, its keep rule and the listener reference present).
 - `:sample:shared:verifyIosReleaseExcludesCapture`: without the flag, no `_hopi_perf_` symbol, no
   `kfun:dev.koga.hopi.perf.internal` or `kfun:dev.koga.hopi.core.perf` symbol, no
-  `HopiPerfCadence` class, no `hopi-perf-hang` string; with it, all present. `hopi-api`'s
+  `HopiPerfCadence` class, no `hopi-perf-hang` string; with it, all present. Since stage 9 the
+  Kotlin family covers every symbol kind of every runtime package (`_k…:dev.koga.hopi.perf.internal`
+  and `.core` among them) and the sampler's thread name `hopi-perf-samp` joins the strings. `hopi-api`'s
   `dev.koga.hopi.perf` symbols (`HopiPerf`, `HopiMonitor`, `HopiPerfConfig`) are expected either
   way: every framework exports `hopi-api`.
 
@@ -936,7 +941,8 @@ unmeasured; the previous-ANR read on a device that has one.
 
 Built: the native library `hopi-perf/src/nativeInterop/objc/hopi_perf.{h,m}` (compiled per iOS
 target and embedded in the `perf` cinterop klib, package `dev.koga.hopi.perf.internal.native`,
-like core's URLSession library), and `IosBackend`, `IosHangMonitor`, `IosSampler` in iosMain:
+like `hopi-network`'s URLSession library, core's when this was built), and `IosBackend`,
+`IosHangMonitor`, `IosSampler` in iosMain:
 
 - **Observers and busy state (C).** Two `CFRunLoopObserver`s on the main run loop for the common
   modes: begin (order `LONG_MIN`) on `AfterWaiting | BeforeTimers | Exit`, end (order `LONG_MAX`) on

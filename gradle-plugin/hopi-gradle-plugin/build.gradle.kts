@@ -27,7 +27,8 @@ gradlePlugin {
             id = "dev.koga.hopi"
             implementationClass = "dev.koga.hopi.gradle.HopiPlugin"
             displayName = "Hopi"
-            description = "Automatic OkHttp and HttpURLConnection capture in the debuggable variants of an Android app."
+            description = "Hopi's runtimes in the debuggable variants of an Android app (OkHttp and HttpURLConnection capture, " +
+                "the performance monitors), and a build that fails when one reaches another variant."
         }
     }
 }

@@ -312,8 +312,11 @@ class RuleState(                     // immutable
   loaded and retained under an `os_unfair_lock`, which only the rules-exist path ever takes. The
   ObjC matcher is the second implementation of the same rules; one JSON table of test vectors
   (patterns, URLs, headers, expected result) in `commonTest` resources runs against both, as
-  `ResponseSkip`'s copy is compared today. `hits` lives in C memory (`hopi_us_rule_claim`), which
-  the Kotlin side reads and claims through the same functions on iOS.
+  `ResponseSkip`'s copy is compared today. `hits` lives in C memory, in core's own `hopi_hits`
+  library since the runtime-split plan's stage 9 (2026-10-29; before, inside the URLSession
+  library): core creates and releases each rule's counter, `hopi-network`'s URLSession library
+  retains it (a strong reference to core's object) and reads and claims it through `hopi_hits_value`
+  and `hopi_hits_claim`, the functions the Kotlin side claims through on iOS.
 
 ### How records are marked
 
@@ -440,7 +443,7 @@ interceptors whose `DefaultSender` executes the send pipeline once per hop, so e
 `Monitoring`, is matched on its own and is its own record, as today. A mock of a 401 with `Auth`
 installed is therefore retried once by `Auth`, as a real 401 would be; `times` bounds it.
 
-### OkHttp (`hopi-android`, the existing interceptor)
+### OkHttp (the Android runtime's interceptor, `hopi-network`)
 
 Hopi's interceptor already runs **last among the application interceptors**, before
 `RetryAndFollowUpInterceptor`, `BridgeInterceptor`, the cache, `ConnectInterceptor` and the network
@@ -491,7 +494,7 @@ OkHttp's own redirects and retries happen below Hopi's position, so a rule match
 request once, as the call is one record. The hook in `RealCall` is unchanged; a request through
 OkHttp 3.12/3.13 (left alone by the runtime) gets no rules, as it gets no record.
 
-### `HttpURLConnection` (`hopi-android`, the existing wrappers)
+### `HttpURLConnection` (the Android runtime's wrappers, `hopi-network`)
 
 The wrapper takes its request snapshot before the delegate's first connecting call. The rule read
 happens there, once per connection, and journaling of the app's setters is unconditional because it
@@ -542,7 +545,7 @@ At the first connecting call: `EMPTY` → today's path. Otherwise match against
   everything read back or journaled above, including the app's `SSLSocketFactory` and
   `HostnameVerifier`; the old delegate is never connected. So the new connection carries exactly
   the TLS settings the app gave the old one, or the process defaults if it gave none. The new
-  delegate is opened from inside `hopi-android`, which is not instrumented, so it is the wrapper's
+  delegate is opened from inside the runtime (`hopi-network`), which is not instrumented, so it is the wrapper's
   delegate and never a second recorded connection. **Body edit**:
   the app writes into a capture-only stream; at its `close()` or the next connecting call the
   wrapper sets fixed-length streaming mode to the replacement's size on the delegate, opens the
@@ -551,11 +554,12 @@ At the first connecting call: `EMPTY` → today's path. Otherwise match against
   once, at the first response read); a body edit serves the replacement from `getInputStream` /
   `getErrorStream` by the same status rule as a mock and closes the delegate's real stream.
 
-### URLSession (`hopi-urlsession`, the existing library plus three pieces)
+### URLSession (`hopi-network`'s library, plus three pieces)
 
 Capture stays observe-only for every request no rule claims. Rules add, all inside the Objective-C
-library and behind the `rules` switch of `HopiUrlSession.start { }` (default true; since the
-runtime-split plan's stage 6 also of `hopi-start`'s `Hopi.start { }`, the iOS start):
+library and behind the `rules` switch of the iOS start, `hopi-start`'s `Hopi.start { }` (default
+true; since the runtime-split plan's stage 9 the only iOS start, with the library in
+`hopi-network`):
 
 1. **`HopiUSRuleProtocol`**, an `NSURLProtocol` subclass that claims only requests a mock or fail
    rule matches. It is put in front of every session's protocol list by replacing
@@ -882,8 +886,10 @@ surfaces.
 
 ## Configuration switch
 
-Each recorder's configuration gains `rules: Boolean = true`: `HopiConfig` (Ktor), `HopiUrlSessionConfig`,
-and the Gradle DSL `hopi { rules = true }` (generated into the variant's configuration). `false`
+Each recorder's configuration gains `rules: Boolean = true`: `HopiConfig` (Ktor), iOS's
+`HopiStartConfig` (the iOS capture config's until the runtime-split plan's stage 9), and the Gradle
+DSL's `hopi { network { rules = true } }` (top-level `hopi { rules }` until stage 9), generated into
+the variant's configuration. `false`
 means that recorder never reads the rule state (it becomes a constant-false branch) and, on iOS, no
 protocol is injected and no factory is hooked. The engine and the API stay; `hello` reports
 `"rules":false` when every recorder that started has it off. The default is true because an empty
@@ -898,7 +904,7 @@ rebuild first fails the agent use case; the switch exists for the app whose code
 | --- | --- |
 | `hopi-core` | `RuleEngine`, specs, compiled rules, matcher, the tree parser, bridge commands, record fields, and since the runtime-split plan's stage 7 the rules runtime behind `HopiRules` (`ApiRules`), registered first by the start sequence (all `@HopiInternalApi`) |
 | `hopi-api` (since stage 7) | `HopiRules` and its builders, in every build: no dependency at all; with no runtime registered every call returns `-1`, `false` or an empty list and stores nothing; targets android, iosArm64, iosSimulatorArm64, jvm |
-| `hopi-ktor`, `hopi-android`, `hopi-urlsession` | The per-source application above; the ObjC protocol, factory hooks and C matcher live in core's ObjC library next to the capture code |
+| `hopi-ktor`, `hopi-network` | The per-source application above; the ObjC protocol, factory hooks and C matcher live in `hopi-network`'s ObjC library next to the capture code (core's until the runtime-split plan's stage 9), the hit counters in core's `hopi_hits` library |
 | `hopi-connect`, `hopi-cli`, `hopi-desktop`, `hopi-ui` | Surfaces (`hopi-ui`: the desktop viewer's screens since the runtime-split plan's stage 5) |
 
 Since the runtime-split plan's stage 7 (2026-10-28) `hopi-rules` and `hopi-rules-noop` are gone:
@@ -906,10 +912,14 @@ the Gradle plugin swaps no rules pair (it holds `hopi-api` at its own version in
 variants instead, and its functional test finds `hopi-api` in both APKs), `:checkNoopParity` has
 no rules pair, and `hopi-api`'s ABI dump is the consumer API alone (its `@HopiInternalApi`
 declarations excluded), the declarations `hopi-rules` had. KMP shared modules take `hopi-api` in
-every build and export it from the iOS framework. `verifyReleaseUsesNoop` and
-`verifyHopiSelection` expect `:hopi-api` on the release classpath where they expected
-`:hopi-rules-noop` (the noop twins and `hopi-api`), `verifyDebugCapture` `:hopi-api` where it
-expected `:hopi-rules`, and `verifyIosReleaseExcludesCapture` is unchanged.
+every build and export it from the iOS framework. The sample's release checks then expected
+`:hopi-api` on the release classpath where they had expected `:hopi-rules-noop`,
+`verifyDebugCapture` `:hopi-api` where it expected `:hopi-rules`, and
+`verifyIosReleaseExcludesCapture` was unchanged. Since stage 9 (2026-10-29) one release check,
+`verifyReleaseHasNoRuntime`, expects exactly `:hopi-api` and `:hopi-ktor-noop` there, both release
+guards refuse `hopi-core`, the engine's module, on a release classpath, and
+`verifyIosReleaseExcludesCapture` also fails on core's `_hopi_hits_` (ARCHITECTURE, "Release
+guards").
 
 The knock-ons as built on 2026-10-25, before stage 7 (history):
 
@@ -996,7 +1006,7 @@ Base check (every item runs in it unless marked):
   `HttpCache` does not store a mock or an edited response, and `HttpCookies` stores no cookie
   (Set-Cookie rejected); a body edit under `ContentEncoding` drops `Content-Encoding` and the app
   reads the replacement; a `Content-Type` edit; the `HttpClientCall` constructor test.
-- **Android host tests** (`:hopi-android:testAndroidHostTest`, OkHttp `MockWebServer`): a mock
+- **Android host tests** (`:hopi-network:testAndroidHostTest`, OkHttp `MockWebServer`): a mock
   leaves the server's request count at 0 and app interceptors see it; request edit reaches the
   server; **an edit to a host the client pins with a wrong pin still fails with
   `SSLPeerUnverifiedException`** (MockWebServer over TLS with a held certificate); response edit
@@ -1011,7 +1021,7 @@ Base check (every item runs in it unless marked):
   connection) and `HostnameVerifier`; a header removal reaches the server without the header (the
   rebuild path); `getErrorStream` is null before a connecting call on a 4xx mock; body edit with
   fixed-length mode; delay ends on `disconnect()`.
-- **iOS** (`:hopi-urlsession:iosSimulatorArm64Test`, `:hopi-core:iosSimulatorArm64Test`, the
+- **iOS** (`:hopi-network:iosSimulatorArm64Test`, `:hopi-core:iosSimulatorArm64Test`, the
   existing in-process server and fixtures): the spikes 1 to 7 as tests; which `canInit` form each
   OS calls and whether a redirect hop asks again; mock and fail through a
   completion handler, a full delegate, a partial delegate and a nil-delegate session, each fail's
@@ -1032,7 +1042,7 @@ Base check (every item runs in it unless marked):
   `:hopi-api:iosSimulatorArm64Test` (a Debug binary's one line for a dropped rule),
   `:hopi-api:checkKotlinAbi` (the consumer API's dump), core's `ApiRulesTest` (`HopiRules` over
   the engine, `from(id)` with no store) and `HopiStartTest` (the registration first, whatever the
-  caps; the notice with the count); `verifyReleaseUsesNoop`, `verifyHopiSelection`,
+  caps; the notice with the count); the release checks (`verifyReleaseHasNoRuntime` since stage 9),
   `verifyDebugCapture` and `verifyIosReleaseExcludesCapture` as extended; the Gradle plugin's
   `functionalTest` (`hopi-api` in both APKs).
 - **CLI and connect** (`:hopi-cli:test`, `:hopi-connect:test`): argument parsing of every new

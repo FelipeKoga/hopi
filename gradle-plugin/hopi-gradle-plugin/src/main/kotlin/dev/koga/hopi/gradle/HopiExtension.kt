@@ -7,23 +7,24 @@ import org.gradle.api.tasks.Nested
 
 /**
  * The optional `hopi { }` block of an Android application module. Every value has a default, so
- * `plugins { id("dev.koga.hopi") }` alone is the whole setup. The store settings mean what they mean
- * for `Hopi.start` on iOS and for the Ktor plugin.
+ * `plugins { id("dev.koga.hopi") }` alone is the whole setup. The store, redaction, log and bridge
+ * settings at the top are the start's, shared by every tool, and mean what they mean for
+ * `Hopi.start` on iOS and for the Ktor plugin; capture's own settings are in [network], the
+ * monitors' in [perf].
  */
 public abstract class HopiExtension {
-    /** False: no variant gets a runtime, a transform or a generated class. */
+    /**
+     * False: no variant gets a runtime, a transform or a generated class. The release guard still
+     * runs on every non-debuggable variant: it refuses a runtime whatever this says.
+     */
     public abstract val enabled: Property<Boolean>
-
-    /** Rewrites OkHttp's `RealCall`, so every OkHttp call is recorded. */
-    public abstract val okhttp: Property<Boolean>
-
-    /** Rewrites every `java.net.URL` connection call site, so every `HttpURLConnection` is recorded. */
-    public abstract val urlConnection: Property<Boolean>
 
     /**
      * Gives debuggable variants the real `hopi-ktor` and the others its noop twin, whichever of the
      * two the app's modules name, so no `-Phopi.enabled` is needed on Android. (`HopiRules` and
-     * `HopiPerf` are in `hopi-api`, which has no twin: every variant gets it.)
+     * `HopiPerf` are in `hopi-api`, which has no twin: every variant gets it.) Keep it on until stage
+     * 10 of the runtime-split plan: the real `hopi-ktor` still brings `hopi-core`, so a release
+     * variant that resolves it fails the release guard.
      */
     public abstract val selectTwins: Property<Boolean>
 
@@ -38,18 +39,17 @@ public abstract class HopiExtension {
      */
     public abstract val summaryLog: Property<Boolean>
     public abstract val agentBridge: Property<Boolean>
-
-    /**
-     * Applies Hopi rules (mock, fail, delay, edit; docs/design/rules.md) to the requests the
-     * interceptor and the wrappers record. False: they never read the rule state.
-     */
-    public abstract val rules: Property<Boolean>
     public abstract val redactedHeaders: ListProperty<String>
     public abstract val redactedQueryParameters: ListProperty<String>
     public abstract val redactionDisabled: Property<Boolean>
 
-    /** Class name patterns AGP's instrumentation leaves alone (`com.vendor.pinned.**`). */
-    public abstract val excludedClasses: ListProperty<String>
+    /** Automatic OkHttp and `HttpURLConnection` capture (docs/design/android-capture.md); on unless `network { enabled = false }`. */
+    @get:Nested
+    public abstract val network: HopiNetworkExtension
+
+    public fun network(action: Action<HopiNetworkExtension>) {
+        action.execute(network)
+    }
 
     /** The performance monitors (docs/design/perf-monitors.md); off unless `perf { enabled = true }`. */
     @get:Nested
@@ -74,23 +74,16 @@ public abstract class HopiExtension {
         redactionDisabled.set(true)
     }
 
-    /** Leaves classes matching these patterns uninstrumented. */
-    public fun excludeClasses(vararg patterns: String) {
-        excludedClasses.addAll(*patterns)
-    }
-
     internal fun applyDefaults() {
         enabled.convention(true)
-        okhttp.convention(true)
-        urlConnection.convention(true)
         selectTwins.convention(true)
         maxEntries.convention(500)
         maxTotalBytes.convention(16L * 1024 * 1024)
         maxBodyBytes.convention(256L * 1024)
         summaryLog.convention(true)
         agentBridge.convention(false)
-        rules.convention(true)
         redactionDisabled.convention(false)
+        network.applyDefaults()
         perf.applyDefaults()
     }
 }

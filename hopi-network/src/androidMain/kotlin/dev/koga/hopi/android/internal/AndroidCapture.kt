@@ -36,7 +36,7 @@ public object AndroidCapture {
         /** `RealCall` carries [HopiInstrumented]: every call is recorded by the interceptor. */
         Instrumented,
 
-        /** `RealCall` exists without the annotation: an unknown OkHttp, or `hopi { okhttp = false }`. */
+        /** `RealCall` exists without the annotation: an unknown OkHttp, or `hopi { network { okhttp = false } }`. */
         NotInstrumented,
 
         /**

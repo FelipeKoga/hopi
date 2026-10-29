@@ -2,6 +2,8 @@ package dev.koga.hopi.android
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import dev.koga.hopi.bench.GiantBodies
+import dev.koga.hopi.bench.Shape
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.instrument.HopiRewriter
@@ -9,6 +11,7 @@ import java.io.File
 import java.net.InetAddress
 import java.net.URLClassLoader
 import java.net.InetSocketAddress
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -147,6 +150,17 @@ class TestServer : AutoCloseable {
                     exchange.responseBody.write("rest\n".toByteArray())
                 }
                 "/binary-chunked" -> send(exchange, 200, ByteArray(BINARY_BYTES) { it.toByte() }, "application/octet-stream", chunked = true)
+                // `/giant?mb=N` (AndroidGiantBodyBenchmark): [giantBody], streamed in 64 KiB writes,
+                // with a Content-Length, or chunked with `&chunked=1`.
+                "/giant" -> {
+                    val query = exchange.requestURI.query.orEmpty().split('&').associate { it.substringBefore('=') to it.substringAfter('=') }
+                    val bytes = giantBody(query.getValue("mb").toInt())
+                    exchange.responseHeaders.add("Content-Type", "application/json")
+                    exchange.sendResponseHeaders(200, if (query["chunked"] == "1") 0 else bytes.size.toLong())
+                    for (offset in bytes.indices step GIANT_WRITE) {
+                        exchange.responseBody.write(bytes, offset, minOf(GIANT_WRITE, bytes.size - offset))
+                    }
+                }
                 "/sse" -> {
                     exchange.responseHeaders.add("Content-Type", "text/event-stream")
                     exchange.sendResponseHeaders(200, 0)
@@ -218,6 +232,11 @@ class TestServer : AutoCloseable {
         const val LARGE_BYTES = 1024 * 1024
         const val BINARY_BYTES = 65_536
         const val DROPPED_AFTER = 16_384
+        private const val GIANT_WRITE = 64 * 1024
+        private val giantBodies = ConcurrentHashMap<Int, ByteArray>()
+
+        /** [mb] MiB of minified JSON records (the giant-body benchmarks' shape), made once per size. */
+        fun giantBody(mb: Int): ByteArray = giantBodies.computeIfAbsent(mb) { GiantBodies.bytes(Shape.Minified, it * GiantBodies.MB) }
 
         /** The same 1 MiB every time, so a test can compare digests. */
         fun large(): ByteArray = ByteArray(LARGE_BYTES) { i -> ('a' + i % 26).code.toByte() }

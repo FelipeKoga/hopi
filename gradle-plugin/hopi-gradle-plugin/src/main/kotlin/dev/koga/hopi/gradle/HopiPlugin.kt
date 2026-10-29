@@ -8,17 +8,26 @@ import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
+import org.gradle.language.base.plugins.LifecycleBasePlugin
 
 /**
  * `plugins { id("dev.koga.hopi") }` in an Android application module (docs/design/android-capture.md):
  *
- * - each debuggable build type gets the network runtime (`hopi-network`) and `hopi-core`, every
- *   other one no runtime at all: javac compiles the generated configuration inside the app, and it
- *   names core's types, which every runtime takes as `implementation` only;
- * - each debuggable variant has OkHttp's `RealCall` and every `java.net.URL` connection call site of
- *   the app and all of its dependencies rewritten (AGP instrumentation, scope ALL), and the
- *   `hopi { }` block generated into it as the start configuration and its tool list; other
- *   variants are not instrumented at all;
+ * - each debuggable build type gets `hopi-core` and, with `network { enabled }` (the default), the
+ *   network runtime (`hopi-network`); every other build type gets no runtime at all. Core is there
+ *   whatever the tools: its provider starts the generated configuration, which javac compiles inside
+ *   the app and which names core's types, and every runtime takes core as `implementation` only;
+ * - each debuggable variant gets the `hopi { }` block generated into it as the start configuration
+ *   and its tool list: the network tool with `network { enabled }`, perf's with
+ *   `perf { enabled = true }`, possibly none (the start then registers the rules runtime and starts
+ *   the bridge with `agentBridge`, so `HopiRules` works for the Ktor plugin);
+ * - with `network { enabled }`, each debuggable variant has OkHttp's `RealCall` and every
+ *   `java.net.URL` connection call site of the app and all of its dependencies rewritten (AGP
+ *   instrumentation, scope ALL); other variants are not instrumented at all;
+ * - each variant that is not debuggable gets the release guard, `hopiReleaseGuard<Variant>`
+ *   ([HopiReleaseGuard]), whatever `enabled` says: before the variant's build it fails when the
+ *   runtime classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, which only a
+ *   module naming them can bring there;
  * - with `selectTwins` (the default), each variant resolves `hopi-ktor` to the real module when
  *   debuggable and to the noop twin otherwise, whichever the app's modules name;
  * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
@@ -59,16 +68,18 @@ public class HopiPlugin : Plugin<Project> {
             for (buildType in dsl.buildTypes) {
                 val real = extension.enabled.get() && buildType.isDebuggable
                 realByBuildType[buildType.name] = real
-                // The network runtime, debuggable build types only: the others get no runtime.
-                if (real) project.dependencies.add("${buildType.name}Implementation", runtime(project, RUNTIME))
-                // The generated configuration extends core's HopiConfigValues and lists core's
-                // HopiTool: javac needs core on the variant's compile classpath, and no runtime
-                // exposes it there.
-                if (real) project.dependencies.add("${buildType.name}Implementation", runtime(project, CORE))
-                if (real) alignApi(project, buildType.name)
-                // The monitors' runtime, debuggable build types only: HopiPerf, which the app calls,
-                // is hopi-api's.
-                if (real && extension.perf.enabled.get()) project.dependencies.add("${buildType.name}Implementation", runtime(project, PERF))
+                // Debuggable build types only: the others get no runtime, which their guard checks.
+                if (!real) continue
+                val configuration = "${buildType.name}Implementation"
+                // The network runtime, with `network { enabled }` (the default).
+                if (extension.network.enabled.get()) project.dependencies.add(configuration, runtime(project, RUNTIME))
+                // Whatever the tools: core's provider reads the generated configuration, which
+                // extends core's HopiConfigValues and lists core's HopiTool, so javac needs core on
+                // the variant's compile classpath, and no runtime exposes it there.
+                project.dependencies.add(configuration, runtime(project, CORE))
+                alignApi(project, buildType.name)
+                // The monitors' runtime: HopiPerf, which the app calls, is hopi-api's.
+                if (extension.perf.enabled.get()) project.dependencies.add(configuration, runtime(project, PERF))
             }
         }
         components.onVariants(components.selector().all()) { variant ->
@@ -80,7 +91,9 @@ public class HopiPlugin : Plugin<Project> {
                         "${variant.buildType}; dev.koga.hopi gave it ${if (expected) "Hopi's runtimes" else "no runtime"}",
                 )
             }
-            if (real) instrument(project, extension, variant)
+            if (real && extension.network.enabled.get()) instrument(extension.network, variant)
+            if (real) generateConfig(project, extension, variant)
+            if (!variant.debuggable) guard(project, variant)
             if (extension.selectTwins.get()) {
                 selectTwins(project, variant.compileConfiguration, real)
                 selectTwins(project, variant.runtimeConfiguration, real)
@@ -88,26 +101,36 @@ public class HopiPlugin : Plugin<Project> {
         }
     }
 
-    private fun instrument(project: Project, extension: HopiExtension, variant: ApplicationVariant) {
+    /** The bytecode transform and its excludes: `network { enabled }`, debuggable variants only. */
+    private fun instrument(network: HopiNetworkExtension, variant: ApplicationVariant) {
         variant.instrumentation.transformClassesWith(HopiClassVisitorFactory::class.java, InstrumentationScope.ALL) { parameters ->
-            parameters.okhttp.set(extension.okhttp)
-            parameters.urlConnection.set(extension.urlConnection)
+            parameters.okhttp.set(network.okhttp)
+            parameters.urlConnection.set(network.urlConnection)
         }
-        variant.instrumentation.excludes.addAll(extension.excludedClasses)
+        variant.instrumentation.excludes.addAll(network.excludedClasses)
+    }
+
+    /**
+     * The generated start configuration, every debuggable variant: its tool list names the network
+     * tool with `network { enabled }` and perf's with `perf { enabled = true }`, and may be empty.
+     */
+    private fun generateConfig(project: Project, extension: HopiExtension, variant: ApplicationVariant) {
+        val network = extension.network
         val name = variant.name.replaceFirstChar(Char::uppercaseChar)
         val generate = project.tasks.register("generate${name}HopiConfig", GenerateHopiConfig::class.java) { task ->
-            task.okhttp.set(extension.okhttp)
+            task.networkPresent.set(network.enabled)
+            task.okhttp.set(network.okhttp)
             // The runtime defers Ktor's Android engine to the wrapper only when that engine's own
             // `URL` calls were rewritten, which an exclude pattern can prevent.
             task.urlConnection.set(
-                extension.urlConnection.zip(extension.excludedClasses) { on, excludes -> on && excludes.none { excludes(it, KTOR_ANDROID_ENGINE) } },
+                network.urlConnection.zip(network.excludedClasses) { on, excludes -> on && excludes.none { excludes(it, KTOR_ANDROID_ENGINE) } },
             )
             task.maxEntries.set(extension.maxEntries)
             task.maxTotalBytes.set(extension.maxTotalBytes)
             task.maxBodyBytes.set(extension.maxBodyBytes)
             task.summaryLog.set(extension.summaryLog)
             task.agentBridge.set(extension.agentBridge)
-            task.rules.set(extension.rules)
+            task.rules.set(network.rules)
             task.redactedHeaders.set(extension.redactedHeaders)
             task.redactedQueryParameters.set(extension.redactedQueryParameters)
             task.redactionDisabled.set(extension.redactionDisabled)
@@ -124,6 +147,27 @@ public class HopiPlugin : Plugin<Project> {
         }
         val java = variant.sources.java ?: throw GradleException("variant ${variant.name} has no Java sources to add Hopi's configuration to")
         java.addGeneratedSourceDirectory(generate, GenerateHopiConfig::outputDirectory)
+    }
+
+    /**
+     * The release guard of a variant that is not debuggable ([HopiReleaseGuard]): its inputs are the
+     * variant's runtime classpath, as the twin selection leaves it, mapped to the runtimes it holds,
+     * the ones to remove and whether the real `hopi-ktor` brings one, when the task's inputs are
+     * read; AGP runs it before `pre<Variant>Build`, so before any compile or dex task of the variant.
+     */
+    private fun guard(project: Project, variant: ApplicationVariant) {
+        val name = variant.name.replaceFirstChar(Char::uppercaseChar)
+        val graph = variant.runtimeConfiguration.incoming.resolutionResult.rootComponent
+        val guard = project.tasks.register("hopiReleaseGuard$name", HopiReleaseGuard::class.java) { task ->
+            task.group = LifecycleBasePlugin.VERIFICATION_GROUP
+            task.description = "Fails the build when the non-debuggable variant ${variant.name} resolves one of Hopi's runtimes."
+            task.variantName.set(variant.name)
+            task.buildType.set(variant.buildType ?: variant.name)
+            task.runtimes.set(graph.map(HopiRuntimeGraph::refused))
+            task.remove.set(graph.map(HopiRuntimeGraph::toRemove))
+            task.viaKtor.set(graph.map(HopiRuntimeGraph::broughtByKtor))
+        }
+        variant.lifecycleTasks.registerPreBuild(guard)
     }
 
     /**
@@ -147,8 +191,9 @@ public class HopiPlugin : Plugin<Project> {
     }
 
     /**
-     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core and `hopi-network`, and
-     * `hopi-perf` with `perf { enabled = true }`, at that version: the app names `hopi-api` itself
+     * Holds `hopi-api` at [HOPI_VERSION] in [buildType], which gets core (whatever the tools),
+     * `hopi-network` with `network { enabled }` and `hopi-perf` with `perf { enabled = true }`, at
+     * that version: the app names `hopi-api` itself
      * (it holds `HopiRules` and `HopiPerf`), at whatever version it chose, and core's rules runtime
      * and hopi-perf's runtime implement internal interfaces of it, and `hopi-network`'s network tool
      * calls its registry's `registerNetwork`. A constraint, so it adds nothing to a build that never

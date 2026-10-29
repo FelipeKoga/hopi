@@ -12,10 +12,10 @@ with no change beyond the `source` field below.
 
 Goals:
 
-- One call at startup, from Kotlin or Swift, in debug builds: `HopiUrlSession.start()`
-  (`HopiUrlSession.shared.start()` in Swift), and since the runtime-split plan's stage 6
-  (2026-10-28) `hopi-start`'s `Hopi.start()` (`Hopi.shared.start()` in Swift), which also
-  registers the performance monitors. No per-session, per-client or per-SDK setup.
+- One call at startup, from Kotlin or Swift, in debug builds: since the runtime-split plan's stage
+  6 (2026-10-28) `hopi-start`'s `Hopi.start()` (`Hopi.shared.start()` in Swift), which also
+  registers the performance monitors, and since stage 9 (2026-10-29) the only one (the design's
+  own start, below, was removed with its module). No per-session, per-client or per-SDK setup.
 - Every in-process URLSession request is recorded once: completion-handler, delegate and
   async/await APIs, any delegate shape (custom, partial, nil, `NSProxy`), `URLSession.shared`,
   default and ephemeral configurations, sessions created before `start()`, and the Ktor Darwin
@@ -25,8 +25,9 @@ Goals:
   metrics, `respondsToSelector:` answers, delegate identity, `protocolClasses`.
 - Bounded: the response body is kept up to `maxBodyBytes` and only counted past it. The app's
   threads do no copying; the main thread does no Hopi work at all.
-- Release builds get the noop twin (and, since stage 6, no `hopi-start`) and contain none of this
-  code, checked automatically.
+- Release builds contain none of this code, checked automatically: as designed they got the noop
+  twin; since stage 9 of the runtime-split plan (2026-10-29) they get no runtime and no
+  `hopi-start` (no noop), and the iOS release guard fails a Release link that would hold one.
 
 Non-goals (v1): WebSocket frames, `NSURLSessionStreamTask`, AVFoundation media loading, WKWebView,
 `NSURLConnection`, raw CFNetwork/BSD sockets, gRPC or Cronet stacks, physical iOS devices for
@@ -266,8 +267,9 @@ Hopi does not own).
 defers.**
 
 - `hopi-core` gains `PlatformCapture` (`@HopiInternalApi`): `cover(enginePackage: String)` and
-  `covers(engineClassName: String?): Boolean`, an atomic set. `HopiUrlSession.start()` calls
-  `cover("io.ktor.client.engine.darwin.")` once the byte path or the metadata path is installed.
+  `covers(engineClassName: String?): Boolean`, an atomic set. The start (`UrlSessionCapture.start`,
+  which the network tool calls) calls `cover("io.ktor.client.engine.darwin.")` once the byte path
+  or the metadata path is installed.
 - The Ktor plugin reads its client's engine class name once at install
   (`client.engine::class.qualifiedName`, supported on Kotlin/Native), and on each send, at
   `HttpSendPipeline.Monitoring`, checks `PlatformCapture.covers(name)` (one atomic read). When it is
@@ -342,6 +344,14 @@ Backward compatible in both directions:
 
 ### Module layout
 
+Since stage 9 of the runtime-split plan (2026-10-29): the library, its binding (package
+`dev.koga.hopi.network.internal.urlsession`), `UrlSessionCapture`, `UrlSessionRules` and the iOS
+network tool are `hopi-network`'s iosMain (`dev.koga.hopi.network.internal`), beside the Android
+runtime; a rule's hit counter is core's own small C library, `hopi_hits` (binding
+`dev.koga.hopi.core.internal.hits`), which the URLSession library retains and claims through
+`hopi_hits_*` calls only; the public module and its noop below are deleted; the contract is ARCHITECTURE's ("Modules",
+"URLSession capture"). The layout as designed and first built:
+
 | Module | Targets | Contents |
 | --- | --- | --- |
 | `hopi-core` (iosMain) | iosArm64, iosSimulatorArm64 | The ObjC static library, its cinterop binding (package `dev.koga.hopi.core.internal.urlsession`, like the `oslog` shim), and `UrlSessionCapture` (`@HopiInternalApi`): the Kotlin side of the callbacks, record → `HttpTransaction`, `PlatformCapture` |
@@ -368,13 +378,28 @@ files are linked only when a referenced symbol pulls them in, and only `UrlSessi
 to them, which Kotlin/Native's DCE drops unless `HopiUrlSession.start()` is reachable. A test
 asserts it (a framework built with `hopi-ktor` alone has no `_hopi_us_` symbol).
 
+Refuted for static frameworks (the runtime-split plan's stage 9 experiments, E2.3, 2026-10-29):
+Kotlin/Native drops a dependency's unreferenced Kotlin in every framework kind, but merges a
+cinterop archive member whole into every static framework, Debug and Release: a probe framework
+with only `hopi-perf` (so core, which then held the library) on its classpath and nothing of Hopi
+referenced held all 139 `_hopi_us_` symbols and `hopi_perf.o`'s 45, with no Hopi Kotlin symbol. Only
+a dynamic framework's own link drops both. The claim holds for dynamic frameworks alone, and the
+test above was never built. So the iOS release guard, not dead-code elimination, keeps a runtime
+out of a Release framework (ARCHITECTURE, "Release guards").
+
 ### Native build
 
 ```text
-hopi-core/src/nativeInterop/objc/hopi_urlsession.h   C declarations only (hopi_us_*)
-hopi-core/src/nativeInterop/objc/hopi_urlsession.m   hooks, state, capture queue (ARC)
-hopi-core/src/nativeInterop/cinterop/urlsession.def
+hopi-network/src/nativeInterop/objc/hopi_urlsession.h   C declarations only (hopi_us_*)
+hopi-network/src/nativeInterop/objc/hopi_urlsession.m   hooks, state, capture queue (ARC)
+hopi-network/src/nativeInterop/cinterop/urlsession.def
+hopi-core/src/nativeInterop/objc/hopi_hits.{h,m}       a rule's hit counter (hopi_hits_*), core's own
+hopi-core/src/nativeInterop/cinterop/hits.def
 ```
+
+(Paths since stage 9 of the runtime-split plan, 2026-10-29; the library was `hopi-core`'s before,
+with the hit counter inside it. `hopi_urlsession.m` includes `hopi_hits.h` and holds each rule's
+counter as a strong `id`; its compile task adds core's `objc` directory to the include path.)
 
 Gradle registers, per iOS target, two `Exec` tasks with argument arrays (no shell):
 
@@ -393,7 +418,7 @@ anyway.
 
 ```text
 language = Objective-C
-package = dev.koga.hopi.core.internal.urlsession
+package = dev.koga.hopi.network.internal.urlsession
 headers = hopi_urlsession.h
 headerFilter = hopi_urlsession.h
 staticLibraries = libhopi_urlsession.a
@@ -421,6 +446,10 @@ and every chunk would otherwise cross into Kotlin/Native on CFNetwork's queue (t
 GC safepoints on a thread that is not Kotlin's). The ObjC side is about 500 lines.
 
 ### Consumer API
+
+Since stage 9 of the runtime-split plan (2026-10-29): deleted with its module and its noop; iOS
+starts capture with `hopi-start`'s `Hopi.start { }` only (stage 6), whose `HopiStartConfig` holds the
+same settings plus `rules`, `perf` and `perfRemoteControl`; the contract is ARCHITECTURE's ("Consumer API"). As designed:
 
 ```kotlin
 public object HopiUrlSession {
@@ -472,10 +501,17 @@ The call compiles in both configurations, because the noop exports the same API.
 did this in `iOSApp.swift` until the runtime-split plan's stage 6. Since then it calls
 `Hopi.shared.start { … }` from `hopi-start` inside `#if HOPI`, a Swift condition that follows the
 same build setting as the Gradle build phase (docs/ARCHITECTURE.md, "Consumer API" and
-"Selecting real vs noop"): `hopi-start` has no noop, so a framework without the flag has no
+"Selecting the runtimes in a KMP project"): `hopi-start` has no noop, so a framework without the flag has no
 `Hopi`, and the call compiles only where it has.
 
 ### Noop twin and release exclusion
+
+Since stage 9 of the runtime-split plan (2026-10-29): no noop twin; a Release framework holds no
+runtime, the iOS release guard fails a Release link whose classpath holds one, and
+`:sample:shared:verifyIosReleaseExcludesCapture` checks the framework by families that now include
+core's `_hopi_hits_`, every runtime package's Kotlin symbols, hopi-start's `Hopi` and the header's
+declarations; the Android release check is `verifyReleaseHasNoRuntime`; the contract is ARCHITECTURE's ("Release guards",
+"The sample's release checks"). As designed and first built:
 
 - `hopi-urlsession-noop`: the same declarations, `start()` empty, `isStarted` always false, every
   config setter accepted and read back. ABI dumps for all four targets, in `:checkNoopParity`, and
@@ -508,6 +544,10 @@ and the Modules table gains `hopi-urlsession` and `hopi-urlsession-noop`; the Da
 the analytics debugger is unchanged: that tool keeps an explicit API.
 
 ## Tests
+
+Since stage 9 of the runtime-split plan (2026-10-29) the iOS tests below are `hopi-network`'s
+(`:hopi-network:iosSimulatorArm64Test`, test package `dev.koga.hopi.urlsession` kept) and core's
+(the hit counter). The list as designed:
 
 `hopi-core` and `hopi-urlsession` `iosSimulatorArm64Test` (Kotlin/Native on the simulator), with
 a test-only ObjC archive and cinterop on the **test** compilation (never in the main klib):

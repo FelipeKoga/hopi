@@ -5,8 +5,9 @@ package dev.koga.hopi.bench
  * is checked in. Every body is valid JSON of at least the requested size in UTF-8 bytes (a few
  * bytes over, to close the document); the same shape and size always give the same bytes.
  *
- * This file is compiled into the JVM test sources of every module that runs one of those
- * benchmarks (see each module's `jvmGiantBodyBenchmark` task).
+ * This file is compiled into the test sources of every module that runs one of those benchmarks
+ * (see gradle/giant-body-benchmark.gradle.kts: `jvmGiantBodyBenchmark`, `testGiantBodyBenchmark`,
+ * and `androidHostGiantBodyBenchmark` for hopi-network's Android host tests).
  */
 internal enum class Shape(val label: String) {
     /** One line: `{"items":[{…},{…},…]}`. */

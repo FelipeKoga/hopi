@@ -1,0 +1,6 @@
+HopiVerify: {"bench":"small","medianMs":0.58999999999999997,"minMs":0.46700000000000003,"n":200,"p90Ms":1.365,"processCpuUsPerRequest":1014}
+HopiVerify: {"all":[6.1100000000000003,6.319,6.0990000000000002,6.2229999999999999,6.1900000000000004],"bench":"giant","bytes":1048554,"maxMs":6.319,"mb":1,"medianMs":6.1900000000000004,"minMs":6.0990000000000002,"processCpuMsPerRun":2.2000000000000002,"runs":5}
+HopiVerify: {"all":[15.294,12.891999999999999,12.686999999999999,13.237,13.071999999999999],"bench":"giant","bytes":5242766,"maxMs":15.294,"mb":5,"medianMs":13.071999999999999,"minMs":12.686999999999999,"processCpuMsPerRun":8.0500000000000007,"runs":5}
+HopiVerify: {"all":[49.052,49.683,77.307000000000002,53.777999999999999,49.369],"bench":"giant","bytes":20971479,"maxMs":77.307000000000002,"mb":20,"medianMs":49.683,"minMs":49.052,"processCpuMsPerRun":35.07,"runs":5}
+HopiVerify: {"bench":"done"}
+dev.koga.hopi.sample: 88630

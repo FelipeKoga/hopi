@@ -4,6 +4,7 @@ import dev.koga.hopi.instrument.DexReader
 import dev.koga.hopi.instrument.DexReader.MethodRef
 import dev.koga.hopi.instrument.HookDescriptors
 import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -72,12 +73,13 @@ hopi {
 
 dependencies {
     // Hopi's Ktor plugin comes with the shared module, which names the real module or the noop twin
-    // by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting real vs noop"). The
-    // dev.koga.hopi plugin then resolves it per variant: real in debug, noop in release, whatever
-    // the property said, so the two are never both packaged. It also adds, in debug only, the
-    // network runtime (hopi-network), core, whose start registers the runtime behind HopiRules, and,
-    // for `perf { enabled }`, hopi-perf, whose tool registers the runtime behind HopiPerf: release
-    // gets no runtime, and hopi-api, which the shared module names in every build, has no twin.
+    // by the `hopi.enabled` Gradle property (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP
+    // project"). The dev.koga.hopi plugin then resolves it per variant: real in debug, noop in
+    // release, whatever the property said, so the two are never both packaged. It also adds, in
+    // debug only, the network runtime (hopi-network), core, whose start registers the runtime behind
+    // HopiRules, and, for `perf { enabled }`, hopi-perf, whose tool registers the runtime behind
+    // HopiPerf: release gets no runtime (its release guard fails a build that resolves one), and
+    // hopi-api, which the shared module names in every build, has no twin.
     implementation(project(":sample:shared"))
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
     implementation(project(":sample:fakesdk"))
@@ -86,22 +88,28 @@ dependencies {
 }
 
 /**
- * Proves which Hopi a release APK packages, and that none of it, and no instrumentation, is in it.
- * It reads the APK's dex files (classes, referenced types and methods, and each class's invoke
- * instructions, with the plugin's own `DexReader`, no SDK tool) and the merged manifest:
+ * Proves that a release APK holds no Hopi runtime and no instrumentation. It reads the APK's dex
+ * files (classes, referenced types and methods, and each class's invoke instructions, with the
+ * plugin's own `DexReader`, no SDK tool) and the merged manifest:
  *
- * - the release runtime classpath holds exactly `hopi-api` (`HopiRules` and `HopiPerf`, no twin)
- *   and the Ktor plugin's noop twin, no runtime (no `hopi-network`, `hopi-core` or `hopi-perf`),
- *   and the APK's Hopi classes are exactly the classes their jars hold;
- * - no type of `dev.koga.hopi.core` or `dev.koga.hopi.android.internal` is defined or even
- *   referenced (an instrumented call site would reference a hook type), and no class calls a hook;
+ * - the release runtime classpath's Hopi components are exactly `hopi-api` (`HopiRules` and
+ *   `HopiPerf`, no twin) and the Ktor plugin's noop twin (until stage 10 of the runtime-split plan,
+ *   which makes the real Ktor plugin a thin one): no runtime, as a project or as `dev.koga.hopi`
+ *   coordinates; and the APK's Hopi classes are exactly the classes their jars hold (unminified);
+ * - no type of `dev.koga.hopi.core`, `.android`, `.perf.internal`, `.ui`, `.network`, `.urlsession`
+ *   or `.start` is defined or even referenced (an instrumented call site would reference a hook
+ *   type), with no exemption, and no class calls a hook;
  * - the negative control: OkHttp's `RealCall` still calls `OkHttpClient.interceptors()` and the fake
  *   SDK still calls `URL.openConnection()`, so the check is known to look at the right code;
- * - the merged manifest declares no Hopi provider;
+ * - the merged manifest declares no provider, activity, service or receiver of `dev.koga.hopi.`
+ *   other than the app's own (`dev.koga.hopi.sample.`);
  * - no Hopi class calls the APIs the performance monitors are built on (`Window.addOnFrameMetricsAvailableListener`,
- *   `Looper.setMessageLogging`), and no type of `dev.koga.hopi.perf.internal` is in the APK.
+ *   `Looper.setMessageLogging`).
+ *
+ * The plugin's release guard already refuses a runtime on that classpath before the build; this
+ * check reads what was built, so it also sees what no classpath shows.
  */
-abstract class VerifyHopiSelection : DefaultTask() {
+abstract class VerifyReleaseHasNoRuntime : DefaultTask() {
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val apkDirectory: DirectoryProperty
@@ -113,11 +121,11 @@ abstract class VerifyHopiSelection : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val mergedManifest: RegularFileProperty
 
-    /** Paths of the Hopi projects on the release runtime classpath. */
+    /** The Hopi components on the release runtime classpath ([HopiGraph.componentsIn]). */
     @get:Input
-    abstract val hopiProjects: SetProperty<String>
+    abstract val hopiComponents: SetProperty<String>
 
-    /** The classes jars of those projects. */
+    /** The classes jars of those components. */
     @get:Classpath
     abstract val hopiJars: ConfigurableFileCollection
 
@@ -131,10 +139,9 @@ abstract class VerifyHopiSelection : DefaultTask() {
         val apk = File(builtArtifacts.elements.single().outputFile)
         val problems = mutableListOf<String>()
 
-        val projects = hopiProjects.get()
-        val expectedProjects = setOf(":hopi-api", ":hopi-ktor-noop")
-        if (projects != expectedProjects) {
-            problems += "the release runtime classpath holds ${projects.sorted()}, expected ${expectedProjects.sorted()}"
+        val components = hopiComponents.get()
+        if (components != EXPECTED_COMPONENTS) {
+            problems += "the release runtime classpath holds ${components.sorted()}, expected ${EXPECTED_COMPONENTS.sorted()}"
         }
 
         val dex = DexReader.ofApk(apk)
@@ -144,35 +151,35 @@ abstract class VerifyHopiSelection : DefaultTask() {
         }
         // D8 may add synthetic classes next to a library's own (`…$$ExternalSyntheticLambda0`).
         val apkOwnClasses = apkClasses.mapTo(sortedSetOf()) { it.substringBefore("\$\$ExternalSynthetic") }
-        if (libraryClasses.isEmpty()) problems += "the Hopi projects' jars hold no class"
+        if (libraryClasses.isEmpty()) problems += "the Hopi components' jars hold no class"
         val unexpected = apkOwnClasses - libraryClasses
-        if (unexpected.isNotEmpty()) problems += "classes of no selected Hopi project: ${unexpected.take(20)}"
+        if (unexpected.isNotEmpty()) problems += "classes of no selected Hopi component: ${unexpected.take(20)}"
         val missing = libraryClasses - apkOwnClasses
-        if (missing.isNotEmpty()) problems += "classes of the selected projects missing from the APK: ${missing.take(20)}"
+        if (missing.isNotEmpty()) problems += "classes of the selected components missing from the APK: ${missing.take(20)}"
 
         val forbidden = dex.referencedTypes.filter { type -> FORBIDDEN_PACKAGES.any { type.startsWith(it) } }
-        if (forbidden.isNotEmpty()) problems += "${forbidden.size} referenced capture or core types, e.g. ${forbidden.take(5)}"
+        if (forbidden.isNotEmpty()) problems += "${forbidden.size} referenced runtime or capture types, e.g. ${forbidden.take(5)}"
         val hookCalls = dex.invokesByClass.filterValues { calls -> calls.any { it.owner == HookDescriptors.OKHTTP_HOOKS || it.owner == HookDescriptors.URL_HOOKS } }.keys
         if (hookCalls.isNotEmpty()) problems += "classes that call a Hopi hook: ${hookCalls.take(10)}"
         val realCallCalls = dex.callersOf(INTERCEPTORS)
         if (HookDescriptors.REAL_CALL_CLASSES.none { it in realCallCalls }) problems += "RealCall does not call OkHttpClient.interceptors() (the negative control found nothing)"
         val sdkCalls = dex.callersOf(OPEN_CONNECTION).filter { it.startsWith("dev/koga/fakesdk/") }
         if (sdkCalls.isEmpty()) problems += "the fake SDK does not call URL.openConnection() (the negative control found nothing)"
-        val manifest = mergedManifest.get().asFile.readText()
-        if (PROVIDER in manifest) problems += "the merged manifest declares $PROVIDER"
+        val manifestComponents = hopiManifestComponents(mergedManifest.get().asFile)
+        if (manifestComponents.isNotEmpty()) problems += "the merged manifest declares Hopi components: $manifestComponents"
         val perfCalls = dex.invokesByClass.filter { (owner, calls) -> owner.startsWith("dev/koga/hopi/") && calls.any { it in PerfApis.ALL } }.keys
         if (perfCalls.isNotEmpty()) problems += "Hopi classes that call the perf monitors' APIs: ${perfCalls.take(10)}"
 
         val summary = buildString {
             appendLine("apk: ${apk.name}")
-            appendLine("expected: the noop twins and hopi-api, no capture code, no instrumentation")
-            appendLine("hopi projects on the release classpath: ${projects.sorted().joinToString()}")
-            appendLine("hopi classes in the apk: ${apkClasses.size}; referenced core/capture types: ${forbidden.size}; classes calling a hook: ${hookCalls.size}")
+            appendLine("expected: hopi-api and the Ktor plugin's noop twin, no runtime, no instrumentation")
+            appendLine("hopi components on the release classpath: ${components.sorted().joinToString()}")
+            appendLine("hopi classes in the apk: ${apkClasses.size}; referenced runtime/capture types: ${forbidden.size}; classes calling a hook: ${hookCalls.size}; Hopi manifest components: ${manifestComponents.size}")
             appendLine("negative control: RealCall calls OkHttpClient.interceptors(): ${realCallCalls.filter { it in HookDescriptors.REAL_CALL_CLASSES }}; fake SDK classes calling URL.openConnection(): $sdkCalls")
             apkClasses.forEach { appendLine("  $it") }
         }
         if (problems.isNotEmpty()) {
-            throw GradleException("The release APK does not package the expected Hopi:\n- " + problems.joinToString("\n- ") + "\n" + summary)
+            throw GradleException("The release APK holds Hopi runtime code or instrumentation:\n- " + problems.joinToString("\n- ") + "\n" + summary)
         }
         report.get().asFile.writeText(summary)
         logger.lifecycle(summary.lineSequence().take(5).joinToString("\n"))
@@ -186,11 +193,25 @@ abstract class VerifyHopiSelection : DefaultTask() {
             .toList()
     }
 
+    /** The `android:name` of every provider, activity, service and receiver of `dev.koga.hopi.` but the app's own. */
+    private fun hopiManifestComponents(manifest: File): List<String> {
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(manifest)
+        return MANIFEST_COMPONENTS.flatMap { tag ->
+            val elements = document.getElementsByTagName(tag)
+            (0 until elements.length).map { (elements.item(it) as org.w3c.dom.Element).getAttribute("android:name") }
+        }.filter { it.startsWith("dev.koga.hopi.") && !it.startsWith("dev.koga.hopi.sample.") }
+    }
+
     private companion object {
-        val FORBIDDEN_PACKAGES = listOf("dev/koga/hopi/core/", "dev/koga/hopi/android/internal/", "dev/koga/hopi/android/generated/", "dev/koga/hopi/perf/internal/")
+        /** Until stage 10 of the runtime-split plan, which turns the Ktor plugin's noop twin into the thin plugin. */
+        val EXPECTED_COMPONENTS = setOf(":hopi-api", ":hopi-ktor-noop")
+        val FORBIDDEN_PACKAGES = listOf(
+            "dev/koga/hopi/core/", "dev/koga/hopi/android/", "dev/koga/hopi/perf/internal/", "dev/koga/hopi/ui/",
+            "dev/koga/hopi/network/", "dev/koga/hopi/urlsession/", "dev/koga/hopi/start/",
+        )
+        val MANIFEST_COMPONENTS = listOf("provider", "activity", "service", "receiver")
         val INTERCEPTORS = MethodRef(HookDescriptors.OKHTTP_CLIENT, HookDescriptors.INTERCEPTORS, HookDescriptors.INTERCEPTORS_DESCRIPTOR)
         val OPEN_CONNECTION = MethodRef(HookDescriptors.URL, "openConnection", "()Ljava/net/URLConnection;")
-        const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
     }
 }
 
@@ -223,8 +244,9 @@ abstract class VerifyDebugCapture : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val mergedManifest: RegularFileProperty
 
+    /** The Hopi components on the debug runtime classpath ([HopiGraph.componentsIn]). */
     @get:Input
-    abstract val hopiProjects: SetProperty<String>
+    abstract val hopiComponents: SetProperty<String>
 
     @get:OutputFile
     abstract val report: RegularFileProperty
@@ -234,7 +256,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val apk = File(builtArtifactsLoader.get().load(apkDirectory.get())?.elements?.single()?.outputFile ?: throw GradleException("No debug APK"))
         val dex = DexReader.ofApk(apk)
         val problems = mutableListOf<String>()
-        val projects = hopiProjects.get()
+        val projects = hopiComponents.get()
         val required = setOf(":hopi-api", ":hopi-core", ":hopi-ktor", ":hopi-network", ":hopi-perf")
         if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
 
@@ -287,37 +309,39 @@ abstract class VerifyDebugCapture : DefaultTask() {
 // An object, not a script function: the configuration cache stores the provider mapping that
 // uses it, and a script function would capture the script.
 object HopiGraph {
-    /** The Hopi projects in a resolved dependency graph, by project path. */
-    fun projectsIn(root: ResolvedComponentResult): Set<String> {
+    /**
+     * The Hopi components in a resolved dependency graph: this repository's projects by path
+     * (`:hopi-api`), published ones as `dev.koga.hopi:<module>`.
+     */
+    fun componentsIn(root: ResolvedComponentResult): Set<String> {
         val found = sortedSetOf<String>()
         val visited = mutableSetOf(root.id)
         val queue = ArrayDeque(listOf(root))
         while (queue.isNotEmpty()) {
             val component = queue.removeFirst()
-            (component.id as? ProjectComponentIdentifier)?.projectPath?.takeIf { it.startsWith(":hopi-") }?.let(found::add)
+            name(component.id)?.let(found::add)
             component.dependencies.filterIsInstance<ResolvedDependencyResult>().map { it.selected }.filter { visited.add(it.id) }.forEach(queue::add)
         }
         return found
     }
+
+    /** Whether a component's jar belongs to the release check's class comparison. */
+    fun isHopi(id: ComponentIdentifier): Boolean = name(id) != null
+
+    private fun name(id: ComponentIdentifier): String? = when (id) {
+        is ProjectComponentIdentifier -> id.projectPath.takeIf { it.startsWith(":hopi-") }
+        is ModuleComponentIdentifier -> "${id.group}:${id.module}".takeIf { id.group == "dev.koga.hopi" }
+        else -> null
+    }
 }
 
-fun VerifyHopiSelection.configureSelectionCheck(reportName: String) {
+// What every consumer relies on: the release APK holds hopi-api and the Ktor plugin's noop twin,
+// no runtime and no instrumentation, whatever -Phopi.enabled says (the plugin resolves the twins per
+// variant, so the property no longer reaches an Android release build).
+val verifyReleaseHasNoRuntime = tasks.register<VerifyReleaseHasNoRuntime>("verifyReleaseHasNoRuntime") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    report.set(layout.buildDirectory.file("reports/hopi/$reportName.txt"))
-}
-
-// The default every consumer relies on: the release APK ships the noop twins and hopi-api, no
-// hopi-core and no instrumentation.
-val verifyReleaseUsesNoop = tasks.register<VerifyHopiSelection>("verifyReleaseUsesNoop") {
-    description = "Checks that the release APK ships only the noop twins and hopi-api and holds no capture code and no instrumentation."
-    configureSelectionCheck(reportName = "release-uses-noop")
-}
-
-// The same check, kept for -Phopi.enabled=true: with the dev.koga.hopi plugin the property no longer
-// reaches an Android release build (the plugin resolves the twins per variant), which this proves.
-val verifyHopiSelection = tasks.register<VerifyHopiSelection>("verifyHopiSelection") {
-    description = "Checks that the release APK ships the noop twins whatever -Phopi.enabled says."
-    configureSelectionCheck(reportName = "release-selection")
+    description = "Checks that the release APK holds hopi-api and the Ktor noop twin only: no Hopi runtime, no capture code, no instrumentation."
+    report.set(layout.buildDirectory.file("reports/hopi/release-has-no-runtime.txt"))
 }
 
 val verifyDebugCapture = tasks.register<VerifyDebugCapture>("verifyDebugCapture") {
@@ -328,20 +352,18 @@ val verifyDebugCapture = tasks.register<VerifyDebugCapture>("verifyDebugCapture"
 
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
-        listOf(verifyReleaseUsesNoop, verifyHopiSelection).forEach { task ->
-            task.configure {
-                apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
-                builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
-                mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
-                val classpath = variant.runtimeConfiguration
-                hopiProjects.set(classpath.incoming.resolutionResult.rootComponent.map(HopiGraph::projectsIn))
-                hopiJars.from(
-                    classpath.incoming.artifactView {
-                        attributes { attribute(Attribute.of("artifactType", String::class.java), "android-classes-jar") }
-                        componentFilter { it is ProjectComponentIdentifier && it.projectPath.startsWith(":hopi-") }
-                    }.files,
-                )
-            }
+        verifyReleaseHasNoRuntime.configure {
+            apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+            builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
+            mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+            val classpath = variant.runtimeConfiguration
+            hopiComponents.set(classpath.incoming.resolutionResult.rootComponent.map(HopiGraph::componentsIn))
+            hopiJars.from(
+                classpath.incoming.artifactView {
+                    attributes { attribute(Attribute.of("artifactType", String::class.java), "android-classes-jar") }
+                    componentFilter(HopiGraph::isHopi)
+                }.files,
+            )
         }
     }
     onVariants(selector().withBuildType("debug")) { variant ->
@@ -349,13 +371,13 @@ androidComponents {
             apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
             builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
             mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
-            hopiProjects.set(variant.runtimeConfiguration.incoming.resolutionResult.rootComponent.map(HopiGraph::projectsIn))
+            hopiComponents.set(variant.runtimeConfiguration.incoming.resolutionResult.rootComponent.map(HopiGraph::componentsIn))
         }
     }
 }
 
 tasks.named("check") {
-    dependsOn(verifyHopiSelection)
+    dependsOn(verifyReleaseHasNoRuntime)
     // The positive control needs instrumentation, which -Psample.hopiCapture=false turns off.
     if (providers.gradleProperty("sample.hopiCapture").orNull != "false") dependsOn(verifyDebugCapture)
 }

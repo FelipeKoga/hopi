@@ -17,7 +17,9 @@ Goals:
 
 - Setup is one line in the app module's `build.gradle.kts`: `plugins { id("dev.koga.hopi") }`. No
   code, no per-client, per-SDK or per-session setup, and no `-Phopi.enabled` for Android apps that
-  use the plugin. An optional `hopi { … }` block holds the same settings as `HopiUrlSessionConfig`.
+  use the plugin. An optional `hopi { … }` block holds the same store settings as `Hopi.start` on
+  iOS (`HopiStartConfig`; before stage 9 of the runtime-split plan, iOS's own capture config), and,
+  since that stage, capture's own settings in `hopi { network { } }`.
 - Every OkHttp call (OkHttp 3.14, 4.x and 5.x; 3.12 and 3.13 are rewritten but left unrecorded,
   see "Dedupe with the Ktor plugin") and every `HttpURLConnection` /
   `HttpsURLConnection` opened through `java.net.URL` in the APK's own code is recorded once: app
@@ -32,8 +34,10 @@ Goals:
   they are only counted; the records queued for a store consumer that fell behind keep at most
   `maxTotalBytes` of captures between them. No `peekBody` or read-ahead. Hopi does no work of its
   own on the main thread. The only main-thread cost is the auto-start, measured.
-- Release (non-debuggable) variants are not instrumented and get the noop twin. They contain no
-  capture class and no reference to one, and an automated check proves it.
+- Release (non-debuggable) variants are not instrumented and get no runtime (until stage 9 of the
+  runtime-split plan, 2026-10-29, the noop twin; since then a release variant that resolves a
+  runtime fails its build in the plugin's release guard). They contain no capture class and no
+  reference to one, and an automated check proves it (`verifyReleaseHasNoRuntime` since stage 9).
 
 Non-goals (v1):
 
@@ -347,7 +351,9 @@ Rules for the wrapper:
 `hopi-core`'s `AndroidManifest.xml` declares one provider (`hopi-android`'s until the
 runtime-split plan's stage 4, 2026-10-28; the class kept its package). With the plugin it is
 merged only into debuggable variants, because only they depend on `hopi-core`: the plugin adds it
-with the runtime to debuggable build types. An app that links a real Hopi module without the plugin
+with the runtimes to debuggable build types (since stage 9 of the runtime-split plan, whatever
+`network { }` and `perf { }` enable, so even with no tool), and the release guard fails a release
+variant that resolves it. An app that links a real Hopi module without the plugin
 merges it wherever that module goes, where it starts nothing and writes one notice line
 (ARCHITECTURE.md, Android capture, "Start").
 
@@ -372,15 +378,16 @@ into each debuggable variant from the `hopi { … }` block,
 `dev.koga.hopi.android.generated.HopiGeneratedConfig extends HopiConfigValues` (core's), whose
 constructor passes the global settings (the store caps, redaction, `summaryLog`, `agentBridge`)
 and then the tool list, each tool constructed with its own settings:
-`new NetworkTool(okhttp, urlConnection, rules)` and, with `perf { enabled = true }`,
-`new PerfEntry(autoStart, hangThresholdMs, hangHeartbeat, remoteControl)`. One `Class.forName` and one
-constructor call. Without that class (a runtime added without the plugin) it writes one notice line,
+`new NetworkTool(okhttp, urlConnection, rules)` with `network { enabled }` (the default) and
+`new PerfEntry(autoStart, hangThresholdMs, hangHeartbeat, remoteControl)` with
+`perf { enabled = true }`, possibly neither (since stage 9 of the runtime-split plan). One
+`Class.forName` and one constructor call. Without that class (a runtime added without the plugin) it writes one notice line,
 `not started: no generated configuration; apply the dev.koga.hopi Gradle plugin to the app`, and
 starts nothing: the tool list lives in that class, and nothing was rewritten anyway (before stage 4
 it started with defaults). (3) It registers core's current-activity callbacks (perf-monitors.md,
 "How the monitors find the app"). (4) It runs core's start sequence (ARCHITECTURE.md, "Start
-sequence") with the tool list: invalid caps give a notice line and no start, `HopiUrlSession`'s
-rule; the default store's caps are preset; with `agentBridge` the store installation is made at
+sequence") with the tool list: invalid caps give a notice line and no start (iOS's rule: a Swift
+caller cannot catch); the default store's caps are preset; with `agentBridge` the store installation is made at
 once on a background thread; then each tool starts. The network tool sets `started`. If
 `Class.forName("okhttp3.internal.connection.RealCall", false, loader)` (or
 `okhttp3.RealCall`) loads and carries `@HopiInstrumented`, it also calls
@@ -393,7 +400,9 @@ rewritten (`urlConnection`, false when an exclude pattern matches
 a minified debug build, and `hopi-core`'s keep the provider and the generated class. Requests made
 before the provider runs (`Application.attachBaseContext`, other processes) are not recorded. With
 `summaryLog` the provider ends with one line of its own cost, in parts: `android capture started
-(okhttp instrumented, <total> us; config <n> us, network <n> us, perf <n> us)`.
+(okhttp instrumented, <total> us; config <n> us, network <n> us, perf <n> us)`. The line marks the
+end of the start sequence, whatever tools ran: with `network { enabled = false }` it has no
+`network` part, and with no tool only `config` (ARCHITECTURE, Android capture, "Start").
 
 ## Dedupe with the Ktor plugin
 
@@ -469,6 +478,10 @@ does.
 
 ### Layout
 
+Since stage 9 of the runtime-split plan (2026-10-29): `hopi-android` and `hopi-android-noop` are
+gone; the Android runtime below is `hopi-network`'s `androidMain` (its packages kept), with no
+noop, beside the iOS URLSession capture; the contract is ARCHITECTURE's ("Modules", "Android capture"). The layout as designed:
+
 ```text
 settings.gradle.kts         pluginManagement { includeBuild("gradle-plugin") }
 gradle-plugin/              an included build (its own settings.gradle.kts, the root's version catalog through versionCatalogs { from(files("../gradle/libs.versions.toml")) })
@@ -486,7 +499,11 @@ selection a developer needs (`hopi { okhttp = false }` turns one off at build ti
 `hopi-android` is not a dependency of `hopi-ktor` or of any KMP module. Only the plugin adds it,
 to an Android application.
 
-Public API (what the noop mirrors):
+Public API (what the noop mirrors). Since stage 9 of the runtime-split plan (2026-10-29): deleted,
+with the noop; the status it held is the network status of `hopi-api`'s registry,
+`HopiRuntimes.networkStarted` and `okHttpInstrumented` (`@HopiInternalApi`), which the network tool
+writes once capture runs, so nothing of the runtime is public and `hopi-network`'s dumps are
+empty; the contract is ARCHITECTURE's ("Modules", "Start sequence"). As designed:
 
 ```kotlin
 public object HopiAndroid {
@@ -512,6 +529,11 @@ configuration names, which the app's own classes must reach.)
 
 ### DSL
 
+Since stage 9 of the runtime-split plan (2026-10-29): `okhttp`, `urlConnection`, `rules` and
+`excludeClasses` are in `hopi { network { } }`, beside `network { enabled }` (default true; false
+leaves out the network runtime, the transform and the network tool); `enabled = false` gives no
+variant anything, and the release guard runs whatever it says; the contract is ARCHITECTURE's ("Consumer API"). As designed:
+
 ```kotlin
 hopi {                                   // all optional; defaults are HopiUrlSessionConfig's
     enabled = true                       // false: every variant gets the noop and nothing is instrumented
@@ -536,6 +558,14 @@ with `variant.sources.java?.addGeneratedSourceDirectory(…)`; the design's
 `values/hopi_config.xml` became that class while building it (see "As built").
 
 ### Variant wiring
+
+Since stage 9 of the runtime-split plan (2026-10-29): `finalizeDsl` adds `hopi-core` to every
+debuggable build type (with `enabled`), `hopi-network` with `network { enabled }` and `hopi-perf`
+with `perf { enabled = true }`, and nothing to the others; every debuggable variant gets a
+generated configuration (its tool list may be empty) and, with `network { enabled }`, the
+transform; every variant that is not debuggable gets the release guard, `hopiReleaseGuard<Variant>`,
+before its `pre<Variant>Build`; the contract is ARCHITECTURE's ("Selecting the runtimes in a KMP project", "Release
+guards"). The wiring as designed and first built:
 
 - The plugin applies only together with `com.android.application`
   (`pluginManager.withPlugin`). Applied anywhere else, it fails with "apply dev.koga.hopi to the
@@ -595,11 +625,20 @@ for.
 
 Consequence for the sample: `sample/androidApp` applies the plugin. A debug build without the flag
 is now real (Ktor plugin, UI, capture), and the release build is always noop. The generated
-`HOPI_ENABLED` constant stays for iOS. The Android app shows `HopiAndroid.isStarted` instead. The
+`HOPI_ENABLED` constant stays for iOS. The Android app shows the network status instead
+(`HopiAndroid.isStarted` until stage 9 of the runtime-split plan; since then
+`HopiRuntimes.networkStarted`, with the same output). The
 `-Phopi.enabled=true` instructions for the bridge checks become unnecessary on Android, and the
 architecture doc's sample section changes accordingly.
 
 ## Noop twin and release exclusion
+
+Since stage 9 of the runtime-split plan (2026-10-29): there is no noop twin; release variants get
+no runtime, the plugin's release guard fails one that resolves a runtime, and one task,
+`:sample:androidApp:verifyReleaseHasNoRuntime`, replaces both release checks below (the release
+classpath's Hopi components are exactly `:hopi-api` and `:hopi-ktor-noop`, no type of a runtime's
+package is referenced, the merged manifest declares no Hopi component); the contract is ARCHITECTURE's ("Release guards",
+"The sample's release checks"). As designed and first built:
 
 - `hopi-android-noop`: the public API above, both values false, no manifest, no resources, no
   dependency. ABI dump, in `:checkNoopParity`.
@@ -673,6 +712,12 @@ one, and the dex check proves the rewrite on the SDK's own classes.
 
 Host and JVM tests are part of the base check. Device tests are not, because they boot the
 emulator.
+
+Since stage 9 of the runtime-split plan (2026-10-29) the host tests below are `hopi-network`'s
+(`:hopi-network:testAndroidHostTest`, packages kept), the noop's tests went with it, and the
+plugin's TestKit tests also cover the release guard (`aRuntimeInANonDebuggableVariantFailsTheBuild`:
+a runtime named for release by project, by coordinates and through a library) and
+`network { enabled = false }` (a fixture with perf's tool, one with no tool). The list as designed:
 
 **`gradle-plugin:instrument:test`** (JVM, ASM, no AGP):
 

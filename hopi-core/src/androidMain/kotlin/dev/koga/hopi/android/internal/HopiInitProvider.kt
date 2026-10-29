@@ -18,7 +18,8 @@ import dev.koga.hopi.core.start.ToolStart
 
 /**
  * Starts Hopi with no code in the app: `hopi-core`'s manifest declares it, and the `dev.koga.hopi`
- * Gradle plugin adds `hopi-core` with the runtimes to debuggable build types only. It runs on the
+ * Gradle plugin adds `hopi-core`, with the runtimes the `hopi { }` block enables, to debuggable
+ * build types only (a release build that resolves one fails the plugin's release guard). It runs on the
  * main thread before `Application.onCreate`, so it starts nothing in an app that is not debuggable,
  * reads the generated configuration with one class lookup, and hands the generated tool list to the
  * start sequence ([HopiStart]), whose tools only set state; the store is installed by the first
@@ -94,8 +95,11 @@ public class HopiInitProvider : ContentProvider() {
 
         /**
          * `android capture started (<notes>, <total> us; config <n> us, <tool> <n> us, …)`, the
-         * tools' notes and parts in start order. A `StringBuilder` and plain loops: Kotlin's
-         * collection extensions would load their classes on the main thread.
+         * tools' notes and parts in start order: the line that marks the end of the start
+         * sequence, whatever tools ran (with `network { enabled = false }` it has no `network`
+         * part, with no tool only `config`); the prefix stays for the device runs that read it. A
+         * `StringBuilder` and plain loops: Kotlin's collection extensions would load their classes
+         * on the main thread.
          */
         private fun startedLine(started: List<ToolStart>, totalNanos: Long, configNanos: Long): String {
             val line = StringBuilder("android capture started (")
@@ -113,10 +117,11 @@ public class HopiInitProvider : ContentProvider() {
 /**
  * The `hopi { }` block of the app's build. The plugin generates
  * `dev.koga.hopi.android.generated.HopiGeneratedConfig`, a Java subclass whose no-argument
- * constructor passes the block's global settings here, then the tool list, each tool constructed
- * with its own settings (`new NetworkTool(…)`, with `perf { enabled = true }` also
- * `new PerfEntry(…)`), so reading it is one class lookup and one constructor call, no field
- * reflection and no resources. Only debuggable variants get it.
+ * constructor passes the block's global settings here, then the tool list: the tools the block
+ * enables, possibly none, each constructed with its own settings (`new NetworkTool(…)` with
+ * `network { enabled }`, `new PerfEntry(…)` with `perf { enabled = true }`), so reading it is one
+ * class lookup and one constructor call, no field reflection and no resources. Every debuggable
+ * variant gets it, and only they do.
  */
 @HopiInternalApi
 public abstract class HopiConfigValues(

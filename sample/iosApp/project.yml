@@ -77,12 +77,14 @@ targets:
         basedOnDependencyAnalysis: false
         shell: /bin/sh
         script: |
-          # Debug links the real Hopi modules and hopi-start, which Swift starts Hopi with (behind
-          # `#if HOPI`); any other configuration their noop twins and no hopi-start
-          # (docs/ARCHITECTURE.md, "Selecting real vs noop"). Only the HOPI_ENABLED values that set
-          # Swift's HOPI, YES and true, link Hopi, so the two never disagree: any other value, or
-          # none (which meant on before HOPI existed), builds a Debug app with the noop twins, as
-          # `xcodebuild ... HOPI_ENABLED=false` does for A/B runs at the same optimisation level.
+          # Debug links Hopi's runtimes and hopi-start, which Swift starts Hopi with (behind
+          # `#if HOPI`); any other configuration no runtime and no hopi-start, only hopi-api and
+          # the Ktor plugin's noop twin (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP
+          # project"), and the iOS release guard fails a Release link that would hold a runtime.
+          # Only the HOPI_ENABLED values that set Swift's HOPI, YES and true, link Hopi, so the two
+          # never disagree: any other value, or none (which meant on before HOPI existed), builds a
+          # Debug app without Hopi, as `xcodebuild ... HOPI_ENABLED=false` does for A/B runs at the
+          # same optimisation level.
           set -eu
           cd "$SRCROOT/../.."
           case "$CONFIGURATION/${HOPI_ENABLED:-}" in
