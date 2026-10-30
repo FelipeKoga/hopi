@@ -2790,8 +2790,8 @@ Stage 10 (2026-10-29; 10a `cad60c3` on `80f1a46`, then 10b's edits on it; emulat
   capture A/Bs, and the device check of a JVM app started with `Hopi.start`.
 - **Base check**: green on 10a (3 min 55 s) and on 10b.
 
-Stage 11 (2026-10-30, the stage's edits on `086c055`; no emulator or simulator; evidence in the
-session's scratchpad):
+Stage 11 (2026-10-30, the stage's edits on `086c055`; emulator `Hopi_API_35`, API 35;
+evidence in the session's scratchpad and `build/evidence/runtime-split/stage11/`):
 
 - **First ([run])**: step 7's grep gate (rule 8's form and exclusions, git 2.47.1) found 453 hits
   before the edits and finds 235 after them: 222 lines of README, ROADMAP, ARCHITECTURE and four
@@ -2817,11 +2817,15 @@ session's scratchpad):
   and a copy of `benchmark/urlsession/2026-10-29/ab-cap8mib-iphone17-ios27.0/` their tables equal
   HEAD's but for the label, and the URLSession `summary.json` equals the committed one value for
   value.
-- **Not run** (to finish quickly, as in stage 10): the stage's three [run] items, which need the
-  emulator or the simulator: `benchmark/android-capture/run.py e2e …` with the nohopi APK,
+- **The renamed arm, emulator** (by the executing agent): `benchmark/android-capture/e2e/run.sh`
+  with the capture build and the `nohopi` one, then `check.py`: 54 checks, 0 failed. A first
+  attempt stopped when the emulator went offline halfway through the capture run (`adb: device
+  offline`); the rerun passed.
+- **Not run** (to finish quickly, as in stage 10): `benchmark/android-capture/run.py e2e`,
   `benchmark/urlsession/e2e/run.sh` with the `HOPI_ENABLED=false` app, and `python3
   benchmark/perf/idle.py --arms nohopi=none@dev.koga.hopi.sample.nohopi,off=none,all=all`. The
   renamed Python scripts compile (`py_compile`), and the readers ran on recorded data (above).
+- **Base check**: green (4 min 32 s).
 
 ## 10. Progress (kept by the executing agent)
 
@@ -2891,7 +2895,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 8. Perf into API and runtime | done: `HopiPerf`, `HopiMonitor` and `HopiPerfConfig` in `hopi-api` (`dev.koga.hopi.perf`), with an `@HopiInternalApi` `HopiPerfRuntime` and the registry's perf slot, dropped-start count and kept label; `hopi-perf` is the runtime behind it (empty dumps): perf's tool registers `ApiPerf`, which only forwards (`ApiPerfCalls`), and writes the dropped-starts notice; `HopiPerf` no longer starts itself and only what a block sets applies (8.1); nothing on Android's start path loads a monitor class (the backend split); frames report `attaching` (8.6); `PerfLauncher` renamed `CurrentActivity`; `perf { remoteControl }` and `HopiStartConfig.perfRemoteControl` (8.5); `hopi-perf-noop` and the perf twin pair deleted; the plugin adds `hopi-perf` to debuggable build types; [run] results in section 9 | (this commit) |
 | 9. Network runtime and release guards | 9a done: `hopi-network` (android, iosArm64, iosSimulatorArm64; empty ABI dumps) holds `hopi-android`'s capture with its packages, and core's URLSession library and the iOS network tool (`dev.koga.hopi.network.internal`); core keeps the rule hit counter as a C library of its own (`hopi_hits`); `HopiAndroid` and `HopiUrlSession` deleted (9.4), the sample reads `HopiRuntimes`' network status; `hopi-android`, `hopi-android-noop`, `hopi-urlsession` and `hopi-urlsession-noop` deleted; the plugin's `RUNTIME` is `hopi-network`, with no noop. 9b done: the plugin's release guard (`hopiReleaseGuard<Variant>`, before any dex task) and the iOS release guard (`gradle/ios-release-guard.gradle`, before every Release link), `network { }` with generation split from instrumentation (a debuggable variant with every tool off still gets core and a generated configuration with no tool), `verifyReleaseHasNoRuntime` and the iOS check's new families, the giant-body benchmark on Android's host tests (E1 R7) and the R8 pass-through; [run] results in section 9 | `472fcd6` (9a), (this commit) |
 | 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b done: core's rules answer every platform mock and edit with `Cache-Control: no-store` (`ResponseEdits.noStore`; R5), iOS's dead Ktor Darwin cover and `KTOR` among its platform sources removed, R3 and R5 regression tests, `mock-302` in the sample's self-test; [run] results in section 9, a reduced set | `cad60c3` (10a), (this commit) |
-| 11. Remove the remaining twin machinery | done: the root build's parity check (`NoopParityCheck` with its `inline`/`const` rule, `noopTwins`, `checkNoopParity`) and the plugin's `selectTwins` and `TWINS` deleted, `:checkNoopParity` out of README's and section 7's base check, the functional test `publishedCoordinatesAreSwappedPerVariant` renamed `publishedCoordinatesArePerVariant`; the live benchmark scripts' noop arm is the `nohopi` arm (install suffix `.nohopi`), and the readers also read the old labels; the tracked `__pycache__` files deleted and `__pycache__/` ignored; the sample's texts; O7 as applied (`checkKotlinAbi` in six modules); the grep gate from 453 to 235 hits, each under a dated history note or a false positive; [run] results in section 9, the stage's [run] items not run | (this commit) |
+| 11. Remove the remaining twin machinery | done: the root build's parity check (`NoopParityCheck` with its `inline`/`const` rule, `noopTwins`, `checkNoopParity`) and the plugin's `selectTwins` and `TWINS` deleted, `:checkNoopParity` out of README's and section 7's base check, the functional test `publishedCoordinatesAreSwappedPerVariant` renamed `publishedCoordinatesArePerVariant`; the live benchmark scripts' noop arm is the `nohopi` arm (install suffix `.nohopi`), and the readers also read the old labels; the tracked `__pycache__` files deleted and `__pycache__/` ignored; the sample's texts; O7 as applied (`checkKotlinAbi` in six modules); the grep gate from 453 to 235 hits, each under a dated history note or a false positive; [run] results in section 9, two of the stage's three [run] items not run | `09f0dae` |
 | 12. Physical devices | | |
 | 13. Documentation pass | | |
 | 14. Final verification and report | | |
