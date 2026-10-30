@@ -36,6 +36,11 @@ dependencies {
     testImplementation(libs.compose.ui.test)
 }
 
+sourceSets.test {
+    // FakeUsbmuxd and FakeXcrun (USB iPhones without a phone).
+    kotlin.srcDir(rootProject.layout.projectDirectory.dir("hopi-connect/src/testShared/kotlin"))
+}
+
 tasks.jar {
     // Read back as the HAR export's `creator.version`.
     manifest { attributes("Implementation-Version" to desktopVersion) }

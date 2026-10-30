@@ -11,6 +11,8 @@ import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.fake.FakeUsbmuxd
+import dev.koga.hopi.fake.FakeXcrun
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.ServerSocket
@@ -40,7 +42,8 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * The adb and simctl flows with recorded subprocesses: a token-less bridge on loopback stands in
  * for adb's forward to the app's `LocalServerSocket`, and the iOS flow reads the `bridge.json` a
- * real bridge wrote into a fake app container.
+ * real bridge wrote into a fake app container. USB iPhones go through a fake usbmuxd on a Unix
+ * socket of the test's own and a fake devicectl.
  */
 class DeviceFlowTest {
     private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -414,6 +417,7 @@ class DeviceFlowTest {
             env = emptyMap(),
             isMac = true,
             isExecutable = { it == Paths.get("/usr/bin/xcrun") },
+            usbmuxdSocket = NO_USBMUXD,
         )
         val args = (parseInvocation(listOf("list", "--app", APP)) as Invocation.Run).args
         Targets(environment).open(args).use { endpoint ->
@@ -514,9 +518,73 @@ class DeviceFlowTest {
         assertEquals(listOf("no devices: start an emulator, connect a phone, or boot an iOS simulator"), none.lines)
     }
 
+    private fun iphone(vararg argv: String, usbmuxd: FakeUsbmuxd, xcrun: FakeXcrun) =
+        runCapturing(*argv, processes = xcrun, isMac = true, executables = setOf(Paths.get(FakeXcrun.XCRUN)), usbmuxdSocket = usbmuxd.socket)
+
+    @Test
+    fun devicesListsUsbIphonesAfterTheSimulators() {
+        FakeUsbmuxd().use { usbmuxd ->
+            val xcrun = FakeXcrun(simulators = fixture("simctl-booted.json"), devicectl = fixture("devicectl-devices.json"))
+            val simulator = """{"type":"device","platform":"ios","id":"$UDID","state":"booted","name":"iPhone 16","os":"iOS 18.2"}"""
+            // usbmuxd answers but lists nothing: the output is what it was, and devicectl never runs.
+            val none = iphone("devices", "--json", usbmuxd = usbmuxd, xcrun = xcrun)
+            assertEquals(listOf(simulator), none.lines, none.toString())
+            assertEquals("", none.stderr)
+            assertEquals(emptyList(), xcrun.devicectlCalls)
+
+            usbmuxd.attach(5, IPHONE)
+            val json = iphone("devices", "--json", usbmuxd = usbmuxd, xcrun = xcrun)
+            assertEquals(ExitCode.OK, json.exitCode, json.toString())
+            assertEquals(
+                listOf(simulator, """{"type":"device","platform":"ios","id":"$IPHONE","state":"usb","name":"Koga’s iPhone","os":"iOS 26.0"}"""),
+                json.lines,
+            )
+
+            val human = iphone("devices", usbmuxd = usbmuxd, xcrun = xcrun)
+            val (header, _, phone) = human.lines
+            assertTrue(phone.startsWith("ios       $IPHONE "), human.stdout)
+            assertEquals(header.indexOf("STATE"), phone.indexOf("usb"), human.stdout)
+            assertEquals(header.indexOf("NAME"), phone.indexOf("Koga’s iPhone (iOS 26.0)"), human.stdout)
+
+            // devicectl knows no name: the phone is listed all the same.
+            val unnamed = iphone("devices", "--platform", "ios", "--json", usbmuxd = usbmuxd, xcrun = FakeXcrun(devicectl = null))
+            assertEquals(listOf("""{"type":"device","platform":"ios","id":"$IPHONE","state":"usb","name":null,"os":null}"""), unnamed.lines)
+        }
+    }
+
+    @Test
+    fun deviceNamesAUsbIphoneReachedThroughUsbmuxd() {
+        val bridge = JvmAgentBridge.start(store, root.resolve("phone/Library/Caches/hopi"), app = APP)
+        closeables += bridge
+        FakeUsbmuxd().use { usbmuxd ->
+            usbmuxd.attach(5, IPHONE)
+            // A booted simulator does not get in the way of a --device that names the phone.
+            val xcrun = FakeXcrun(
+                simulators = fixture("simctl-booted.json"),
+                appFile = { device, bundleId, _ -> if (device == IPHONE && bundleId == APP) Files.readString(bridge.bridgeFile) else null },
+            )
+            val run = iphone("list", "--app", APP, "--device", IPHONE, usbmuxd = usbmuxd, xcrun = xcrun)
+            // The token was accepted through usbmuxd (a hello came back); a JVM bridge fails the platform check.
+            assertEquals(ExitCode.NOT_REACHABLE, run.exitCode, run.toString())
+            assertEquals("hopi: the bridge reports platform jvm, not ios\n", run.stderr)
+            assertEquals(listOf(bridge.port), usbmuxd.connectedPorts)
+            assertEquals("", run.stdout)
+
+            xcrun.appFile = { _, _, _ -> null }
+            val stopped = iphone("list", "--app", APP, "--device", IPHONE, usbmuxd = usbmuxd, xcrun = xcrun)
+            assertEquals(ExitCode.NOT_REACHABLE, stopped.exitCode)
+            assertEquals(
+                "hopi: app not running or agentBridge = false: no bridge answers for $APP on $IPHONE (USB) " +
+                    "(devicectl could not copy Library/Caches/hopi/bridge.json: ${xcrun.copyError})\n",
+                stopped.stderr,
+            )
+        }
+    }
+
     private companion object {
         const val APP = "com.example.app"
         const val UDID = "90E767A1-5F25-4E8E-B1B2-D1A8F53295FA"
+        const val IPHONE = "00008140-001A2B3C4D5E801E"
         val PROOF = "5e".repeat(32)
         val ADB: Path = Paths.get("/sdk/platform-tools/adb")
     }

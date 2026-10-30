@@ -461,8 +461,8 @@ xcrun simctl spawn booted log stream --style ndjson --predicate 'subsystem == "d
 ```
 
 The CLI reads the full detail (headers, bodies) from the app's device-local bridge
-(`agentBridge = true`; Android devices and emulators over adb, iOS simulators). Build it with
-`./gradlew :hopi-cli:installDist`; the binary is
+(`agentBridge = true`; Android devices and emulators over adb, iOS simulators, iPhones over
+USB). Build it with `./gradlew :hopi-cli:installDist`; the binary is
 `hopi-cli/build/install/hopi-cli/bin/hopi`.
 
 ```bash
@@ -481,6 +481,22 @@ commands are in [Rules](#rules-mock-fail-delay-edit).
 Secrets are redacted on every channel; the `--json` line shapes are specified in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#agent-access).
 
+An iPhone on USB (macOS with Xcode 15 or later) needs no setup of its own: the CLI finds it
+through usbmuxd, Apple's USB multiplexer, copies the app's `bridge.json` off the phone with
+`xcrun devicectl`, and reaches the bridge's port on the phone's loopback through usbmuxd. The app
+listens only on the phone's loopback; the CLI relays to it from a port on the Mac's loopback, as
+adb's forward does. It is used when `--device <udid>` names it, or when no adb device is ready and
+no simulator is booted: plugging one in never changes which target a command finds.
+
+```bash
+hopi devices                                  # the phone: ios <udid> usb <name> (<iOS version>)
+hopi list --app <bundle id> --device <udid> --json
+```
+
+This is tested on the Mac side only, against a stand-in usbmuxd (and its framing against Apple's
+daemon with no phone attached); the phone side waits for a run on hardware, as does an Android
+phone over USB or wireless adb (no code of its own: it is an adb device like an emulator).
+
 ## Desktop viewer
 
 `hopi-desktop` shows a running app's traffic in a window on your Mac: the list and detail side by
@@ -493,10 +509,12 @@ from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java 
 ./gradlew :hopi-desktop:packageDmg   # hopi-desktop/build/compose/binaries/main/dmg/Hopi-1.0.0.dmg
 ```
 
-Pick a device (adb devices and emulators, booted iOS simulators, JVM processes with a bridge),
-enter the app's id (on Android the bridges listening on the device are offered), and connect.
-Only the selected request's headers and bodies are fetched from the app, so a giant body never
-crosses unless you open it. When the app restarts, or adb resets, the viewer reconnects by itself.
+Pick a device (adb devices and emulators, booted iOS simulators, iPhones on USB, JVM processes
+with a bridge), enter the app's id (on Android the bridges listening on the device are offered),
+and connect. Only the selected request's headers and bodies are fetched from the app, so a giant
+body never crosses unless you open it. When the app restarts, or adb resets, the viewer
+reconnects by itself; on an iPhone over USB nothing on the Mac sees the app restart, so press ⌘R
+once it runs.
 
 | Keys | |
 | --- | --- |

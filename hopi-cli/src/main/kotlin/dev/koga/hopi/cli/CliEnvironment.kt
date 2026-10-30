@@ -32,8 +32,10 @@ internal class CliEnvironment(
     val readTimeoutMs: Int = 15_000,
     /** What `--body @-` reads. */
     val stdin: InputStream = InputStream.nullInputStream(),
+    /** usbmuxd's socket, for iPhones on USB. */
+    usbmuxdSocket: Path = HostEnvironment.USBMUXD_SOCKET,
 ) {
-    val host: HostEnvironment = HostEnvironment(processes, env, userHome, isMac, isExecutable, shutdownHooks)
+    val host: HostEnvironment = HostEnvironment(processes, env, userHome, isMac, isExecutable, shutdownHooks, usbmuxdSocket = usbmuxdSocket)
 
     companion object {
         /**

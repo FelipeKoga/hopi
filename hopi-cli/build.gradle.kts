@@ -26,6 +26,8 @@ distributions {
 sourceSets.test {
     // The giant-body fixtures and probes, shared by every module's benchmark.
     kotlin.srcDir(rootProject.layout.projectDirectory.dir("benchmark/fixtures"))
+    // FakeUsbmuxd and FakeXcrun (USB iPhones without a phone), shared with :hopi-connect's tests.
+    kotlin.srcDir(rootProject.layout.projectDirectory.dir("hopi-connect/src/testShared/kotlin"))
     // The adb and simctl output fixtures live with the parsers in :hopi-connect.
     resources.srcDir(rootProject.layout.projectDirectory.dir("hopi-connect/src/test/resources"))
 }

@@ -116,7 +116,14 @@ public class HostEnvironment(
     public val shutdownHooks: ShutdownHooks = RuntimeShutdownHooks,
     /** Long-running subprocesses (the desktop viewer's `adb track-devices`); the CLI starts none. */
     public val streams: StreamStarter = SystemStreamStarter,
-)
+    /** usbmuxd's socket, through which iPhones on USB are listed and reached (macOS with Xcode only). */
+    public val usbmuxdSocket: Path = USBMUXD_SOCKET,
+) {
+    public companion object {
+        /** Where macOS's usbmuxd (launchd starts it on demand) listens. */
+        public val USBMUXD_SOCKET: Path = Paths.get("/var/run/usbmuxd")
+    }
+}
 
 internal fun pathEntries(env: Map<String, String>): List<Path> =
     env["PATH"].orEmpty().split(java.io.File.pathSeparatorChar).filter { it.isNotEmpty() }.mapNotNull {

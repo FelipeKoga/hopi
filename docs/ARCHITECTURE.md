@@ -1827,8 +1827,14 @@ categories (`avc: denied { connectto } … tclass=unix_stream_socket`, the calle
   is written to a temporary file created 0600 and renamed over the old one (the directory is
   0700), and deleted when the bridge is closed or stops accepting (see Threads). Accepted sockets get `SO_NOSIGPIPE`, so a CLI that
   disconnects mid-write cannot kill the app. `hello` reports the bundle identifier.
-- **Physical iOS devices:** no bridge in v1 (no sane host↔app channel without a network listener).
-  The os_log stream works.
+- **iPhone over USB** (D10; the host side is tested, the phone side waits for the owner's
+  hardware): the app's bridge is the simulator's, unchanged, `127.0.0.1` port 0 plus token, with
+  `bridge.json` in `<app data container>/Library/Caches/hopi/` (the same code; that an app on a
+  device binds loopback and writes there is assumed, not yet observed). No network listener is
+  added: the host reaches the device's loopback through usbmuxd, Apple's USB multiplexer
+  (`/var/run/usbmuxd`), whose `Connect` turns its socket into a byte stream to a TCP port on the
+  device. The token is still the first line and still checked by the bridge (see the CLI's Targets).
+  The os_log stream works there too.
 - **JVM:** same as the iOS simulator (`127.0.0.1` port 0 plus token), with `bridge.json` written to
   a directory given by the system property `hopi.bridgeDir` (default
   `<java.io.tmpdir>/hopi/<pid>`, mode 0700, file 0600, the same temporary-file-and-rename
@@ -2009,7 +2015,7 @@ still receives every reply already queued, including a `tail` backlog.
 #### CLI
 
 ```
-hopi devices [--platform android|ios] [--json]  # what can be reached: adb devices, booted simulators
+hopi devices [--platform android|ios] [--json]  # what can be reached: adb devices, booted simulators, USB iPhones
 hopi list   --app <id> [--platform android|ios] [--device <serial|udid>] [--json] [--limit N] [--since ID]
 hopi tail   --app <id> [...] [--since ID] [--json]  # live; NDJSON with --json, one line per event
 hopi get    <id> --app <id> [...] [--json]    # full detail incl. bodies
@@ -2039,7 +2045,7 @@ cURL export, the JSON writer (requests), `prettyPrintJson` and `formatBytes` (`h
 uses its `parseFlatJsonObject` for `bridge.json`), and on kotlinx-serialization-json only for its
 JSON tree parser (replies; no compiler plugin). It parses its own arguments (no CLI library). `./gradlew :hopi-cli:installDist`
 produces a runnable `hopi-cli/build/install/hopi-cli/bin/hopi`. Everything that
-reaches an app (adb and simctl, the targets below, `bridge.json`, the bridge client with its
+reaches an app (adb, simctl, usbmuxd and devicectl, the targets below, `bridge.json`, the bridge client with its
 handshake and proof check) lives in the JVM module `hopi-connect`, shared with the desktop
 viewer; the CLI adds argument parsing, rendering and exit codes on top. Its whole public API is
 `@HopiInternalApi`, kept in `hopi-connect/api/` by `updateKotlinAbi`.
@@ -2075,15 +2081,20 @@ its socket, one request thread blocked on its queue.
 its platform; otherwise the platform with a ready target (adb state `device`, or a booted simulator)
 wins, both is a usage error, neither is "not reachable". Within a platform, exactly one ready
 target is used, or `--device`; several without `--device` is a usage error that lists them, and a
-named device that is `unauthorized` or `offline` is "not reachable". Adb is found at
+named device that is `unauthorized` or `offline` is "not reachable". An iPhone on USB is a target
+only when `--device` names it or nothing else would be: inferred, only when no adb device is
+ready and no simulator is booted; within iOS, only when no simulator is booted. So attaching
+one never changes the target a command found before. Adb is found at
 `$ANDROID_HOME/platform-tools/adb`, `~/Library/Android/sdk/platform-tools/adb`, or `PATH`, and run
-by that absolute path; simctl only as `/usr/bin/xcrun simctl`, never looked up on `PATH`.
+by that absolute path; simctl and devicectl only as `/usr/bin/xcrun`, never looked up on `PATH`.
 Subprocesses are spawned with argument arrays, never through a shell, and `--app` and `--device`
 must match `[A-Za-z0-9_][A-Za-z0-9._:-]*` before they reach one (no value can read as an option or
 a path).
 
 - **Android:** `adb -s <serial> forward tcp:0 localabstract:hopi.<app>`; the port is the digits
-  adb prints. The CLI always removes that forward (`adb -s <serial> forward --remove tcp:<port>`)
+  adb prints. A phone over USB or over wireless debugging (`adb pair`, `adb connect`) is an adb
+  device like an emulator, with this same flow and no code of its own; it has run on emulators
+  only, and a phone waits for the owner's hardware check. The CLI always removes that forward (`adb -s <serial> forward --remove tcp:<port>`)
   when the command ends, and a JVM shutdown hook, registered before the forward is created, removes
   it on SIGINT during `tail` (removal runs once either way). The CLI does not list bridges from
   `/proc/net/unix`: `--app` is required (the desktop viewer's picker does, see Desktop viewer). adb drops every forward of a device whose transport resets
@@ -2104,6 +2115,61 @@ a path).
 - **iOS simulator:** `xcrun simctl list devices booted -j`, then
   `xcrun simctl get_app_container <udid> <bundleId> data`, then
   `<container>/Library/Caches/hopi/bridge.json`.
+- **iPhone over USB** (`Usbmuxd.kt`, `Devicectl.kt`; macOS with Xcode 15 or later). Found:
+  usbmuxd's `ListDevices` on `/var/run/usbmuxd`, plist protocol version 1 (each message a 16-byte
+  little-endian header: length including the header, version 1, type 8 = plist, a tag the reply
+  repeats; then an XML plist, read with DTDs off, so Apple's DOCTYPE URL is never fetched). Each
+  request has a socket of its own, and a reply of another version, type or tag is refused. Its
+  `USB` entries are the iPhones, one per `SerialNumber` (the UDID; 24 hex digits, a 25-character
+  UDID without its dash, get the dash back); a UDID that fails the `--device` pattern is dropped.
+  While an attached one is not named yet, `xcrun devicectl list devices --json-output <file>`
+  names it (`properties.state.name` and `properties.software.osVersionNumber`, the deprecated
+  `hardwareProperties` and `deviceProperties` for older Xcodes; `reality` `simulated` entries left
+  out). A `Targets` keeps the names devicectl gave; a phone devicectl does not list (not trusted
+  yet, say), or a devicectl that fails, only leaves the name out, and the next listing asks again.
+  Read: `xcrun devicectl device copy from --device <udid> --source Library/Caches/hopi/bridge.json
+  --destination <dir>/bridge.json --domain-type appDataContainer --domain-identifier <bundleId>`
+  into a fresh 0700 temporary directory, deleted before `open` returns, or by a shutdown hook when
+  the JVM ends first (SIGINT): the copy holds the token. Neither the deletion nor the read follows
+  a link devicectl may have made; a link in the file's place reads as no file copied. Then the
+  port and token as from a simulator's file. Connected: the endpoint is a relay on
+  `127.0.0.1` port 0 (`UsbmuxRelay`); each connection the client opens there gets a usbmuxd
+  `Connect` of its own (`DeviceID`, `PortNumber` the bridge's port in network byte order), and the
+  relay then copies bytes both ways, passing an end of input on as a half close. usbmuxd's 3
+  (connection refused: nothing listens, so the app is not running) closes the client's connection
+  before a byte, which reads as "app not running or agentBridge = false: no bridge answers for
+  <app> on <udid> (USB)", as an adb forward nothing answers does. A copy devicectl cannot make says
+  the same, with "(devicectl could not copy …: <its first line>)": devicectl's own words tell not
+  installed from not running or bridge off, and they have not been seen yet. When an established
+  connection ends and usbmuxd no longer lists the UDID: "<udid> (USB) is no longer attached
+  (usbmuxd does not list it); the app may still be running: reconnect it and run the command
+  again". Each usbmuxd reply is awaited at most 5 s; no socket, a 2 (no such device) or another
+  code each have their own message. `Listen` is not used. Several iPhones without `--device` is a
+  usage error; `--device` matches a UDID in any case, with or without its dash. With an iPhone
+  attached, a `--device` that names neither a booted simulator nor an attached iPhone is "iOS
+  device <id> not found (available: …)", listing both; with none attached it is the simulators'
+  "booted simulator <id> not found", as before.
+
+  What is verified: the host side, against `FakeUsbmuxd` (a Unix-socket server owned by
+  hopi-connect's tests that answers `ListDevices` and `Connect` and relays to host loopback as if
+  it were the phone's) and a fake devicectl: the framing (the whole request plist within the
+  header's length, replies in pieces, a wrong tag or version), `PortNumber`'s byte order, the
+  errors, two relayed connections at once, a `list` through the relay, links in the copy, `hopi
+  devices`, `--device` and the viewer's picker (`UsbmuxdTest`, `UsbIphoneTargetsTest`,
+  `DeviceFlowTest`, `UsbIphoneViewerTest`). Against Apple's daemon, with no phone attached
+  (2026-10-30, a probe that sends the bytes `Usbmuxd.kt` builds): `ListDevices` got a 237-byte
+  reply of version 1, type 8 and the request's tag, its list `<array/>`, and a `Connect` to a
+  `DeviceID` it does not know got 2, with its tag. devicectl 651.13.5's `device copy from --help`
+  lists the flags above. What waits for the owner's hardware (no iPhone was attached on
+  2026-10-30): two points known from libusbmuxd's sources (Apple documents none of usbmuxd), not
+  observed with a phone: that `SerialNumber` is devicectl's UDID, and that `Connect` reaches a
+  listener on the device's loopback. Assumed: that a physical device's `list devices` JSON has the
+  shape of the simulated entries devicectl 651.13.5 printed, that the app binds loopback and writes
+  `bridge.json` on a device as on a simulator (the same code), and that usbmuxd stops listing a
+  detached phone before, or as, it closes its connections (the "no longer attached" message relies
+  on it; `FakeUsbmuxd` detaches in that order). The check: `hopi devices`, `hopi list --app
+  dev.koga.hopi.sample --device <udid>`, `hopi tail`, `hopi perf status` (each with `--app` and
+  `--device`), and the desktop viewer.
 - **JVM:** `--bridge-file <path>` (implies `--platform jvm`); `--app` is optional and, when given,
   checked like on the other platforms.
 
@@ -2140,7 +2206,9 @@ again would hide what the app chose to show.
 - `devices`: one line per target,
   `{"type":"device","platform":"android"|"ios","id":"…","state":"…","name":"…"|null,"os":"…"|null}`;
   Android's `state` is adb's word (`device` = ready, `unauthorized`, `offline`, …) and `os` is null;
-  a booted simulator has `"state":"booted"` and `os` like `"iOS 18.2"`. No target prints nothing.
+  a booted simulator has `"state":"booted"` and `os` like `"iOS 18.2"`; an iPhone on USB
+  `"state":"usb"`, with `name` and `os` from devicectl, both null when it does not know the
+  device, listed after the simulators. No target prints nothing.
 - `curl` takes no `--json` (its output is one shell command, with any `# warning:`/`# note:` lines first).
   Control characters in the request are shown as `\uXXXX`, after a line
   `# warning: the request contains control characters, shown as \uXXXX escapes; this command does not send them as captured`.
@@ -2182,7 +2250,8 @@ bridge protocol unchanged, through `hopi-connect`: the app needs nothing new.
 - `Viewer`, the connection logic without UI. It lists targets (`discover`): adb devices with, for
   each ready one, the bridges listening there (`Targets.androidBridges`: the `@hopi.<name>`
   entries of `adb exec-out cat /proc/net/unix`, a fixed command; names must pass
-  `TargetIds.APP`), booted simulators, and JVM bridges (`<java.io.tmpdir>/hopi/*/bridge.json`).
+  `TargetIds.APP`), booted simulators, iPhones on USB (`Targets.usbIphones`, named by devicectl),
+  and JVM bridges (`<java.io.tmpdir>/hopi/*/bridge.json`).
   It also holds the one `Target` being viewed (a device plus an app id; optional for a JVM bridge)
   and its `RemoteSession`. Every state change runs on one thread (`hopi-desktop-connect`), so
   callers never block and two connects never overlap.
@@ -2247,6 +2316,16 @@ the worker up to its read timeout.
   picker). Connected, or with the window in the background, no watch runs.
 - The session's own disconnect while connected. One attempt follows at once, which is all an adb
   forward dropped under a running app needs.
+
+A USB iPhone has only the last of these: its `bridge.json` is on the phone, and usbmuxd's
+`Listen` (attach and detach events) is not used. While its app is stopped the status says "App
+stopped: Reconnect (⌘R) once <app> runs on the iPhone", followed by devicectl's reason when its
+copy of `bridge.json` failed ("(devicectl could not copy …: …)"), which tells a stopped app from one
+not installed or a locked phone. Unplugged, the session ends with "<udid>
+(USB) is no longer attached …", and a reconnect while it is away says "<udid> (USB) is not
+attached (usbmuxd does not list it): plug it in, then reconnect": the viewer opens a phone it
+listed with `Targets.openUsbIphone`, which never falls back to the simulators. The picker lists it
+again at the next discovery (Refresh, or any adb event).
 
 The JDWP event comes before the app binds its bridge: the process registers with adbd when it is
 forked, and the bridge binds at start, on the start sequence's own thread, with `agentBridge` (a
@@ -2326,6 +2405,9 @@ idle, with exactly two connections. `ViewerUiTest` composes the window content a
 in-process `JvmAgentBridge`. It connects, streams, selects from the keyboard (only the selected
 body is fetched), exports with ⌘E, clears with Esc and ⌘K, and follows the app stopping and
 starting again in the status bar. It writes screenshots to `build/reports/screenshots/`.
+`UsbIphoneViewerTest` lists a USB iPhone in the picker with devicectl's name and connects to it
+through `FakeUsbmuxd`, then shows its app stopped with the Reconnect text and devicectl's reason,
+and the phone unplugged.
 
 `DeviceViewerUiTest` runs the same window content against a real target, only with
 `-Phopi.desktop.device=android` (one emulator, the sample's real debug build installed with

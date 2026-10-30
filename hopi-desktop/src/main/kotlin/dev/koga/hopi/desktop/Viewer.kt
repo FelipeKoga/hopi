@@ -7,6 +7,7 @@ import dev.koga.hopi.connect.Platform
 import dev.koga.hopi.connect.RemoteSession
 import dev.koga.hopi.connect.RemoteState
 import dev.koga.hopi.connect.Targets
+import dev.koga.hopi.connect.usageError
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -60,7 +61,8 @@ internal sealed interface ViewerStatus {
  * the app restarted), a watch on the bridge file's directory while waiting for the app (iOS
  * simulator and JVM: a restarted app writes a new `bridge.json`), and the session's own
  * disconnect (one attempt at once, which is all an adb forward dropped under a running app
- * needs). The JDK's watch service polls on macOS ([PathWatcher]), so both watches run only while
+ * needs). A USB iPhone has none of these but the last: its `bridge.json` is on the phone, so
+ * while it waits only Reconnect tries again. The JDK's watch service polls on macOS ([PathWatcher]), so both watches run only while
  * there is something to wait for: the bridge file's while [ViewerStatus.Waiting], the JVM bridge
  * root's (new JVM processes in the picker) while the window has focus and nothing is connected.
  * Connected, or in the background, the viewer runs no watch at all. Android's process event comes before
@@ -284,6 +286,8 @@ internal class Viewer(
         return when (device) {
             is AndroidDevice -> targets.open(Platform.Android, target.app, device.serial, bridgeFile = null)
             is SimulatorDevice -> targets.open(Platform.Ios, target.app, device.udid, bridgeFile = null)
+            // Never the simulators' path: an unplugged phone says so instead of "booted simulator … not found".
+            is UsbIphoneDevice -> targets.openUsbIphone(target.app ?: throw usageError("enter the app's bundle id"), device.udid)
             is JvmBridge -> targets.open(Platform.Jvm, target.app, device = null, bridgeFile = device.file)
         }
     }
@@ -345,6 +349,9 @@ internal class Viewer(
                     null
                 }
             }
+            // Its bridge.json is on the phone and usbmuxd's attach events are not followed: no event
+            // to wait for, so Reconnect tries again (the status says so).
+            is UsbIphoneDevice -> bridgeFile = null
             is JvmBridge -> bridgeFile = device.file
         }
     }

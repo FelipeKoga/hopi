@@ -341,10 +341,22 @@ internal fun statusText(status: ViewerStatus): String = when (status) {
     is ViewerStatus.Connected -> "Connected to ${status.app} (${status.platform}) on ${status.target.device.label}"
     is ViewerStatus.Waiting -> when (status.kind) {
         WaitKind.Reconnecting -> "Reconnecting to ${status.target.label}…"
-        WaitKind.AppStopped -> "App stopped: reconnects when ${status.target.app ?: "the process"} starts"
+        // Nothing on the host tells when an app on a USB iPhone starts (its bridge.json is on the phone).
+        // devicectl's reason, when its copy failed, tells a stopped app from a missing one or a locked phone.
+        WaitKind.AppStopped -> if (status.target.device is UsbIphoneDevice) {
+            "App stopped: Reconnect (⌘R) once ${status.target.app} runs on the iPhone" + devicectlReason(status.message)
+        } else {
+            "App stopped: reconnects when ${status.target.app ?: "the process"} starts"
+        }
         WaitKind.DeviceOffline -> "Device offline: reconnects when adb lists it (${status.message})"
         WaitKind.Failed -> "Not connected: ${status.message}"
     }
+}
+
+/** The ` (devicectl could not copy …: <its reason>)` that ends `Targets.openUsbIphone`'s message when devicectl failed, or "". */
+private fun devicectlReason(message: String): String {
+    val at = message.indexOf(" (devicectl could not copy ")
+    return if (at < 0) "" else message.substring(at)
 }
 
 /** Null for JVM bridges, whose label says JVM already. */

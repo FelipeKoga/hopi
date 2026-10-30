@@ -2827,6 +2827,44 @@ evidence in the session's scratchpad and `build/evidence/runtime-split/stage11/`
   renamed Python scripts compile (`py_compile`), and the readers ran on recorded data (above).
 - **Base check**: green (4 min 32 s).
 
+Stage 12 (2026-10-30, the stage's edits on `3ba2865`; no iPhone or Android phone attached;
+evidence in the session's scratchpad, `probe/usbmux_probe-output.txt` and
+`devicectl/copy-from-help.txt`):
+
+- **First ([run])**: item 1 in part. `xcrun devicectl list devices` (devicectl 651.13.5) listed this
+  Mac's six simulators only, so the parser follows their JSON (version 5) and a physical entry's
+  shape is assumed; `device copy from --help` lists the flags the code passes (`--device`,
+  `--source`, `--destination`, `--domain-type appDataContainer`, `--domain-identifier`). Item 2
+  not run: it needs a device. Item 3 in part, with no phone: a probe that sends the bytes
+  `Usbmuxd.kt` builds to `/var/run/usbmuxd` got, for `ListDevices`, a 237-byte reply of version 1,
+  type 8 and the request's tag (7), its list `<array/>`; for a `Connect` to a `DeviceID` it does
+  not know (987654), `Number` 2 with its tag (9); nothing followed either reply. What a phone
+  would show (`SerialNumber` against devicectl's UDID, `Connect` to a listener on the device's
+  loopback, the order of a detach) is in ARCHITECTURE's "iPhone over USB", as known from
+  libusbmuxd's sources or assumed.
+- **Gates**: `:hopi-connect:test` 92, `:hopi-cli:test` 67 and `:hopi-desktop:test` 40, green in
+  one run (the stage's first run had 86, 67 and 40; the review's fixes added six tests).
+  `hopi-connect`'s ABI dump was regenerated (`updateKotlinAbi`): `UsbIphone`,
+  `Targets.usbIphones` and `openUsbIphone`, `HostEnvironment.usbmuxdSocket`.
+- **Review**: a read-only review found 11 problems, all fixed before the commit: this entry and
+  section 10's row were missing; the viewer's stopped-app status hid devicectl's reason (now
+  appended); a reply's tag and version were not checked (now refused unless they match); a phone
+  devicectl did not name at first stayed unnamed for the viewer's lifetime (now only names are
+  kept); the copy's cleanup followed links and the read did too (now neither does), and a SIGINT
+  during the copy left it, token and all, on disk (now a shutdown hook deletes it); a 25-character
+  UDID written without its dash would have reached devicectl that way (the dash is put back); the
+  `--device` not-found text with a phone attached was neither documented nor tested; the fake's
+  framing checks were weaker than they looked (now the whole request plist, Apple's `<array/>`,
+  replies in pieces, a wrong tag or version); the docs called usbmuxd's protocol documented
+  behaviour, README said nothing listens on the Mac, and the detach order was missing from what
+  waits for hardware; the USB paths' missing-Xcode message named simulators.
+- **Not run** (no hardware attached on 2026-10-30): every hardware check of the stage's Verify. An
+  iPhone over USB with the Debug app: `hopi devices`, `hopi list --app dev.koga.hopi.sample
+  --device <udid>`, `hopi tail` and `hopi perf status` (each with `--app` and `--device`), and the
+  desktop viewer. An Android phone over USB and over wireless adb (`adb pair`, `adb connect`): the
+  same commands; there is no code of its own to check, it is an adb device like the emulator.
+- **Base check**: green.
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2896,7 +2934,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 9. Network runtime and release guards | 9a done: `hopi-network` (android, iosArm64, iosSimulatorArm64; empty ABI dumps) holds `hopi-android`'s capture with its packages, and core's URLSession library and the iOS network tool (`dev.koga.hopi.network.internal`); core keeps the rule hit counter as a C library of its own (`hopi_hits`); `HopiAndroid` and `HopiUrlSession` deleted (9.4), the sample reads `HopiRuntimes`' network status; `hopi-android`, `hopi-android-noop`, `hopi-urlsession` and `hopi-urlsession-noop` deleted; the plugin's `RUNTIME` is `hopi-network`, with no noop. 9b done: the plugin's release guard (`hopiReleaseGuard<Variant>`, before any dex task) and the iOS release guard (`gradle/ios-release-guard.gradle`, before every Release link), `network { }` with generation split from instrumentation (a debuggable variant with every tool off still gets core and a generated configuration with no tool), `verifyReleaseHasNoRuntime` and the iOS check's new families, the giant-body benchmark on Android's host tests (E1 R7) and the R8 pass-through; [run] results in section 9 | `472fcd6` (9a), (this commit) |
 | 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b done: core's rules answer every platform mock and edit with `Cache-Control: no-store` (`ResponseEdits.noStore`; R5), iOS's dead Ktor Darwin cover and `KTOR` among its platform sources removed, R3 and R5 regression tests, `mock-302` in the sample's self-test; [run] results in section 9, a reduced set | `cad60c3` (10a), (this commit) |
 | 11. Remove the remaining twin machinery | done: the root build's parity check (`NoopParityCheck` with its `inline`/`const` rule, `noopTwins`, `checkNoopParity`) and the plugin's `selectTwins` and `TWINS` deleted, `:checkNoopParity` out of README's and section 7's base check, the functional test `publishedCoordinatesAreSwappedPerVariant` renamed `publishedCoordinatesArePerVariant`; the live benchmark scripts' noop arm is the `nohopi` arm (install suffix `.nohopi`), and the readers also read the old labels; the tracked `__pycache__` files deleted and `__pycache__/` ignored; the sample's texts; O7 as applied (`checkKotlinAbi` in six modules); the grep gate from 453 to 235 hits, each under a dated history note or a false positive; [run] results in section 9, two of the stage's three [run] items not run | `09f0dae` |
-| 12. Physical devices | | |
+| 12. Physical devices | done: `hopi-connect` reaches an iPhone on USB through a usbmuxd client (`Usbmuxd.kt`: `ListDevices` and `Connect`, plist protocol version 1, a host-loopback relay with a `Connect` per connection) and a devicectl reader (`Devicectl.kt`: `list devices` for names, `device copy from` for `bridge.json`, in a 0700 temporary directory deleted on return or by a shutdown hook); `Targets` lists USB iPhones (`usbIphones`) and opens one that `--device` names, or the only one when no adb device is ready and no simulator is booted (`openIos`; the viewer's `openUsbIphone`), and names an unplugged phone as the reason a connection ended; `hopi devices` lists them (`"state":"usb"`), the viewer's picker too, with a Reconnect status; tests against `FakeUsbmuxd` and a fake devicectl in all three modules; Android phones need no code (adb); [run] results in section 9, every hardware check not run (no hardware attached) | (this commit) |
 | 13. Documentation pass | | |
 | 14. Final verification and report | | |
 | Later (O8). Plugin on KMP modules | deferred | |
@@ -3066,6 +3104,22 @@ Stage 10 leaves for later stages:
   removed the iOS Ktor Darwin cover).
 - A `no-store` answer means an app cannot exercise its own HTTP cache through a rule on the
   platform sources; an exemption for a rule's own `Cache-Control` is the owner's decision.
+
+Stage 12 leaves for later stages:
+
+- The hardware checks of section 9's "Not run" bullet, for the owner: they settle what
+  ARCHITECTURE's "iPhone over USB" lists as known from libusbmuxd's sources or assumed. Run them
+  before stage 14's report.
+- usbmuxd's `Listen` is not used, so the viewer sees neither an iPhone attached or detached nor its
+  app starting: Refresh and Reconnect (⌘R) do it by hand.
+- While an attached iPhone is unnamed (not trusted yet, or a devicectl that fails), every discovery
+  runs devicectl again, on the viewer's worker thread (each run capped at 30 s).
+- "<udid> (USB) is no longer attached" relies on usbmuxd no longer listing a detached phone by the
+  time its connections close. If a phone shows otherwise, ask `ListDevices` once more, after a
+  short wait, before answering that the app closed the connection.
+- With an iPhone attached, a `--device` that names nothing and no `--platform` still reads "device
+  <id> is neither listed by adb devices nor a booted simulator", byte for byte as before; naming
+  USB iPhones there is a wording change for the owner.
 ---
 
 ## Appendix A. Inventory already found (2026-10-27, narrow greps; re-grep in E1.1)
