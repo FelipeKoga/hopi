@@ -57,7 +57,9 @@ Non-goals (v1):
 
 - Leak detection, allocation tracking, heap dumps, method tracing, energy, network throughput,
   disk I/O, startup time. Each would be its own tool under the roadmap rule.
-- Physical iOS devices over the bridge (none in v1); the os_log lines work there.
+- Physical iOS devices over the bridge (none in v1); the os_log lines work there. (Since the
+  runtime-split plan's stage 12, 2026-10-30, the CLI and the desktop viewer reach an iPhone over
+  USB, `hopi perf` included; tested against a stand-in usbmuxd only, with no phone attached.)
 - Hang detection on the JVM target (no main looper; the JVM gets CPU and memory only, for tests
   and, since the runtime-split plan's stage 10, for JVM apps through `hopi-start`'s `Hopi.start`).
 - Symbolicating native (C/C++) frames on Android; release-build symbolication on iOS.
@@ -178,6 +180,8 @@ process that does not call `Hopi.start` registers no runtime, so there `HopiPerf
 the perf tool's constructor arguments; off by default):
 
 ```kotlin
+import dev.koga.hopi.gradle.HopiMonitor   // the plugin's type, not a default import of a build script
+
 hopi {
     perf {
         enabled = false          // true: hopi-perf in debuggable variants only, its tool in the tool list

@@ -125,6 +125,8 @@ additive fields: `reqHeld`/`resHeld` on summaries of cut bodies, `through` on th
 so the app pays no extra cost.
 - **Connection (built).** The CLI's target code in the shared JVM module `hopi-connect`:
   `adb forward` + proof check on Android, `bridge.json` + token on the iOS simulator and the JVM,
+  and on an iPhone over USB `bridge.json` copied with `devicectl` + a relay through usbmuxd (built
+  2026-10-30, the runtime-split plan's stage 12; architecture doc, "iPhone over USB"),
   a device and app picker (Android lists the bridges listening on the device), auto-reconnect
   when the app restarts or adb resets. Reconnects are event-driven: `adb track-devices`, `adb
   track-jdwp` and a watch on the `bridge.json` directory, never a polling loop (the JDK's watch
@@ -134,7 +136,9 @@ so the app pays no extra cost.
   before its bridge binds.
 - **UI (built).** `hopi-ui`'s list/detail composables on the JVM target (`HopiPanes`),
   list and detail side by side, keyboard navigation (↓/↑, Enter, Esc, ⌘F, ⌘K, ⌘E, ⌘R), a status
-  bar. Later: multiple windows/tabs per device, larger bodies shown more comfortably.
+  bar, the Rules (⌘L) and Perf (⌘P) panels; a shadcn/ui-style design system, light or dark with the system,
+  with color for status only (the owner's decision of 2026-10-28). Later: multiple windows/tabs per
+  device, larger bodies shown more comfortably.
 - **Desktop extras.** Built: export a session as HAR 1.2 and NDJSON (bodies fetched on demand,
   bounded), copy as cURL. Later: open a body in an external editor, diff two transactions, filter
   by app when several are connected.
@@ -157,9 +161,13 @@ so the app pays no extra cost.
   line below the fold of the Diagnostics tab; it now counts them in `<evidence>/devserver.ndjson`
   and reads the line from logcat. Its adb reset accepts a server that another adb client started
   first. 18 of 18 pass with figures.
-- Open questions: physical iOS devices (no bridge in v1). (Whether the in-app screen becomes
-  optional is settled: it was removed in the runtime-split plan's stage 5, and the desktop viewer
-  is the main viewer.)
+- Open: an iPhone over USB is tested against a stand-in usbmuxd only (and the framing against
+  Apple's daemon with no phone attached): the run on a phone, which also settles what the
+  architecture doc lists as assumed there, is the owner's, as is an Android phone over USB and
+  wireless adb. usbmuxd's attach and detach events (`Listen`) are not used, so the viewer sees
+  neither a phone plugged in nor its app starting: Refresh and Reconnect (⌘R) do it by hand.
+  (Whether the in-app screen becomes optional is settled: it was removed on 2026-10-28, and the
+  desktop viewer and the CLI are the surfaces.)
 
 ### Automatic platform capture (every request, third-party SDKs included)
 - **iOS, URLSession (built).** `hopi-network` (since the runtime-split plan's stage 9),
@@ -271,8 +279,20 @@ so the app pays no extra cost.
     refuses br, zstd and stacked codings; a Ktor client without `ContentEncoding` whose request
     names its own `Accept-Encoding` records raw bytes under `ktor` (on Android and the JVM; on iOS
     URLSession decodes, stage 10's R3), and those are still copied as held.
+  - Every mock and response edit on OkHttp and `HttpURLConnection`, and every mock on URLSession,
+    carries `Cache-Control: no-store` (since 2026-10-29), so an app cannot exercise its own HTTP
+    cache through such a rule; an exemption for a rule's own `Cache-Control` is the owner's
+    decision.
   - Later: live breakpoints (pause and edit a request in flight), matching on the request body,
     stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
+
+### Gradle plugin on KMP modules
+Explore (the runtime-split plan's O8, deferred). Apply `dev.koga.hopi` to a KMP shared module too,
+so that it adds `hopi-start` and the runtimes to the iOS Debug framework, exports `hopi-api` and
+applies the iOS release guard itself, in place of the `hopi.enabled` block and the copied guard
+script the README asks for. The choice could then come from Xcode's `CONFIGURATION` during
+`embedAndSignAppleFrameworkForXcode` instead of a free Gradle property; CocoaPods' configuration
+property needs a mapping of its own.
 
 ### Replay (no priority)
 Backlog, no priority. Re-sending a recorded request (optionally edited) through the app's own
@@ -293,4 +313,3 @@ URLSession, and their tests) exists in git commit `a5d160b`; `docs/design/rules.
 - Console / log capture (app logs alongside HTTP).
 - WebSocket and SSE inspection for Ktor.
 - App info: build, device, environment, feature flags.
-- Physical iOS device support for the CLI.

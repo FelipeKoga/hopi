@@ -6,10 +6,11 @@ struct IOSApp: App {
     init() {
         // One call, first thing: every URLSession request of the process is recorded from here
         // on, the app's own and those of SDKs it does not own, and the performance monitors are
-        // registered for the bridge (`hopi perf start`, the desktop viewer's Perf panel), none
-        // started (each costs nothing until one is; `-hopiPerf frames,hangs` starts monitors at
-        // launch). HOPI is set only where the framework has Hopi: the Debug configuration, unless
-        // built with HOPI_ENABLED=false (project.yml). A Release framework has no Hopi to call.
+        // registered for the bridge (`hopi perf start`, the desktop viewer's Perf panel) and for
+        // HopiPerf, the code API, none started (each costs nothing until one is;
+        // `-hopiPerf frames,hangs` starts monitors at launch). HOPI is set only where the
+        // framework has Hopi: the Debug configuration, unless built with HOPI_ENABLED=false
+        // (project.yml). A Release framework has no Hopi to call.
         #if HOPI
         Hopi.shared.start { config in
             // The bridge and the caps: Ktor's Darwin requests are recorded by URLSession capture

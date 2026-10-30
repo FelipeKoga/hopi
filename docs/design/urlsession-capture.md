@@ -385,18 +385,18 @@ runtime; a rule's hit counter is core's own small C library, `hopi_hits` (bindin
 | `hopi-urlsession` | android, jvm, iosArm64, iosSimulatorArm64 | Public API (`HopiUrlSession`, `HopiUrlSessionConfig`), depends on `hopi-core`. iOS calls `UrlSessionCapture`; Android and JVM do nothing (`start()` returns at once, `isStarted` stays false), so `commonMain` code can call it. ABI-validated. |
 | `hopi-urlsession-noop` | same | Same API, does nothing, depends on nothing. ABI-validated, added to `:checkNoopParity`. |
 
-**Since the runtime-split plan's stage 6 (2026-10-28).** The start moved to `hopi-start`
-(iosArm64 and iosSimulatorArm64; no noop twin, linked and exported by Debug frameworks only):
-`Hopi.start` runs core's start sequence with the network tool `NetworkTool`, which sits in
-`hopi-core`'s iosMain beside `UrlSessionCapture` and calls its `start`, and with perf's tool. The
-tool is public (`@HopiInternalApi`) because `hopi-start` names it; it is not in `hopi-urlsession`,
-whose ABI dump has no filter and is compared with a noop that holds only `HopiUrlSession` and
-`HopiUrlSessionConfig`, and which the sample still exports. `HopiUrlSession` stays until stage 9,
-which is to move the library, `UrlSessionCapture`, `UrlSessionRules` and the tool into
-`hopi-network`, after splitting off the native hit counter that core's rule engine uses (it stays
-in core). The parity reason below for keeping the library in core goes with the twins. The DCE
-claim below is out of date: `HitCounter.ios.kt` also refers to the library, and the test it names
-was never built.
+**From the runtime-split plan's stage 6 to its stage 9 (2026-10-28 and 29).** The start moved to
+`hopi-start` (iosArm64 and iosSimulatorArm64; no noop twin, linked and exported by Debug
+frameworks only): `Hopi.start` runs core's start sequence with the network tool `NetworkTool`,
+which then sat in `hopi-core`'s iosMain beside `UrlSessionCapture` and called its `start`, and with
+perf's tool. The tool was public (`@HopiInternalApi`) because `hopi-start` names it, and not in
+`hopi-urlsession`, whose ABI dump had no filter and was compared with a noop that held only
+`HopiUrlSession` and `HopiUrlSessionConfig`, and which the sample still exported then.
+`HopiUrlSession` stayed until stage 9, which moved the library, `UrlSessionCapture`,
+`UrlSessionRules` and the tool into `hopi-network` (above), after splitting off the native hit
+counter that core's rule engine uses (it stays in core). The parity reason below for keeping the
+library in core went with the twins. The DCE claim below is out of date: `HitCounter.ios.kt` also
+referred to the library, and the test it names was never built.
 
 The native code lives in `hopi-core` because a cinterop binding cannot be annotated or filtered
 the same way on both sides of a parity pair; `hopi-core` is not parity-checked and already carries

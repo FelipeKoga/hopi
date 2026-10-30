@@ -95,6 +95,8 @@ by `hopi-core/build.gradle.kts`) moves into `hopi-network` is evaluation item E2
 Android, the application module:
 
 ```kotlin
+import dev.koga.hopi.gradle.HopiMonitor   // for autoStart below; not a default import (E3.3, added in stage 13)
+
 plugins {
     id("com.android.application")
     id("dev.koga.hopi") version "0.1.0"
@@ -2935,7 +2937,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b done: core's rules answer every platform mock and edit with `Cache-Control: no-store` (`ResponseEdits.noStore`; R5), iOS's dead Ktor Darwin cover and `KTOR` among its platform sources removed, R3 and R5 regression tests, `mock-302` in the sample's self-test; [run] results in section 9, a reduced set | `cad60c3` (10a), (this commit) |
 | 11. Remove the remaining twin machinery | done: the root build's parity check (`NoopParityCheck` with its `inline`/`const` rule, `noopTwins`, `checkNoopParity`) and the plugin's `selectTwins` and `TWINS` deleted, `:checkNoopParity` out of README's and section 7's base check, the functional test `publishedCoordinatesAreSwappedPerVariant` renamed `publishedCoordinatesArePerVariant`; the live benchmark scripts' noop arm is the `nohopi` arm (install suffix `.nohopi`), and the readers also read the old labels; the tracked `__pycache__` files deleted and `__pycache__/` ignored; the sample's texts; O7 as applied (`checkKotlinAbi` in six modules); the grep gate from 453 to 235 hits, each under a dated history note or a false positive; [run] results in section 9, two of the stage's three [run] items not run | `09f0dae` |
 | 12. Physical devices | done: `hopi-connect` reaches an iPhone on USB through a usbmuxd client (`Usbmuxd.kt`: `ListDevices` and `Connect`, plist protocol version 1, a host-loopback relay with a `Connect` per connection) and a devicectl reader (`Devicectl.kt`: `list devices` for names, `device copy from` for `bridge.json`, in a 0700 temporary directory deleted on return or by a shutdown hook); `Targets` lists USB iPhones (`usbIphones`) and opens one that `--device` names, or the only one when no adb device is ready and no simulator is booted (`openIos`; the viewer's `openUsbIphone`), and names an unplugged phone as the reason a connection ended; `hopi devices` lists them (`"state":"usb"`), the viewer's picker too, with a Reconnect status; tests against `FakeUsbmuxd` and a fake devicectl in all three modules; Android phones need no code (adb); [run] results in section 9, every hardware check not run (no hardware attached) | (this commit) |
-| 13. Documentation pass | | |
+| 13. Documentation pass | done: README rewritten around the tools and the install paths (Android: the plugin alone; iOS: `hopi-api`, `hopi-start` under `hopi.enabled` with the Xcode build phase, `#if HOPI` and the iOS release guard; JVM: `hopi-ktor` and `Hopi.start`), with "The Ktor plugin", "What reaches a release build" (3.6.1; E2 correction 4, the exported classes named without a count; E2.3's static and dynamic results; Debug builds handed to testers) and a dated migration summary for earlier 0.1.0 builds in place of the stage 9 to 11 bullets; E3.3's `HopiMonitor` import in README, perf-monitors.md and 3.2; the performance rows split into current ones and dated history (R25), the release APK row at stage 10's 32 classes (stage 14 measures it again); the desktop viewer's look; ARCHITECTURE's Migration note gone (A1), the Modules table without its stage column, principle 1 without stage references, and stale passages fixed (the idle-cost row, the summary log's switch, the JVM bridge, the Android socket name, ⌘P, the Ktor recorder's budget dated); ROADMAP: USB iPhones, the viewer's look, O8 as a backlog item, the `no-store` exemption as an open rules item; urlsession-capture.md's stage 6 note in the past tense; `iOSApp.swift`'s comment names `HopiPerf` (stage 8's note), the stage's one edit outside Markdown; rule 8's gate from 235 to 223 hits, each under a dated history note or a false positive (`inputWindows`), the named-term gates likewise; 18 anchor links resolve | (this commit) |
 | 14. Final verification and report | | |
 | Later (O8). Plugin on KMP modules | deferred | |
 
@@ -3052,7 +3054,7 @@ Stage 8 leaves for later stages:
   `unattached`, which `PerfClientTest` pins on the host; the desktop's hint was not looked at on a
   device. E5 X3's `autoStart(Hangs)` variant was not run.
 - `sample/iosApp/iosApp/iOSApp.swift`'s comment still says the monitors are "registered for the
-  bridge" without naming `HopiPerf` (stage 13).
+  bridge" without naming `HopiPerf` (stage 13). Done in stage 13.
 
 Stage 9 leaves for later stages:
 
