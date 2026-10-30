@@ -8,8 +8,8 @@ explored and designed before it is built.
 
 Each tool is its own runtime module, **off by default**, and opt-in individually. The API an app
 calls lives in the optional `hopi-api`, which does nothing alone; the runtime is linked into debug
-builds only; the Gradle plugin's DSL turns the tool on. (The noop twins this replaces go stage by
-stage: `docs/design/api-runtime-split-plan.md`.)
+builds only; the Gradle plugin's DSL turns the tool on. (This replaced the noop twins, removed by
+2026-10-30: `docs/design/api-runtime-split-plan.md`.)
 Its cost when off is zero, its cost when on is stated in its design doc and measured on the sample
 app before it ships. Prefer platform-provided signals the OS already computes over sampling loops
 that wake threads. Anything that has to sample states its interval and its overhead. This is the
@@ -32,7 +32,7 @@ both platforms vs the platform accessibility APIs (`AccessibilityNodeInfo`, UIAc
 Design: `docs/design/perf-monitors.md` (`hopi-perf`, the runtime behind `hopi-api`'s `HopiPerf`
 since the runtime-split plan's stage 8; each monitor off by default, its cost stated per monitor).
 Built in four stages: the core model, bridge `perf.*`, log lines,
-`HopiPerf` API and parity (a noop twin until stage 8), Gradle `perf { }` and the release checks; the Android monitors
+`HopiPerf` API, Gradle `perf { }` and the release checks; the Android monitors
 (FrameMetrics, the Looper printer with an input bracket or a heartbeat, one sampler); the iOS
 monitors (run-loop observers and stack capture in C, stalls, display-link cadence on request,
 `task_info` CPU and footprint, memory warnings); the surfaces (CLI `hopi perf …` and `hopi hangs`,
@@ -42,7 +42,7 @@ bench with `benchmark/perf/`. Verified on the Android emulator (28 of 28 checks:
 including one inside a Compose `onClick`, a dialog, CPU, heaps, trim levels) and on the iOS
 simulator (21 of 21 since stage 5, which fixed a leased hang watchdog that missed hangs, CPU's
 first sample after memory, a tail that lost a hang's end, the Perf tab formatting every stack, the
-spin lock, rings allocated while off, and the iOS 300 ms reading; design, "As built", stage 5). Measured: off costs nothing (identical to the noop build, 0 CPU and 0 wakes
+spin lock, rings allocated while off, and the iOS 300 ms reading; design, "As built", stage 5). Measured: off costs nothing (identical to the noop build of 2026-10-25, 0 CPU and 0 wakes
 idle); the printer costs +6.2 to +6.5 µs per main-thread message and +29 µs per `Dispatchers.Main`
 resume (its 3 µs gate is not met; it stays the default, the heartbeat's alternative misses hangs
 near the threshold and wakes each of its two threads 8 times a second, 16 in all, since its
@@ -162,7 +162,7 @@ so the app pays no extra cost.
   is the main viewer.)
 
 ### Automatic platform capture (every request, third-party SDKs included)
-- **iOS, URLSession (built).** `hopi-network` (since the runtime-split plan's stage 9; no noop),
+- **iOS, URLSession (built).** `hopi-network` (since the runtime-split plan's stage 9),
   started by `hopi-start`'s `Hopi.start { }`: records every URLSession request of the process,
   observe only, with no per-client setup (architecture doc, "URLSession capture"; design in
   `docs/design/urlsession-capture.md`). Ktor's Darwin engine is one of its URLSession clients, one
@@ -175,8 +175,8 @@ so the app pays no extra cost.
   and a per-request A/B measured on the simulator only. Open: a physical device run, background
   sessions beyond metadata, WebSocket tasks.
 - **Android, OkHttp and `HttpURLConnection` (built).** The `dev.koga.hopi` Gradle plugin
-  (`gradle-plugin/`) and `hopi-network` (since the runtime-split plan's stage 9; no noop, and the
-  plugin's release guard fails a release variant that resolves a runtime): one plugin line records
+  (`gradle-plugin/`) and `hopi-network` (since the runtime-split plan's stage 9; the plugin's
+  release guard fails a release variant that resolves a runtime): one plugin line records
   every OkHttp call and every `HttpURLConnection` of the app and its dependencies, observe only,
   debuggable variants only (architecture doc, "Android capture"; design and measurements in
   `docs/design/android-capture.md`).
@@ -286,8 +286,8 @@ URLSession, and their tests) exists in git commit `a5d160b`; `docs/design/rules.
   on a schedule, never as a side effect of another action.
 - Through the app's own client or session only, so its interceptors, TLS settings, pinning, proxy,
   cookies and challenge delegate apply; Hopi never opens a connection of its own.
-- Debug only: absent from release builds and from every noop twin, checked automatically like the
-  rest of Hopi, with zero cost on every request while no replay runs.
+- Debug only: absent from release builds, checked automatically like the rest of Hopi, with zero
+  cost on every request while no replay runs.
 
 ### Later candidates (from DebugSwift's feature set)
 - Console / log capture (app logs alongside HTTP).

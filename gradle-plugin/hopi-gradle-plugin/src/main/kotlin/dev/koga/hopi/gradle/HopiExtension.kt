@@ -19,13 +19,6 @@ public abstract class HopiExtension {
      */
     public abstract val enabled: Property<Boolean>
 
-    /**
-     * Does nothing since stage 10 of the runtime-split plan, which left no twin: `hopi-ktor` is the
-     * thin Ktor plugin in every build, with no core, and `HopiRules` and `HopiPerf` are in
-     * `hopi-api`, which every variant gets. Accepted, on or off, until stage 11 removes it.
-     */
-    public abstract val selectTwins: Property<Boolean>
-
     public abstract val maxEntries: Property<Int>
     public abstract val maxTotalBytes: Property<Long>
     public abstract val maxBodyBytes: Property<Long>
@@ -74,7 +67,6 @@ public abstract class HopiExtension {
 
     internal fun applyDefaults() {
         enabled.convention(true)
-        selectTwins.convention(true)
         maxEntries.convention(500)
         maxTotalBytes.convention(16L * 1024 * 1024)
         maxBodyBytes.convention(256L * 1024)

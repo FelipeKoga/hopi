@@ -6,7 +6,7 @@ For every run of the real build (`hopi-swift`, `hopi-ktor`, `hopi-sdk`) it match
 exactly one record per request, nothing re-sent, every record `source = "urlsession"`. Per
 scenario of the app's own log it checks method, URL, status or error, headers and bodies (captured
 bytes against the bytes the app read, or the dev server's body for a truncated one). It compares
-the bytes each scenario read on the real and the noop build (`noop-*`), the `tail` stream against
+the bytes each scenario read on the real and the nohopi build (`nohopi-*`), the `tail` stream against
 `list`, and Hopi's os_log lines against the records.
 
 usage: check.py <run dir>
@@ -200,20 +200,20 @@ def main():
           and sum(1 for r in sdk if header(r["request"]["headers"], "User-Agent") == "ktor-client") == 1,
           f"{dict(got)}")
 
-    # Bytes the app read: identical on the real and the noop build.
+    # Bytes the app read: identical on the real and the nohopi build.
     for engine, prefix in (("swift", "HopiVerify: "), ("ktor", "HopiSample: ")):
         real = app_lines(os.path.join(run, f"hopi-{engine}-app.log"), prefix)
-        noop = app_lines(os.path.join(run, f"noop-{engine}-app.log"), prefix)
+        nohopi = app_lines(os.path.join(run, f"nohopi-{engine}-app.log"), prefix)
         fields = ("status", "bytes", "sha256", "error")
-        differ = [n for n in real if n not in noop or any(real[n].get(f) != noop[n].get(f) for f in fields)]
-        check(f"{engine}: bytes read identical on real and noop builds (SHA-256 per scenario)",
-              not differ and set(real) == set(noop) and len(real) > 0,
+        differ = [n for n in real if n not in nohopi or any(real[n].get(f) != nohopi[n].get(f) for f in fields)]
+        check(f"{engine}: bytes read identical on real and nohopi builds (SHA-256 per scenario)",
+              not differ and set(real) == set(nohopi) and len(real) > 0,
               f"{len(real)} scenarios, differing: {differ}")
         # Nothing re-sent: the server saw the same requests from both builds.
         r_srv = Counter(map(key_of_server, ndjson(os.path.join(run, f"hopi-{engine}-server.ndjson"))))
-        n_srv = Counter(map(key_of_server, ndjson(os.path.join(run, f"noop-{engine}-server.ndjson"))))
-        check(f"{engine}: the server saw the same requests from the real and the noop build",
-              r_srv == n_srv, f"real-only {dict(r_srv - n_srv)}, noop-only {dict(n_srv - r_srv)}")
+        n_srv = Counter(map(key_of_server, ndjson(os.path.join(run, f"nohopi-{engine}-server.ndjson"))))
+        check(f"{engine}: the server saw the same requests from the real and the nohopi build",
+              r_srv == n_srv, f"real-only {dict(r_srv - n_srv)}, nohopi-only {dict(n_srv - r_srv)}")
 
     # The NDJSON log line: one terminal summary per record, carrying the source.
     for label, records in (("hopi-swift", swift), ("hopi-ktor", ktor)):

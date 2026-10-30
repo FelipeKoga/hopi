@@ -18,11 +18,11 @@ import kotlinx.coroutines.CancellationException
 
 /**
  * The Ktor (OkHttp engine) half of the Android end-to-end capture check
- * (benchmark/android-capture/e2e), the Android twin of the iOS `ktorVerifyAction`: one request of
- * each shape through the sample's client, each tagged `X-Hopi-Verify: <name>`, logging one
- * `{"verify":…}` line under `HopiSample` with the status, the bytes the app read and their SHA-256,
- * so a capture and a noop build can be compared byte for byte. [https] is a public HTTPS URL.
- * Returns the number of scenarios that failed with an exception.
+ * (benchmark/android-capture/e2e), the Android counterpart of the iOS `ktorVerifyAction`: one
+ * request of each shape through the sample's client, each tagged `X-Hopi-Verify: <name>`, logging
+ * one `{"verify":…}` line under `HopiSample` with the status, the bytes the app read and their
+ * SHA-256, so a capture build and one with no runtime can be compared byte for byte. [https] is a
+ * public HTTPS URL. Returns the number of scenarios that failed with an exception.
  */
 public suspend fun runKtorVerify(https: String): Int {
     val client: HttpClient = SampleHttp.client

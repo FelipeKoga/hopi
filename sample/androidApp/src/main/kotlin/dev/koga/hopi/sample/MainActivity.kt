@@ -169,7 +169,7 @@ private fun captureAction() = PlatformAction("Third-party SDK and URL.readText()
  * One request of each shape through Ktor, the fake SDK's OkHttp client and HttpURLConnection, one
  * `{"verify":…}` line each under `HopiSample` (status, bytes read, SHA-256), then
  * `{"verify":"done",…}` with the capture status. The host matches the lines to Hopi's records and
- * compares them with a noop build's.
+ * compares them with those of a build with no runtime (the `nohopi` arm).
  */
 @OptIn(HopiInternalApi::class)
 private fun verifyAction(https: String) = PlatformAction("Capture verify") {

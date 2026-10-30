@@ -107,7 +107,7 @@ public object UrlSessionCapture {
      * different ones writes a notice line instead. Invalid caps write a notice and start nothing,
      * without using up the first call. Its one caller is the network tool ([NetworkTool]), behind
      * the start sequence's own checks of the caps and of a second start, so these checks are
-     * defensive: no Swift code calls it, and it has no noop. [injectedStore] is for tests.
+     * defensive: no Swift code calls it. [injectedStore] is for tests.
      */
     public fun start(settings: Settings, injectedStore: HopiStore? = null): Mode {
         if (first.load() == null) {

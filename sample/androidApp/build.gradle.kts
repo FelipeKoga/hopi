@@ -55,7 +55,7 @@ kotlin {
 
 // `-Psample.hopiCapture=false` builds the debug variant as release is built (`hopi { enabled = false }`:
 // no runtime, so the thin Ktor plugin installs nothing, no instrumentation), the control arm of the
-// capture A/B.
+// capture A/B (the benchmark scripts' `nohopi` arm).
 hopi {
     enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
     // The CLI and the desktop viewer reach the app through its bridge.
@@ -231,7 +231,7 @@ object PerfApis {
  * `readBytes()`) call the URL hooks; the merged manifest
  * declares the provider; the rule engine is packaged (the release check's absent core, seen from
  * the other side); the Ktor plugin's recorder is packaged (`KtorHooks`, the forwarder the network
- * tool registers); and the debug runtime classpath holds the real modules.
+ * tool registers); and the debug runtime classpath holds the runtimes.
  */
 abstract class VerifyDebugCapture : DefaultTask() {
     @get:InputFiles
@@ -259,7 +259,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
         val problems = mutableListOf<String>()
         val projects = hopiComponents.get()
         val required = setOf(":hopi-api", ":hopi-core", ":hopi-ktor", ":hopi-network", ":hopi-perf")
-        if (!projects.containsAll(required) || projects.any { it.endsWith("-noop") }) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
+        if (!projects.containsAll(required)) problems += "the debug runtime classpath holds ${projects.sorted()}, expected $required"
 
         val hookCallers = dex.callersOf(OKHTTP_HOOK)
         val realCalls = HookDescriptors.REAL_CALL_CLASSES.filter { it in dex.definedClasses }

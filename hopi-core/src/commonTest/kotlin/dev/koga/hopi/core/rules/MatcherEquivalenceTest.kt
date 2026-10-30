@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
  * [RuleRequest.hasHeaderValue]) agrees with the reference matcher, the list-based one it replaced
  * (2026-10-25), on a broad generated set of rules and requests: methods, schemes, IPv6 hosts,
  * ports, encoded paths, repeated and encoded query names, case-varied headers, and absent, present
- * and glob predicates. Glob itself is shared, so the Kotlin and C glob parity stays as it was.
+ * and glob predicates. Glob itself is shared, so the Kotlin and C globs still agree as before.
  */
 class MatcherEquivalenceTest {
     /** The matcher before 2026-10-25: each predicate over the list of values. */

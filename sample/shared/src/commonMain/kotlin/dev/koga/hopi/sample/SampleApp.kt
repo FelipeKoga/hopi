@@ -52,10 +52,11 @@ public class PlatformAction(public val label: String, public val run: suspend ()
 
 /**
  * Which Hopi this process runs: the Diagnostics caption says it, and the evidence lines carry it
- * (`"build":"real"`, `"real":true`). On iOS the `hopi.enabled` property selects the framework's
- * modules, so the generated [HOPI_ENABLED] says which. On Android the dev.koga.hopi plugin selects
- * them per variant whatever the property says (real in debug, noop in release and with
- * `-Psample.hopiCapture=false`), so the activity reports what runs instead.
+ * (`"build":"real"` or `"nohopi"`, `"real":true` or `false`). On iOS the `hopi.enabled` property
+ * decides whether the framework links the runtimes, so the generated [HOPI_ENABLED] says which. On
+ * Android the dev.koga.hopi plugin decides per variant whatever the property says (the runtimes in
+ * debug, none in release and with `-Psample.hopiCapture=false`), so the activity reports what runs
+ * instead.
  */
 public object SampleBuild {
     /**
@@ -65,15 +66,15 @@ public object SampleBuild {
      */
     public var androidCaptureStarted: Boolean? = null
 
-    /** True for the real modules, false for the noop twins. */
+    /** True when Hopi's runtimes run (Android: capture started; iOS: built with the flag). */
     internal val realHopi: Boolean get() = androidCaptureStarted ?: HOPI_ENABLED
 
     /** The Diagnostics caption: which Hopi runs and what selected it. */
     internal val caption: String
         get() = when (androidCaptureStarted) {
-            true -> "Hopi: real modules (debug build: the dev.koga.hopi plugin selects them)"
-            false -> "Hopi: noop twins (release build, or -Psample.hopiCapture=false)"
-            null -> if (HOPI_ENABLED) "Hopi: real modules (built with -Phopi.enabled=true)" else "Hopi: noop twins (built without -Phopi.enabled=true)"
+            true -> "Hopi: runtimes (debug build: the dev.koga.hopi plugin adds them)"
+            false -> "Hopi: no runtime (release build, or -Psample.hopiCapture=false)"
+            null -> if (HOPI_ENABLED) "Hopi: runtimes (built with -Phopi.enabled=true)" else "Hopi: no runtime (built without -Phopi.enabled=true)"
         }
 }
 

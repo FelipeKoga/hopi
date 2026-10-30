@@ -13,8 +13,7 @@ apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 // default. The model, its JSON and the bridge commands live in hopi-core, the consumer API
 // (HopiPerf) in hopi-api; this module holds the monitors and the runtime perf's tool registers
 // behind HopiPerf. No app names it: the Gradle plugin adds it to debuggable build types with
-// `perf { enabled = true }`, and hopi-start brings it to Debug iOS frameworks and to JVM apps. No
-// noop twin.
+// `perf { enabled = true }`, and hopi-start brings it to Debug iOS frameworks and to JVM apps.
 kotlin {
     explicitApi()
 

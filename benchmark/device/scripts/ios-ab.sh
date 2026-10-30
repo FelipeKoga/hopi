@@ -1,5 +1,5 @@
 #!/bin/sh
-# iOS twin of abn.sh on the booted simulator: for ROUNDS rounds, for each spec, each build's .app
+# iOS counterpart of abn.sh on the booted simulator: for ROUNDS rounds, for each spec, each build's .app
 # is installed in turn (the running app terminated first) and ios.py runs RUNS runs per size.
 # usage: ios-ab.sh <out.ndjson> <sizes> <runs> <rounds> "<label>=<app>[@<cap>] ..." [spec ...]
 set -u

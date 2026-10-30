@@ -7,7 +7,6 @@ import com.android.build.api.variant.ApplicationVariant
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.artifacts.Configuration
 import org.gradle.language.base.plugins.LifecycleBasePlugin
 
 /**
@@ -29,8 +28,6 @@ import org.gradle.language.base.plugins.LifecycleBasePlugin
  *   ([HopiReleaseGuard]), whatever `enabled` says: before the variant's build it fails when the
  *   runtime classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, which only a
  *   module naming them can bring there;
- * - `selectTwins` does nothing since stage 10 of the runtime-split plan: no twin is left (the thin
- *   `hopi-ktor` is in every build); stage 11 removes it;
  * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
  *   app's modules name in every build type) and, with `network { enabled }`, `dev.koga.hopi:hopi-ktor`
  *   (the Ktor plugin, which the app's modules may name in every build type) at this plugin's
@@ -97,10 +94,6 @@ public class HopiPlugin : Plugin<Project> {
             if (real && extension.network.enabled.get()) instrument(extension.network, variant)
             if (real) generateConfig(project, extension, variant)
             if (!variant.debuggable) guard(project, variant)
-            if (extension.selectTwins.get()) {
-                selectTwins(project, variant.compileConfiguration, real)
-                selectTwins(project, variant.runtimeConfiguration, real)
-            }
         }
     }
 
@@ -173,27 +166,6 @@ public class HopiPlugin : Plugin<Project> {
     }
 
     /**
-     * Resolves both directions of each twin pair to the side this variant needs, for this
-     * repository's projects and for the published coordinates. Safe because the twins have the same
-     * ABI with no inlined body (`:checkNoopParity`). Does nothing since stage 10 of the
-     * runtime-split plan, no pair being left ([TWINS] is empty); stage 11 removes it.
-     */
-    private fun selectTwins(project: Project, configuration: Configuration, real: Boolean) {
-        val root = project.rootProject
-        configuration.resolutionStrategy.dependencySubstitution { substitutions ->
-            for ((realName, noopName) in TWINS) {
-                val from = if (real) noopName else realName
-                val to = if (real) realName else noopName
-                if (root.findProject(":$from") != null && root.findProject(":$to") != null) {
-                    substitutions.substitute(substitutions.project(":$from")).using(substitutions.project(":$to"))
-                        .because("dev.koga.hopi: ${if (real) "debuggable variants get the real module" else "other variants get the noop twin"}")
-                }
-                substitutions.substitute(substitutions.module("$GROUP:$from")).using(substitutions.module("$GROUP:$to:$HOPI_VERSION"))
-            }
-        }
-    }
-
-    /**
      * Holds `hopi-api` and, with [network] (`network { enabled }`), `hopi-ktor` at [HOPI_VERSION] in
      * [buildType], which gets core (whatever the tools), `hopi-network` with `network { enabled }`
      * and `hopi-perf` with `perf { enabled = true }`, at that version: the app names `hopi-api`
@@ -254,8 +226,5 @@ public class HopiPlugin : Plugin<Project> {
         const val KTOR = "hopi-ktor"
         const val RUNTIME = "hopi-network"
         const val PERF = "hopi-perf"
-
-        /** No twin is left since stage 10 of the runtime-split plan; stage 11 removes the selection. */
-        val TWINS = emptyList<Pair<String, String>>()
     }
 }

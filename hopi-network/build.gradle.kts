@@ -21,7 +21,7 @@ apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 // hopi-ktor's thin plugin installs once the network tool registered it. No app names it: the
 // `dev.koga.hopi` Gradle plugin adds it to the debuggable variants of an Android application, and
 // hopi-start brings it to Debug iOS frameworks and to JVM apps; every other build gets no runtime.
-// No noop twin. The JVM target holds only the recorder and the JVM network tool.
+// The JVM target holds only the recorder and the JVM network tool.
 kotlin {
     explicitApi()
 

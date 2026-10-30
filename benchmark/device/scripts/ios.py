@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""iOS twin of giant.py: launches the sample on the booted simulator with `-giant <spec>` (and
+"""iOS counterpart of giant.py: launches the sample on the booted simulator with `-giant <spec>` (and
 `-maxBodyBytes N`) under `simctl launch --console-pty`, collects its `HopiSample:` JSON lines,
 and reads the app's memory with the host's `footprint <pid>` during the spec's delay, after the
 last run, and (with --poll) every second meanwhile.

@@ -7,5 +7,6 @@ local.properties
 .DS_Store
 xcuserdata/
 DerivedData/
+__pycache__/
 # Read-only third-party sources used as implementation reference; never shipped.
 .reference/

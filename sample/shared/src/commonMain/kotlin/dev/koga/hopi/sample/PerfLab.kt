@@ -154,7 +154,7 @@ internal class PerfLabRun(
         }
         // The frames monitor attaches with one main-thread message, the sampler takes its first point.
         delay(SETTLE_MS)
-        line("{\"perfLab\":\"start\",\"build\":\"${if (SampleBuild.realHopi) "real" else "noop"}\",\"heartbeat\":$heartbeat,\"running\":\"${HopiPerf.running.joinToString(",")}\"}")
+        line("{\"perfLab\":\"start\",\"build\":\"${if (SampleBuild.realHopi) "real" else "nohopi"}\",\"heartbeat\":$heartbeat,\"running\":\"${HopiPerf.running.joinToString(",")}\"}")
         if (wants("jank")) {
             for (ms in listOf(20L, 50L, 100L)) {
                 val from = labWallMs()

@@ -76,7 +76,7 @@ kotlin {
             // nothing.
             export(project(":hopi-api"))
             // Hopi.shared.start { … } from Swift (iOSApp.swift, inside `#if HOPI`): with the flag only,
-            // and no noop, so a framework built without it (Xcode's Release) has no Hopi.
+            // so a framework built without it (Xcode's Release) has no Hopi.
             if (hopiEnabled) export(project(":hopi-start"))
         }
     }
@@ -90,11 +90,11 @@ kotlin {
                 // on iOS, where URLSession capture records the Darwin engine.
                 implementation(project(":hopi-ktor"))
                 // HopiRules (mock, fail, delay, edit), which the rules scenarios call, and HopiPerf,
-                // which the perf lab and bench start, in every build: hopi-api has no noop, a debug
-                // build's start registers the runtimes behind them (on Android the plugin adds
-                // hopi-perf with `perf { enabled }`; on iOS hopi-start names perf's tool, so
-                // Kotlin/Native keeps hopi-perf). api: the Android app's rules scenarios name
-                // HopiRules too, and the iOS framework exports it.
+                // which the perf lab and bench start, in every build: a debug build's start
+                // registers the runtimes behind them (on Android the plugin adds hopi-perf with
+                // `perf { enabled }`; on iOS hopi-start names perf's tool, so Kotlin/Native keeps
+                // hopi-perf). api: the Android app's rules scenarios name HopiRules too, and the
+                // iOS framework exports it.
                 api(project(":hopi-api"))
                 implementation(libs.compose.runtime)
                 implementation(libs.compose.foundation)
@@ -111,7 +111,7 @@ kotlin {
         }
         iosMain {
             // Test-only accessor for the Swift capture tests (iosAppCaptureTests), which read the
-            // records from the store: built only with the real modules, never into a release.
+            // records from the store: built only with the runtimes, never into a release.
             if (hopiEnabled) kotlin.srcDir("src/iosCaptureProbe/kotlin")
             dependencies {
                 implementation(libs.ktor.client.darwin)

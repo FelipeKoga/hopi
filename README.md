@@ -37,7 +37,7 @@ contract is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); what may come later 
 ## Install
 
 Coming from an earlier build of this repository, by stage of the runtime-split plan
-(`docs/design/api-runtime-split-plan.md`):
+(`docs/design/api-runtime-split-plan.md`; stages 9 to 11, 2026-10-29 and 30):
 - Stage 9: `HopiUrlSession.start { }` (Swift: `HopiUrlSession.shared.start { }`) becomes
   `Hopi.start { }` (`Hopi.shared.start { }`) on iOS (`hopi-start`, see
   [iOS](#ios-every-urlsession-request-automatically)), which also registers the performance
@@ -54,7 +54,7 @@ Coming from an earlier build of this repository, by stage of the runtime-split p
   [Android](#android-every-okhttp-and-httpurlconnection-request-automatically) and
   [iOS](#ios-every-urlsession-request-automatically)).
 - Stage 10: `hopi-ktor-noop` is gone. Name `hopi-ktor` in every build, with no `-Phopi.enabled`
-  choice for it (and no `hopi { selectTwins }`, which now does nothing): the plugin is thin, with no
+  choice for it (and no `hopi { selectTwins }`, which then did nothing): the plugin is thin, with no
   `hopi-core`, and records only where a debug build's network runtime registered its recorder (an
   Android debuggable variant with the Gradle plugin, a JVM process after `Hopi.start`); in a release
   build and on iOS it installs nothing, so without the Gradle plugin an Android app's Ktor plugin
@@ -83,6 +83,8 @@ Coming from an earlier build of this repository, by stage of the runtime-split p
   the rule's or the server's (Ktor's `HttpCache` kept a platform mock after its rule was gone), so
   a rule can no longer exercise your app's own HTTP cache there (see
   [Rules](#rules-mock-fail-delay-edit)).
+- Stage 11: `hopi { selectTwins }` is gone from the Gradle plugin: a build script that still sets
+  it no longer compiles, so delete the line (it did nothing since stage 10).
 
 Hopi is published to Maven Local only: no remote repository, nothing downloaded from anywhere but
 the repositories your build already uses. Every artifact has the group `dev.koga.hopi` and the
@@ -132,8 +134,8 @@ older ones are not tested):
 | Artifact              | What it is                                              |
 | --------------------- | ------------------------------------------------------- |
 | `hopi-ktor`      | The Ktor client plugin, the same thin artifact in every build: it installs the recorder a debug build's network runtime registered (Android with the Gradle plugin, the JVM after `Hopi.start`) and nothing elsewhere (a release build, iOS); no `hopi-core`. It brings `hopi-api` |
-| `hopi-start`     | `Hopi.start { }`, the iOS and JVM start: URLSession capture on iOS, the Ktor plugin's recorder on the JVM, and the performance monitors, from one call; Debug frameworks and JVM apps that record only, no noop twin |
-| `hopi-api`       | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS, and on the JVM through `hopi-start`), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. No noop twin; it comes with `hopi-ktor` too. The CLI and the desktop viewer need no dependency for rules or perf |
+| `hopi-start`     | `Hopi.start { }`, the iOS and JVM start: URLSession capture on iOS, the Ktor plugin's recorder on the JVM, and the performance monitors, from one call; Debug frameworks and JVM apps that record only |
+| `hopi-api`       | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS, and on the JVM through `hopi-start`), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. It comes with `hopi-ktor` too. The CLI and the desktop viewer need no dependency for rules or perf |
 | `hopi-network`   | The network runtime: automatic OkHttp and `HttpURLConnection` capture on Android, URLSession capture on iOS, and their rules, plus the Ktor plugin's recorder on Android and the JVM: added by the plugin on Android (debug builds only) and by `hopi-start` on iOS and the JVM; never named |
 | `hopi-perf`      | The performance monitors (frames, hangs, CPU, memory) behind `HopiPerf`, each off until started: added by the plugin on Android (`perf { enabled = true }`, debug builds only) and by `hopi-start` on iOS and the JVM (CPU and memory there); never named |
 | `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android; adds `hopi-core` and `hopi-network` to debug builds, `hopi-perf` with `perf { enabled = true }`, and nothing to release builds, and fails a release (non-debuggable) variant that resolves a runtime |
@@ -162,7 +164,7 @@ kotlin {
         commonMain.dependencies {
             // the Ktor plugin, in every build: it records only where a debug build registered its recorder
             implementation("dev.koga.hopi:hopi-ktor:$v")
-            // HopiRules and HopiPerf: one artifact for every build, no twin; hopi-ktor brings it
+            // HopiRules and HopiPerf: one artifact for every build; hopi-ktor brings it
             // too, and a module without hopi-ktor that calls them needs it
             implementation("dev.koga.hopi:hopi-api:$v")
         }
@@ -301,9 +303,9 @@ is re-sent and nothing your app sees changes, unless a rule you added applies (a
 sessions created after the start list Hopi's protocol class first in
 `configuration.protocolClasses`; `rules = false` turns that off).
 
-`hopi-start` brings the runtimes, `hopi-network` and `hopi-perf` (and `hopi-core` with them), and
-has no noop twin. Add it, and export it from your framework, only with the flag, so a Release
-framework holds no runtime at all:
+`hopi-start` brings the runtimes, `hopi-network` and `hopi-perf` (and `hopi-core` with them). Add
+it, and export it from your framework, only with the flag, so a Release framework holds no runtime
+at all:
 
 ```kotlin
 // shared/build.gradle.kts
@@ -710,7 +712,10 @@ against them; see [Sample app](#sample-app) and `benchmark/perf/`.
 
 ## Performance
 
-Measured so far (the methods and caveats are in the architecture doc):
+Measured so far (the methods and caveats are in the architecture doc). Dated history: the rows
+that compare with a noop build measured it from 2026-10-23 to 27, when that build linked the noop
+twins, which the runtime-split plan removed (2026-10-28 and 29); the benchmark scripts call that
+arm, the build with no runtime, `nohopi` since 2026-10-30.
 
 | What | Result |
 | --- | --- |
@@ -807,15 +812,14 @@ the iOS install section; perf lab run on the iPhone 16, 2026-10-26).
 ## Building
 
 JDK 17, Gradle through `./gradlew` (9.7.1), Kotlin 2.4.20, Compose Multiplatform 1.12.0, Ktor
-3.5.2. `./gradlew check` runs the tests (including the iOS simulator tests), the ABI dump checks,
-the noop parity check (a real module and its twin must have exactly the same public API; no pair
-is left since stage 10 of the runtime-split plan, so it checks nothing until stage 11 removes it)
-and the publication check. The base check, one Gradle invocation:
+3.5.2. `./gradlew check` runs the tests (including the iOS simulator tests), the ABI dump checks
+(`checkKotlinAbi` on `hopi-api`, `hopi-ktor`, `hopi-start`, the runtimes' empty dumps and
+`hopi-connect`) and the publication check. The base check, one Gradle invocation:
 
 ```bash
 ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-network:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test \
-  :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
+  :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseHasNoRuntime :hopi-network:testAndroidHostTest \
   :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
 ```

@@ -145,7 +145,8 @@ class HopiPluginUnitTest {
         for (path in listOf(":hopi-core", ":hopi-network", ":hopi-perf", ":hopi-start")) {
             assertTrue(HopiRuntimeGraph.isRuntime(ProjectId(path)), path)
         }
-        // A runtime of another project path, and the modules that are no runtime.
+        // A runtime of another project path, and the modules that are no runtime (the `-noop`
+        // modules the runtime-split plan deleted, 2026-10-28 and 29, among them).
         for (path in listOf(":lib:hopi-core", ":hopi-api", ":hopi-ktor", ":hopi-ktor-noop", ":")) {
             assertFalse(HopiRuntimeGraph.isRuntime(ProjectId(path)), path)
         }
@@ -153,7 +154,8 @@ class HopiPluginUnitTest {
         for (module in listOf("hopi-core", "hopi-network-android", "hopi-start-iossimulatorarm64", "hopi-perf-jvm", "hopi-network-iosarm64")) {
             assertTrue(HopiRuntimeGraph.isRuntime(ModuleId(GROUP, module)), module)
         }
-        // Exact names, not prefixes: the stale hopi-perf-noop in Maven Local is no runtime.
+        // Exact names, not prefixes: the `-noop` modules the runtime-split plan deleted (2026-10-28
+        // and 29), which Maven Local may still hold at 0.1.0, are no runtime.
         for (module in listOf("hopi-perf-noop", "hopi-api", "hopi-ktor", "hopi-ktor-noop", "hopi-ktor-android", "hopi-core-extra", "hopi-network-")) {
             assertFalse(HopiRuntimeGraph.isRuntime(ModuleId(GROUP, module)), module)
         }
@@ -209,9 +211,6 @@ class HopiPluginUnitTest {
         assertTrue(text.startsWith("dev.koga.hopi: variant freeQa is not debuggable"), text)
         assertTrue("remove project ':hopi-network' from freeQa (" in text, text)
         assertTrue(text.endsWith("not as implementation or qaImplementation)."), text)
-        // No twin is left to select since stage 10: the advice never names selectTwins.
-        assertFalse("selectTwins" in text, text)
-        assertFalse("selectTwins" in HopiReleaseGuard.message("release", "release", listOf("project ':hopi-network'"), listOf("project ':hopi-network'")))
     }
 
     @Test

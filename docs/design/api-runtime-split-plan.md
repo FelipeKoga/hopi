@@ -1952,25 +1952,24 @@ Not part of this pass.
 ### Base check today
 
 Kept equal to the base check of `README.md` ("Building"); a stage that adds, deletes or renames a
-task path edits both (rule 5). As of stage 10a:
+task path edits both (rule 5). As of stage 11 (the same task paths as the target below):
 
 ```bash
 ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-network:jvmTest \
   :hopi-cli:test :hopi-connect:test :hopi-desktop:test \
-  :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest :checkNoopParity check \
+  :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest check \
   :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseHasNoRuntime :hopi-network:testAndroidHostTest \
   :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
 ```
 
 - One task path that no longer exists fails the whole invocation: a stage that deletes or renames
   one edits `README.md:816-820` ("Building") and this section in the same commit (rule 5).
-- `:checkNoopParity`, `functionalTest` and `:checkPublication` already run inside `check` (root
-  `build.gradle.kts:139`, `:143` with `gradle-plugin/hopi-gradle-plugin/build.gradle.kts:124`, and
-  `:329`), and so does `verifyIosReleaseExcludesCapture` on macOS
-  (`sample/shared/build.gradle.kts:207-209`) (verified). `verifyReleaseUsesNoop` duplicates
-  `verifyHopiSelection`, which `check` runs (`sample/androidApp/build.gradle.kts:301-311,347-348`,
-  verified). Whether `testAndroidHostTest` is in `check` is unverified (E7 X2, stage 3); the explicit
-  entries stay either way.
+- `functionalTest` and `:checkPublication` already run inside `check` (root `build.gradle.kts`,
+  the `tasks.named("check")` blocks, with `gradle-plugin/hopi-gradle-plugin/build.gradle.kts`'s
+  `check`; `:checkNoopParity` did too until stage 11 deleted it). So do `verifyReleaseHasNoRuntime`
+  (`sample/androidApp/build.gradle.kts:346`, in `check` at `:384`), `verifyIosReleaseExcludesCapture`
+  on macOS (`sample/shared/build.gradle.kts:260-271`) (verified) and the host tests (E7 X2, section 9,
+  stage 3). The explicit entries stay.
 
 ### Task paths per stage
 
@@ -1982,7 +1981,7 @@ task path edits both (rule 5). As of stage 10a:
 | 9a | `:hopi-urlsession:jvmTest`, `:hopi-urlsession-noop:jvmTest`, `:hopi-android:testAndroidHostTest` | `:hopi-network:testAndroidHostTest`; `:sample:shared:verifyIosReleaseExcludesCapture` listed |
 | 9b | | `:sample:androidApp:verifyReleaseUsesNoop` renamed `:sample:androidApp:verifyReleaseHasNoRuntime` |
 | 10 (10a) | `:hopi-ktor-noop:jvmTest` | `:hopi-network:jvmTest` |
-| 11 | `:checkNoopParity` | |
+| 11 | `:checkNoopParity` (done) | |
 
 Stages 2, 4, 6, 7 and 12 to 14 change no task path. The sample's sets that `check` asserts
 (`sample/androidApp/build.gradle.kts:207` and `:261`) after each stage:
@@ -2791,6 +2790,39 @@ Stage 10 (2026-10-29; 10a `cad60c3` on `80f1a46`, then 10b's edits on it; emulat
   capture A/Bs, and the device check of a JVM app started with `Hopi.start`.
 - **Base check**: green on 10a (3 min 55 s) and on 10b.
 
+Stage 11 (2026-10-30, the stage's edits on `086c055`; no emulator or simulator; evidence in the
+session's scratchpad):
+
+- **First ([run])**: step 7's grep gate (rule 8's form and exclusions, git 2.47.1) found 453 hits
+  before the edits and finds 235 after them: 222 lines of README, ROADMAP, ARCHITECTURE and four
+  design docs under a dated history note (their migration and history notes, the dated benchmark
+  figures); 5 lines of the plugin's dated `-noop` inputs and KDoc (`HopiPluginUnitTest.kt:148-159`,
+  `HopiReleaseGuard.kt:74`, "2026-10-28 and 29": modules Maven Local may still hold are no
+  runtime); the 3 readers' dated aliases of the old labels (Review, below); and 5 false positives,
+  `inputWindows` (`AndroidMonitors.kt:154`, `HangDetailsTest.kt:17`, `README.md:705`,
+  `perf-monitors.md:408,1295`).
+- **Dry run and plugin tests**: `./gradlew check --dry-run` on the final tree (it reconfigured
+  `:sample:androidApp` after the last edit of its build script) lists no `checkNoopParity` and a
+  `checkKotlinAbi` in six modules: `hopi-api`, `hopi-connect`, `hopi-ktor`, `hopi-network`,
+  `hopi-perf` and `hopi-start` (O7 as applied; `hopi-core` stays exempt). The plugin's unit tests
+  (12) and functional tests (4, `publishedCoordinatesArePerVariant` among them) pass.
+- **Review**: a read-only review found 5 problems, all addressed before the commit: the Done-when's
+  missing evidence (the dry run above, the list below), this entry and section 10's row, two stale
+  sentences of section 7's base check, a present-tense passage of rules.md on `:checkNoopParity`,
+  and the renamed readers, which skipped every run recorded before the rename.
+  `benchmark/android-capture/abtable.py`, `benchmark/device/scripts/paired.py` and
+  `benchmark/urlsession/e2e/abtable.py` now read the old labels `noop` and `noop2` as `nohopi` and
+  `nohopi2`, and exit non-zero, writing no `summary.json`, when the baseline arm has no round. On
+  stage 9's capture A/B (`capture-ab/ab.ndjson`), `build/evidence/inline-tee/android-ab5.ndjson`
+  and a copy of `benchmark/urlsession/2026-10-29/ab-cap8mib-iphone17-ios27.0/` their tables equal
+  HEAD's but for the label, and the URLSession `summary.json` equals the committed one value for
+  value.
+- **Not run** (to finish quickly, as in stage 10): the stage's three [run] items, which need the
+  emulator or the simulator: `benchmark/android-capture/run.py e2e …` with the nohopi APK,
+  `benchmark/urlsession/e2e/run.sh` with the `HOPI_ENABLED=false` app, and `python3
+  benchmark/perf/idle.py --arms nohopi=none@dev.koga.hopi.sample.nohopi,off=none,all=all`. The
+  renamed Python scripts compile (`py_compile`), and the readers ran on recorded data (above).
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2859,7 +2891,7 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 8. Perf into API and runtime | done: `HopiPerf`, `HopiMonitor` and `HopiPerfConfig` in `hopi-api` (`dev.koga.hopi.perf`), with an `@HopiInternalApi` `HopiPerfRuntime` and the registry's perf slot, dropped-start count and kept label; `hopi-perf` is the runtime behind it (empty dumps): perf's tool registers `ApiPerf`, which only forwards (`ApiPerfCalls`), and writes the dropped-starts notice; `HopiPerf` no longer starts itself and only what a block sets applies (8.1); nothing on Android's start path loads a monitor class (the backend split); frames report `attaching` (8.6); `PerfLauncher` renamed `CurrentActivity`; `perf { remoteControl }` and `HopiStartConfig.perfRemoteControl` (8.5); `hopi-perf-noop` and the perf twin pair deleted; the plugin adds `hopi-perf` to debuggable build types; [run] results in section 9 | (this commit) |
 | 9. Network runtime and release guards | 9a done: `hopi-network` (android, iosArm64, iosSimulatorArm64; empty ABI dumps) holds `hopi-android`'s capture with its packages, and core's URLSession library and the iOS network tool (`dev.koga.hopi.network.internal`); core keeps the rule hit counter as a C library of its own (`hopi_hits`); `HopiAndroid` and `HopiUrlSession` deleted (9.4), the sample reads `HopiRuntimes`' network status; `hopi-android`, `hopi-android-noop`, `hopi-urlsession` and `hopi-urlsession-noop` deleted; the plugin's `RUNTIME` is `hopi-network`, with no noop. 9b done: the plugin's release guard (`hopiReleaseGuard<Variant>`, before any dex task) and the iOS release guard (`gradle/ios-release-guard.gradle`, before every Release link), `network { }` with generation split from instrumentation (a debuggable variant with every tool off still gets core and a generated configuration with no tool), `verifyReleaseHasNoRuntime` and the iOS check's new families, the giant-body benchmark on Android's host tests (E1 R7) and the R8 pass-through; [run] results in section 9 | `472fcd6` (9a), (this commit) |
 | 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b done: core's rules answer every platform mock and edit with `Cache-Control: no-store` (`ResponseEdits.noStore`; R5), iOS's dead Ktor Darwin cover and `KTOR` among its platform sources removed, R3 and R5 regression tests, `mock-302` in the sample's self-test; [run] results in section 9, a reduced set | `cad60c3` (10a), (this commit) |
-| 11. Remove the remaining twin machinery | | |
+| 11. Remove the remaining twin machinery | done: the root build's parity check (`NoopParityCheck` with its `inline`/`const` rule, `noopTwins`, `checkNoopParity`) and the plugin's `selectTwins` and `TWINS` deleted, `:checkNoopParity` out of README's and section 7's base check, the functional test `publishedCoordinatesAreSwappedPerVariant` renamed `publishedCoordinatesArePerVariant`; the live benchmark scripts' noop arm is the `nohopi` arm (install suffix `.nohopi`), and the readers also read the old labels; the tracked `__pycache__` files deleted and `__pycache__/` ignored; the sample's texts; O7 as applied (`checkKotlinAbi` in six modules); the grep gate from 453 to 235 hits, each under a dated history note or a false positive; [run] results in section 9, the stage's [run] items not run | (this commit) |
 | 12. Physical devices | | |
 | 13. Documentation pass | | |
 | 14. Final verification and report | | |

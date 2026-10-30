@@ -169,8 +169,8 @@ public final class FakeSdk {
      * one request of each shape through this SDK's own client and through {@code URL.openConnection()},
      * each tagged {@code X-Hopi-Verify: <name>} so the host can match records to requests, returning one
      * {@code {"verify":…}} line per request with the status (or the error's class), the bytes read and
-     * their SHA-256, so a capture and a noop build can be compared byte for byte. {@code https} is a
-     * public HTTPS URL. Runs on the calling thread (never the main thread).
+     * their SHA-256, so a capture build and one with no runtime can be compared byte for byte.
+     * {@code https} is a public HTTPS URL. Runs on the calling thread (never the main thread).
      */
     public static List<String> verify(String base, String https) throws Exception {
         List<String> lines = new ArrayList<>();

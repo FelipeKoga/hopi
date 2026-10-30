@@ -71,8 +71,9 @@ internal object HopiRuntimeGraph {
     /**
      * Whether [id] is one of Hopi's runtimes: the projects `:hopi-core`, `:hopi-network`,
      * `:hopi-perf` and `:hopi-start`, or those modules of `dev.koga.hopi`, with or without a
-     * platform suffix. Exact names, not prefixes (a stale `hopi-perf-noop` is not a runtime);
-     * `hopi-api` and `hopi-ktor` are not runtimes.
+     * platform suffix. Exact names, not prefixes: the `-noop` modules the runtime-split plan deleted
+     * (2026-10-28 and 29), which Maven Local may still hold at 0.1.0, are not runtimes; neither are
+     * `hopi-api` and `hopi-ktor`.
      */
     fun isRuntime(id: ComponentIdentifier): Boolean = isOneOf(id, RUNTIMES)
 

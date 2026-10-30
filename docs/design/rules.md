@@ -14,6 +14,14 @@ This design builds on `docs/design/android-capture.md` and `docs/design/urlsessi
 (the interception points it reuses) and on the architecture's store, bridge and `PlatformCapture`
 contracts.
 
+**History note (2026-10-30).** The runtime-split plan (`docs/design/api-runtime-split-plan.md`)
+moved `HopiRules` into `hopi-api` and deleted `hopi-rules` with its noop twin `hopi-rules-noop`
+(stage 7, 2026-10-28), deleted the other twins (stages 5 to 10, 2026-10-28 and 29) and then the
+parity check `:checkNoopParity` (stage 11, 2026-10-30). The sections it changed say so with their
+stage; every other passage that names a noop, a twin or parity (the architecture contract changes,
+the tests, the implementation order) records the design as built before it and is kept as history.
+The contract is `docs/ARCHITECTURE.md`.
+
 ## Goals and non-goals
 
 Goals:
@@ -26,8 +34,8 @@ Goals:
 - **Bounded cost with rules.** At most 64 rules, compiled at `add` time, matched without
   backtracking blow-up. A request that matches nothing costs a stated, measured number.
 - **Zero production impact.** The engine lives in `hopi-core`, which a release build does not
-  contain. The consumer API (`HopiRules`) had a noop twin with the same API that does nothing;
-  since the runtime-split plan's stage 7 it lives in `hopi-api`, the same in every build, which
+  contain. The consumer API (`HopiRules`) had a noop twin with the same API that did nothing until
+  the runtime-split plan's stage 7 (2026-10-28); since then it lives in `hopi-api`, the same in every build, which
   stores nothing until a debug build registers core's rules runtime. Release builds hold no rule
   engine or runtime, and the release checks prove it; `HopiRules`' builders still run the block
   and copy what they are given (see "In-process API").
@@ -951,10 +959,10 @@ switch alone. The engine and the API stay; `hello` reports `"rules":false` when 
 started has it off. The default is true because an empty
 rule set costs one read (and on iOS one message), and an inspector whose mock command needs a
 rebuild first fails the agent use case; the switch exists for the app whose code reads
-`configuration.protocolClasses` or that suspects the rules layer. No noop is left to mirror it
-since stage 10; `hopi-network`'s `HopiConfigDefaultsTest` pins the plugin's default.
+`configuration.protocolClasses` or that suspects the rules layer. `hopi-network`'s
+`HopiConfigDefaultsTest` pins the plugin's default.
 
-## Module layout, noop twin and release exclusion
+## Module layout and release exclusion
 
 | Module | Content |
 | --- | --- |
@@ -965,12 +973,11 @@ since stage 10; `hopi-network`'s `HopiConfigDefaultsTest` pins the plugin's defa
 | `hopi-connect`, `hopi-cli`, `hopi-desktop`, `hopi-ui` | Surfaces (`hopi-ui`: the desktop viewer's screens since the runtime-split plan's stage 5) |
 
 Since the runtime-split plan's stage 7 (2026-10-28) `hopi-rules` and `hopi-rules-noop` are gone:
-the Gradle plugin swaps no rules pair (it holds `hopi-api` at its own version in debuggable
-variants instead, and its functional test finds `hopi-api` in both APKs), `:checkNoopParity` has
-no rules pair, and `hopi-api`'s ABI dump is the consumer API alone (its `@HopiInternalApi`
-declarations excluded), the declarations `hopi-rules` had. KMP shared modules take `hopi-api` in
-every build and export it from the iOS framework. The sample's release checks then expected
-`:hopi-api` on the release classpath where they had expected `:hopi-rules-noop`,
+the Gradle plugin holds `hopi-api` at its own version in debuggable variants (its functional test
+finds `hopi-api` in both APKs), and `hopi-api`'s ABI dump is the consumer API alone (its
+`@HopiInternalApi` declarations excluded), the declarations `hopi-rules` had. KMP shared modules
+take `hopi-api` in every build and export it from the iOS framework. The sample's release checks
+then expected `:hopi-api` on the release classpath where they had expected `:hopi-rules-noop`,
 `verifyDebugCapture` `:hopi-api` where it expected `:hopi-rules`, and
 `verifyIosReleaseExcludesCapture` was unchanged. Since stage 9 (2026-10-29) one release check,
 `verifyReleaseHasNoRuntime`, expects exactly `:hopi-api` and `:hopi-ktor-noop` there (since stage

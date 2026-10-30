@@ -11,6 +11,14 @@ removed it) show them with no change: `TransactionSource.OKHTTP`
 (`"okhttp"`) and `TransactionSource.URL_CONNECTION` (`"urlconnection"`) already exist in core, on
 the wire, in `BridgeDecoder` and in the UI's `sourceLabel` (`OkHttp`, `HttpURLConnection`).
 
+**History note (2026-10-30).** The runtime-split plan (`docs/design/api-runtime-split-plan.md`)
+removed the noop twins (`hopi-android-noop` with `hopi-android` in its stage 9, 2026-10-29; the UI
+and Ktor twins in its stages 5 and 10), then the parity check `:checkNoopParity` and the twin
+selection `selectTwins` (stage 11, 2026-10-30). The sections it changed say so with their stage;
+every other passage that names a noop, a twin or parity (the architecture contract changes, the
+tests, the A/B method, the implementation steps, the risks, and "As built" to the end) records the
+design as built before it and is kept as history. The contract is `docs/ARCHITECTURE.md`.
+
 ## Goals and non-goals
 
 Goals:
@@ -106,8 +114,8 @@ owner is not exactly `java/net/URL` (a `URL` subclass cannot exist, the class is
 
 The hooks are internal top-level functions (`@file:JvmName("HopiOkHttpHooks")` and
 `@file:JvmName("HopiUrlHooks")`). Kotlin compiles them to public static methods with unmangled
-names, but they are not part of the ABI dump, so the noop needs no copy of them and the release
-check can look for their types. The OkHttp hook and the URL hooks are in two classes, so an app
+names, but they are not part of the ABI dump (it stays empty), and the release check can look for
+their types. The OkHttp hook and the URL hooks are in two classes, so an app
 without OkHttp never loads a class whose signatures name `okhttp3` types (no soft verification
 failure on ART). One shared constant table (`HookDescriptors`, in the `hopi-instrument` module
 below) defines owner, name and descriptor. A runtime test loads both hook classes and checks every
@@ -492,8 +500,8 @@ does.
 ### Layout
 
 Since stage 9 of the runtime-split plan (2026-10-29): `hopi-android` and `hopi-android-noop` are
-gone; the Android runtime below is `hopi-network`'s `androidMain` (its packages kept), with no
-noop, beside the iOS URLSession capture; the contract is ARCHITECTURE's ("Modules", "Android capture"). The layout as designed:
+gone; the Android runtime below is `hopi-network`'s `androidMain` (its packages kept), beside the
+iOS URLSession capture; the contract is ARCHITECTURE's ("Modules", "Android capture"). The layout as designed:
 
 ```text
 settings.gradle.kts         pluginManagement { includeBuild("gradle-plugin") }
@@ -547,7 +555,9 @@ configuration names, which the app's own classes must reach.)
 Since stage 9 of the runtime-split plan (2026-10-29): `okhttp`, `urlConnection`, `rules` and
 `excludeClasses` are in `hopi { network { } }`, beside `network { enabled }` (default true; false
 leaves out the network runtime, the transform and the network tool); `enabled = false` gives no
-variant anything, and the release guard runs whatever it says; the contract is ARCHITECTURE's ("Consumer API"). As designed:
+variant anything, and the release guard runs whatever it says; since stage 11 (2026-10-30)
+`selectTwins` is gone (see "Twin selection (removed)"); the contract is ARCHITECTURE's ("Consumer
+API"). As designed:
 
 ```kotlin
 hopi {                                   // all optional; defaults are HopiUrlSessionConfig's
@@ -628,39 +638,20 @@ guards"). The wiring as designed and first built:
   debuggable variant, the only kind with `hopi-network`, they also mute R8's missing-class reports
   for the app's own Ktor and kotlinx-io.
 
-### Twin selection (why `-Phopi.enabled` is no longer needed on Android)
+### Twin selection (removed)
 
-Since the runtime-split plan's stage 10 (2026-10-29) no twin pair is left: `hopi-ktor-noop`, the
-last, was deleted, and the thin `hopi-ktor` is the same artifact in every variant, so
-`selectTwins` does nothing (stage 11 removes it). As designed and first built:
+Removed in the runtime-split plan's stage 11 (2026-10-30), after its stage 10 had deleted the last
+twin pair (`hopi-ktor-noop`, 2026-10-29). `selectTwins` swapped each twin pair per variant by a
+dependency substitution (the real module in debuggable variants, the noop in the others), safe only
+while `:checkNoopParity` held both sides to one ABI with no inlined body; both are in git commit
+`086c055`, the last that has them. What replaced it: the plugin adds the runtimes to debuggable
+build types only and substitutes nothing, and the release guard refuses a runtime anywhere else
+(ARCHITECTURE, "Selecting the runtimes in a KMP project" and "Release guards").
 
-With `selectTwins = true` (the default), the plugin adds a dependency substitution to each
-variant's `compileConfiguration` and `runtimeConfiguration`. Debuggable variants get
-`hopi-ktor-noop`→`hopi-ktor` and `hopi-ui-noop`→`hopi-ui` (the `hopi-ui` pair went in the
-runtime-split plan's stage 5). The other variants get the reverse.
-This applies to Maven coordinates in group `dev.koga.hopi` and to this repository's project
-paths. A KMP shared module compiled against either twin links against the other, because the ABI
-is the same (`:checkNoopParity`) and no public declaration of either side is `inline` or `const`
-(checked against the dumps today, and made a test of the parity task: an `inline`/`const` line in
-a parity-checked dump fails it, because its body would be inlined from the side compiled against).
-So an Android app builds debug with the real inspector and release with the noop whatever the
-property says, and the property keeps its meaning for iOS frameworks and for apps without the
-plugin. A release build can no longer ship the real modules by passing a property. To do that, a
-developer must remove the plugin, which is the "deliberate, visible choice" the architecture asks
-for.
+## Release exclusion
 
-Consequence for the sample: `sample/androidApp` applies the plugin. A debug build without the flag
-is now real (Ktor plugin, UI, capture), and the release build is always noop. The generated
-`HOPI_ENABLED` constant stays for iOS. The Android app shows the network status instead
-(`HopiAndroid.isStarted` until stage 9 of the runtime-split plan; since then
-`HopiRuntimes.networkStarted`, with the same output). The
-`-Phopi.enabled=true` instructions for the bridge checks become unnecessary on Android, and the
-architecture doc's sample section changes accordingly.
-
-## Noop twin and release exclusion
-
-Since stage 9 of the runtime-split plan (2026-10-29): there is no noop twin; release variants get
-no runtime, the plugin's release guard fails one that resolves a runtime, and one task,
+Since stage 9 of the runtime-split plan (2026-10-29): release variants get no runtime (as designed,
+the noop twin below), the plugin's release guard fails one that resolves a runtime, and one task,
 `:sample:androidApp:verifyReleaseHasNoRuntime`, replaces both release checks below (the release
 classpath's Hopi components are exactly `:hopi-api` and `:hopi-ktor-noop` (since stage 10
 `:hopi-api` and the thin `:hopi-ktor`), no type of a runtime's

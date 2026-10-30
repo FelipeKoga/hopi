@@ -195,17 +195,17 @@ class HopiPluginFunctionalTest {
      * The published-coordinates path (a consumer of Maven Local): with no `hopi-network` project in
      * the build, the plugin adds `dev.koga.hopi:hopi-network` at its own version, `hopi-core` and,
      * with `perf { enabled = true }`, `hopi-perf` to debug only, so the release APK gets no runtime
-     * at all. `hopi-ktor` (the thin Ktor plugin, no twin since stage 10) and `hopi-api`
-     * (`HopiRules`, `HopiPerf`), which the shared module names, reach both APKs. The constraints the
-     * plugin adds in debug, `hopi-api` and `hopi-ktor` at its own version, are not checked here:
-     * every stand-in is published at that version, the one the shared module names, so the APKs
-     * would be the same without them. The stand-ins are jars with one marker class each, published
-     * by a build of their own into a repository of the fixture; core's also holds the generated
-     * configuration's base class and the tool interface, and the network and perf tools the
-     * generated class names implement it (the fixture enables perf).
+     * at all. `hopi-ktor` (the thin Ktor plugin) and `hopi-api` (`HopiRules`, `HopiPerf`), which
+     * the shared module names, reach both APKs as named: the plugin substitutes nothing. The
+     * constraints the plugin adds in debug, `hopi-api` and `hopi-ktor` at its own version, are not
+     * checked here: every stand-in is published at that version, the one the shared module names,
+     * so the APKs would be the same without them. The stand-ins are jars with one marker class
+     * each, published by a build of their own into a repository of the fixture; core's also holds
+     * the generated configuration's base class and the tool interface, and the network and perf
+     * tools the generated class names implement it (the fixture enables perf).
      */
     @Test
-    fun publishedCoordinatesAreSwappedPerVariant() {
+    fun publishedCoordinatesArePerVariant() {
         val root = fixtures.resolve("coordinates")
         root.deleteRecursively()
         val version = System.getProperty("hopi.version")
@@ -236,7 +236,7 @@ class HopiPluginFunctionalTest {
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:hopiReleaseGuardRelease")?.outcome, result.output)
         val debug = DexReader.ofApk(project.resolve("app/build/outputs/apk/debug/app-debug.apk")).definedClasses
         val release = DexReader.ofApk(project.resolve("app/build/outputs/apk/release/app-release-unsigned.apk")).definedClasses
-        // The thin Ktor plugin and hopi-api, which the shared module names: in both, nothing swapped.
+        // The thin Ktor plugin and hopi-api, which the shared module names: in both, as named.
         for (module in listOf("hopi-ktor", "hopi-api")) {
             assertTrue("dev/koga/hopi/standin/${marker(module)}" in debug, "debug has $module: ${debug.filter { it.startsWith("dev/koga/hopi/") }}")
             assertTrue("dev/koga/hopi/standin/${marker(module)}" in release, "release has $module: ${release.filter { it.startsWith("dev/koga/hopi/") }}")
@@ -245,10 +245,10 @@ class HopiPluginFunctionalTest {
         for (runtime in listOf("hopi-core", "hopi-network", "hopi-perf")) {
             assertFalse("dev/koga/hopi/standin/${marker(runtime)}" in release, "release has no $runtime")
         }
-        // The network runtime: debug only, no twin.
+        // The network runtime: debug only.
         assertTrue("dev/koga/hopi/standin/${marker("hopi-network")}" in debug, "debug has hopi-network")
         assertFalse("dev/koga/hopi/standin/${marker("hopi-network")}" in release, "release has no hopi-network")
-        // The perf monitors' runtime, from `perf { enabled = true }`: debug only, no twin.
+        // The perf monitors' runtime, from `perf { enabled = true }`: debug only.
         assertTrue("dev/koga/hopi/standin/${marker("hopi-perf")}" in debug, "debug has hopi-perf")
         assertFalse("dev/koga/hopi/standin/${marker("hopi-perf")}" in release, "release has no hopi-perf")
         // The module of HopiRules and HopiPerf reaches both, as the shared module asked.

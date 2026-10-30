@@ -8,6 +8,14 @@ write into the existing `HopiStore`, so the NDJSON log line, the bridge/CLI and 
 (and the in-app screen, until the runtime-split plan's stage 5 removed it) show the new records
 with no change beyond the `source` field below.
 
+**History note (2026-10-30).** The runtime-split plan (`docs/design/api-runtime-split-plan.md`)
+removed `hopi-urlsession`, its noop twin `hopi-urlsession-noop` and the other twins (stages 5 to
+10, 2026-10-28 and 29), then the parity check `:checkNoopParity` (stage 11, 2026-10-30). The
+sections it changed say so with their stage; every other passage that names a noop, a twin or
+parity (the architecture contract changes, the tests, the A/B method, the implementation steps,
+"As built" and "Hardening") records the design as built before it and is kept as history. The
+contract is `docs/ARCHITECTURE.md`.
+
 ## Goals and non-goals
 
 Goals:
@@ -25,9 +33,9 @@ Goals:
   metrics, `respondsToSelector:` answers, delegate identity, `protocolClasses`.
 - Bounded: the response body is kept up to `maxBodyBytes` and only counted past it. The app's
   threads do no copying; the main thread does no Hopi work at all.
-- Release builds contain none of this code, checked automatically: as designed they got the noop
-  twin; since stage 9 of the runtime-split plan (2026-10-29) they get no runtime and no
-  `hopi-start` (no noop), and the iOS release guard fails a Release link that would hold one.
+- Release builds contain none of this code, checked automatically: since stage 9 of the
+  runtime-split plan (2026-10-29) they get no runtime and no `hopi-start` (as designed, the noop
+  twin), and the iOS release guard fails a Release link that would hold one.
 
 Non-goals (v1): WebSocket frames, `NSURLSessionStreamTask`, AVFoundation media loading, WKWebView,
 `NSURLConnection`, raw CFNetwork/BSD sockets, gRPC or Cronet stacks, physical iOS devices for
@@ -524,13 +532,13 @@ The call compiles in both configurations, because the noop exports the same API.
 did this in `iOSApp.swift` until the runtime-split plan's stage 6. Since then it calls
 `Hopi.shared.start { … }` from `hopi-start` inside `#if HOPI`, a Swift condition that follows the
 same build setting as the Gradle build phase (docs/ARCHITECTURE.md, "Consumer API" and
-"Selecting the runtimes in a KMP project"): `hopi-start` has no noop, so a framework without the flag has no
+"Selecting the runtimes in a KMP project"): a framework without the flag has no `hopi-start`, so no
 `Hopi`, and the call compiles only where it has.
 
-### Noop twin and release exclusion
+### Release exclusion
 
-Since stage 9 of the runtime-split plan (2026-10-29): no noop twin; a Release framework holds no
-runtime, the iOS release guard fails a Release link whose classpath holds one, and
+Since stage 9 of the runtime-split plan (2026-10-29): a Release framework holds no runtime (as
+designed, the noop twin below), the iOS release guard fails a Release link whose classpath holds one, and
 `:sample:shared:verifyIosReleaseExcludesCapture` checks the framework by families that now include
 core's `_hopi_hits_`, every runtime package's Kotlin symbols, hopi-start's `Hopi` and the header's
 declarations; the Android release check is `verifyReleaseHasNoRuntime`; the contract is ARCHITECTURE's ("Release guards",

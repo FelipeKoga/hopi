@@ -4,21 +4,22 @@
 Needs one booted emulator or device (adb at the default SDK location or on PATH), the dev server
 up on the host and logging to SERVER_LOG, `adb reverse tcp:8765 tcp:8765`, the CLI installed
 (`./gradlew :hopi-cli:installDist`), and two debug APKs of the sample: CAPTURE (plain
-`assembleDebug`, the dev.koga.hopi plugin on) and NOOP (`assembleDebug -Psample.hopiCapture=false`,
-built as release is: noop runtime, noop twins, no instrumentation).
+`assembleDebug`, the dev.koga.hopi plugin on) and NOHOPI (`assembleDebug -Psample.hopiCapture=false`,
+built as release is: no runtime, no instrumentation).
 
-  run.py e2e OUT SERVER_LOG CAPTURE NOOP
+  run.py e2e OUT SERVER_LOG CAPTURE NOHOPI
       For each APK: launches the app with `--es capture all` (the fake SDK's nine requests and
       Kotlin's URL.readText()) and `--es giant mb=1;runs=1` (one Ktor request through the OkHttp
       engine), then matches what Hopi recorded (summary lines in logcat, and `hopi list --json`
       over the bridge) against the dev server's own log: with capture every tagged request exactly
-      once with the expected source, the Ktor one "okhttp" and never "ktor"; with the noop build
+      once with the expected source, the Ktor one "okhttp" and never "ktor"; with the nohopi build
       the same server requests and no record at all.
-  run.py ab OUT CAPTURE NOOP [ROUNDS] [SPEC] [ARMS]
-      Interleaved A/B (noop, capture, noop, capture, ...): each block installs one APK, starts the
+  run.py ab OUT CAPTURE NOHOPI [ROUNDS] [SPEC] [ARMS]
+      Interleaved A/B (nohopi, capture, nohopi, capture, ...): each block installs one APK, starts the
       app with `--es captureBench SPEC` and keeps its `{"captureBench":...}` lines. ARMS, default
-      `noop,capture`, is the order within a round; `noop,capture,noop2` adds a second noop block
-      (the same NOOP APK) whose difference from the first is the noise band (abtable.py).
+      `nohopi,capture`, is the order within a round; `nohopi,capture,nohopi2` adds a second
+      nohopi block (the same NOHOPI APK) whose difference from the first is the noise band
+      (abtable.py).
 
 Subprocesses get argument arrays; nothing is sent through a shell. Waiting is event-driven: the
 script reads logcat's stream until the line it needs arrives (or a timeout).
@@ -108,10 +109,10 @@ def server_lines(path, start):
         return [json.loads(line) for line in f.readlines()[start:] if line.startswith("{")]
 
 
-def e2e(out, server_log, capture_apk, noop_apk):
+def e2e(out, server_log, capture_apk, nohopi_apk):
     os.makedirs(out, exist_ok=True)
     report = {}
-    for label, apk in (("capture", capture_apk), ("noop", noop_apk)):
+    for label, apk in (("capture", capture_apk), ("nohopi", nohopi_apk)):
         install(apk)
         with open(server_log) as f:
             start = len(f.readlines())
@@ -156,15 +157,15 @@ def tag(path):
 
 def check(report):
     problems = []
-    cap, noop = report["capture"], report["noop"]
+    cap, nohopi = report["capture"], report["nohopi"]
     server_tags = sorted(t for t in (tag(s["path"]) for s in cap["server"]) if t)
     if server_tags != sorted(EXPECTED):
         problems.append(f"capture build: the server saw tags {server_tags}, expected {sorted(EXPECTED)}")
-    noop_tags = sorted(t for t in (tag(s["path"]) for s in noop["server"]) if t)
-    if noop_tags != server_tags:
-        problems.append(f"noop build sent {noop_tags}, the capture build {server_tags}")
-    if len(noop["server"]) != len(cap["server"]):
-        problems.append(f"the server saw {len(cap['server'])} requests from the capture build and {len(noop['server'])} from the noop build")
+    nohopi_tags = sorted(t for t in (tag(s["path"]) for s in nohopi["server"]) if t)
+    if nohopi_tags != server_tags:
+        problems.append(f"nohopi build sent {nohopi_tags}, the capture build {server_tags}")
+    if len(nohopi["server"]) != len(cap["server"]):
+        problems.append(f"the server saw {len(cap['server'])} requests from the capture build and {len(nohopi['server'])} from the nohopi build")
     for name, recorded in (("summary log", cap["records"]), ("hopi list", cap["cli"])):
         by_tag = {}
         for r in recorded:
@@ -203,19 +204,19 @@ def check(report):
             body = (request.get("body") or {}).get("text")
             if body != sent["body"]:
                 problems.append(f"hopi get sdk={t}: request body {body!r}, the server received {sent['body']!r}")
-    if noop["records"]:
-        problems.append(f"noop build: {len(noop['records'])} Hopi records")
+    if nohopi["records"]:
+        problems.append(f"nohopi build: {len(nohopi['records'])} Hopi records")
     if not any("started=true okHttpInstrumented=true" in s for s in cap["status"]):
         problems.append(f"capture build status: {cap['status']}")
-    if not any("started=false okHttpInstrumented=false" in s for s in noop["status"]):
-        problems.append(f"noop build status: {noop['status']}")
+    if not any("started=false okHttpInstrumented=false" in s for s in nohopi["status"]):
+        problems.append(f"nohopi build status: {nohopi['status']}")
     return problems
 
 
-def ab(out, capture_apk, noop_apk, rounds=3, spec="kinds=okhttp,urlconnection;path=/json;n=300;warmup=50", arms="noop,capture"):
+def ab(out, capture_apk, nohopi_apk, rounds=3, spec="kinds=okhttp,urlconnection;path=/json;n=300;warmup=50", arms="nohopi,capture"):
     os.makedirs(out, exist_ok=True)
     results = []
-    apks = {"noop": noop_apk, "noop2": noop_apk, "capture": capture_apk}
+    apks = {"nohopi": nohopi_apk, "nohopi2": nohopi_apk, "capture": capture_apk}
     for r in range(rounds):
         for label, apk in ((arm, apks[arm]) for arm in arms.split(",")):
             install(apk)
@@ -237,7 +238,7 @@ if __name__ == "__main__":
     if command == "e2e":
         sys.exit(e2e(*args))
     if command == "ab":
-        out, capture_apk, noop_apk = args[:3]
+        out, capture_apk, nohopi_apk = args[:3]
         rounds = int(args[3]) if len(args) > 3 else 3
-        sys.exit(ab(out, capture_apk, noop_apk, rounds, *args[4:6]))
+        sys.exit(ab(out, capture_apk, nohopi_apk, rounds, *args[4:6]))
     sys.exit(f"unknown command {command}")

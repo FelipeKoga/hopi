@@ -11,7 +11,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Test support for `iosAppCaptureTests` (Swift, in the host app's process): watches the store for
- * the record of one URL. Compiled only with `-Phopi.enabled=true`, never into a noop build.
+ * the record of one URL. Compiled only with `-Phopi.enabled=true`, never into a build without the
+ * runtimes.
  */
 @OptIn(HopiInternalApi::class)
 public object SampleCaptureProbe {
