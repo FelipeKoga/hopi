@@ -1,7 +1,8 @@
 # Plan: automatic capture only, no noop twins, per-tool runtimes (handoff)
 
-Status: plan, 2026-10-27; re-planned 2026-10-28 after the evaluation (stage 1). Stages 0 and 1 are
-done; nothing of the target is built yet. Written for the agent that will execute it. Section 10
+Status: executed, 2026-10-27 to 2026-10-30 (stages 0 to 14; the report is section 10's last
+entry). Planned 2026-10-27 and re-planned 2026-10-28 after the evaluation (stage 1); written for the
+agent that executed it. Section 10
 holds the owner's later decisions and the executing agent's provisional ones, and section 3.9 the
 target they produce; both override the older text of sections 2 and 3 where they differ.
 It supersedes `docs/design/api-runtime-split.md` wherever the two differ (that first proposal kept a
@@ -2867,6 +2868,179 @@ evidence in the session's scratchpad, `probe/usbmux_probe-output.txt` and
   same commands; there is no code of its own to check, it is an adb device like the emulator.
 - **Base check**: green.
 
+Stage 14 (2026-10-30, at `c66b16e` with stage 13's docs edits in the tree, then `3952fd3`; emulator
+`Hopi_API_35`, API 35; simulator `iPhone 17`, iOS 27.0, Xcode 27.1; evidence in
+`build/evidence/runtime-split/stage14/`):
+
+- **The base check**: green at `c66b16e` (stage 12); stage 13 changed only Markdown and a comment in
+  `iOSApp.swift`, which the Xcode builds below compiled.
+- **The install** (dev server `python3 sample/devserver/devserver.py` writing `devserver.ndjson`):
+  `./gradlew :sample:androidApp:installDebug :hopi-cli:installDist -Psample.maxBodyBytes=8388608`
+  (15 s, 14 of 135 tasks executed), then `adb reverse tcp:8765 tcp:8765`.
+- **Desktop viewer against the emulator** (`./gradlew :hopi-desktop:test --tests '*DeviceViewerUiTest*'
+  -Phopi.desktop.device=android -Phopi.desktop.evidence=<evidence>`, 2 min 31 s; `android-checks.jsonl`):
+  18 of 18, as in stages 4, 5 and 7. The 5 MB body is fetched only when selected (370 ms; 6 of 6
+  other rows still summaries) and arrives whole (5242766 of 5242766 B, not truncated); copy as cURL
+  keeps `Authorization` redacted; the HAR (6127141 B) and NDJSON (7 lines) exports; 60 s idle while
+  connected: 6 Hopi threads, 0 ticks; 2 app-side connections at each of three points and never more
+  (20 samples); force-stop shows the app stopped, the relaunch reconnects 1521 ms after `am start`
+  returned and the adb reset 3253 ms after `kill-server`. 500 `POST /items`: 2705, 2687 and 2564 ms
+  connected against 2601, 2666 and 2695 ms disconnected, 0 failed (stage 5: 2692, 2570 and 2613
+  against 2743, 2738 and 2723 ms).
+- **Rules panel** (`--tests '*DeviceRulesPanelUiTest'`, the same flags, 34 s; `android-rules-checks.jsonl`):
+  36 PASS and 1 INFO (the newest row in view after a burst: yes) of 37 lines, 0 FAIL, as in stage 7.
+- **Perf lab** (`python3 benchmark/perf/verify.py <evidence>/perf`, run twice, the first run kept in
+  `perf-run1/`): 27 of 28 checks in each run (plus the two for-the-record summary rows). Both fail
+  "jank 20 ms x30: slow, not janky": `seen: 5 janky (gfxinfo, from the intended vsync: 30)  (expected
+  <= 3 of 30)`, then 4 janky. Those frames took 36 to 68 ms in the first run and 50 to 87 ms in the
+  second, their animation stage 22 to 37 ms for the 20 ms block and their GPU stage 8 to 24 ms;
+  gfxinfo counted all 30 over two deadlines in both runs (worst 84.5 and 105.8 ms). The same check
+  read 3 in stage 4; 5 and then 2 in stage 5 (its first run failed the same way); 3 in stage 7; 2 in
+  stage 8. No commit since stage 8's (`2203941`) touched `hopi-perf`'s Android or common sources or
+  core's `perf` package (only `hopi-perf`'s JVM `PerfEntry` and the lab's start-line label). The host
+  meanwhile: 1-minute load average 1.7 to 2.8, 2.3 to 2.5 GB of swap in use, the emulator the
+  busiest process. Every other check passed in both runs (the second run's figures): one hang each
+  of 301, 1001 and 3003 ms and none for 200 ms, the burn 602 ms and the click burn 604 ms, each stack
+  naming its `PerfLab` function; CPU 197.6 % (`/proc` 200.8 %); the Java heap +63.9 MB and the
+  native heap +64.0 MB; 3 memory events for the 2 trim levels sent.
+- **Perf panel** (after the second lab run: the sample brought to the front with `am start -W -n
+  dev.koga.hopi.sample/.MainActivity`, a `HOT` launch; `hopi hangs --json` written to
+  `perf/android-cli-hangs.ndjson`; `--tests '*DevicePerfPanelUiTest' -Phopi.desktop.evidence=<evidence>/perf`,
+  8 s; `perf/android-desktop-checks.jsonl`): 16 PASS and 1 INFO (the CPU figure on screen: yes) of 17
+  lines, 0 FAIL, as in stage 7. The CLI read 6 ended hangs (#70 301, #72 1001, #74 3003, #76 602,
+  #84 604 and #87 440 ms, the last at the resume), each a panel row with the CLI's duration; #70's
+  expanded stack names `PerfLab.hang`; the four switches match `perf.status`; the click burn's hang
+  arrived on the open panel (#88, 605 ms, `PerfLab.clickBurn` in its stack).
+- **Idle, with the no-runtime arm** (`python3 benchmark/perf/idle.py --seconds 60 --settle 10 --arms
+  nohopi=none@dev.koga.hopi.sample.nohopi,off=none,all=all`; `idle.ndjson`), the run stage 11 left
+  out. The `nohopi` arm was built with `./gradlew :sample:androidApp:assembleDebug
+  -Psample.hopiCapture=false -Psample.applicationIdSuffix=.nohopi` (3 s) and installed beside the
+  debug app: package `dev.koga.hopi.sample.nohopi`, debuggable, no `HopiInitProvider`, and its dex
+  holds exactly the release APK's 32 Hopi classes, no `core`, `network` or `start` type. `nohopi`:
+  no Hopi thread, the main thread at 0 µs and 0 wakes. `off`: `hopi-store` and `hopi-bridge` at
+  0 µs and 0 wakes and the main thread at 0 wakes, as `nohopi` (the whole process 80 against 100 ms
+  of CPU, 18 against 20 wakes). `all` (frames, memory, hangs, cpu): `hopi-perf-samp` at 60 ms and 60
+  wakes in the 60 s; `hopi-store`, `hopi-bridge`, `hopi-perf-frame`, `hopi-perf-hang` and the main
+  thread at 0, as in stage 8.
+- **Release APK** (`./gradlew :sample:androidApp:verifyReleaseHasNoRuntime`, with the emulator and
+  the dev server stopped; the task executed, 5 s, with `hopiReleaseGuardRelease` in the same build;
+  `release-has-no-runtime.txt`): `hopi components on the release classpath: :hopi-api, :hopi-ktor`
+  and `hopi classes in the apk: 32; referenced runtime/capture types: 0; classes calling a hook: 0;
+  Hopi manifest components: 0`, both negative controls found: 32 Hopi classes as in stage 10 (3
+  `api`, 8 `ktor`, 5 `perf`, 16 `rules`). The report is byte for byte the one already in the build
+  directory (10:35).
+- **How it ran**: one Gradle invocation at a time, each from a background shell writing its log here
+  (`gradle-*.log`) and awaited before the next step; `./gradlew --stop` before and after; no
+  xcodebuild meanwhile; the emulator stayed online throughout, so nothing was rerun for it. 5.5 GB
+  free at the start, 4.4 GB at the end (macOS grew its swap file from 3 to 4 GB). The emulator keeps
+  `dev.koga.hopi.sample` (the build above), `dev.koga.hopi.sample.nohopi` and an older
+  `dev.koga.hopi.sample.noop`; the debug APK in `sample/androidApp/build/outputs/apk/debug/` is now
+  the `nohopi` build.
+- **Not in this run**: the rest of section 7's Android list (`--es rulesVerify all` and
+  `rulesTargets`, `bench.py`, the capture end to end and A/B, E3.6-c).
+- **The iOS release guard** (the Release framework output deleted first; `guard-link-release-flag.log`):
+  `./gradlew :sample:shared:linkReleaseFrameworkIosSimulatorArm64 -Phopi.enabled=true` fails in
+  `:sample:shared:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64` in 2 s: `Hopi's iOS release
+  guard: :sample:shared:linkReleaseFrameworkIosSimulatorArm64 links a Release binary with Hopi's
+  runtime on its classpath: project ':hopi-start', project ':hopi-core' (via project ':hopi-start',
+  project ':hopi-network', project ':hopi-perf'), project ':hopi-network' (via project ':hopi-start'),
+  project ':hopi-perf' (via project ':hopi-start').`, then the three fixes and `This is the link
+  verifyIosReleaseExcludesCapture consumes: request that task by its own name for its positive
+  control.` Of its 78 task lines (41 actionable tasks), 10 executed: the seven
+  `kmpPartiallyResolvedDependenciesChecker`s, `checkIosSimulatorArm64MainComposeLibrariesCompatibility`,
+  `generateSampleBuildInfo` and the guard; every compile task that started was up to date, no link task
+  appears and no `releaseFramework` directory was written.
+- **The positive control** (`./gradlew :sample:shared:verifyIosReleaseExcludesCapture
+  -Phopi.enabled=true`, 2 min 50 s with the Release link; `verify-release-flag.log`): the guard logs
+  `Hopi's iOS release guard: :sample:shared:linkReleaseFrameworkIosSimulatorArm64 is exempt (the release
+  check's positive control, requested by name):` with the same four components and passes, the link
+  runs, and the check passes: `Shared (with the flag): 171 _hopi_us_ symbols, 40 capture classes, 52 rule
+  symbols, 10 _hopi_hits_ symbols, 2031 runtime Kotlin symbols, 79 _hopi_perf_ symbols, 24 perf classes,
+  1 Hopi classes, 2 Hopi declarations, 2 HopiStartConfig declarations, 2 capture probe declarations, 0
+  module-prefixed Hopi declarations, 0 HopiRuntimes declarations; strings
+  {dev.koga.hopi.urlsession-capture=true, dev.koga.hopi.urlsession-rules=true, _didReceiveData:=true,
+  _didFinishWithError:=true, hopi-perf-hang=true, hopi-perf-samp=true}`. Against stage 9 only the
+  runtime Kotlin count moved (2071), all of it in core: 1626 `dev.koga.hopi.core` (stage 9: 1666), 61
+  `.network`, 305 `.perf.internal` and 39 `.start` (`nm/release-framework-flag-counts.txt`).
+- **Without the flag** (`./gradlew :sample:shared:verifyIosReleaseExcludesCapture`, the previous
+  framework deleted first; 2 min 27 s; `verify-release-noflag.log`): `Shared (without the flag):` 0 in
+  every family, both never-families 0 and every string false; the guard ran and passed with nothing to
+  log. The framework holds 44796 Kotlin symbols, among them `hopi-api`'s (5 `dev.koga.hopi.api`, 217
+  `.rules` and `.perf`), the thin Ktor plugin's 24 and the sample's 1587
+  (`nm/release-framework-noflag-counts.txt`).
+- **E7 X5 and the Release app** (`xcodebuild -project sample/iosApp/iosApp.xcodeproj -scheme iosApp
+  -configuration <C> -derivedDataPath build/ios-derived -destination 'platform=iOS
+  Simulator,id=D81F1D89-DD79-48C6-B019-7983C5A53A27' build`; `xcb-release.log`, `xcb-debug-nohopi.log`,
+  `xcb-debug.log`): Release builds; its Release framework output was deleted first, so the build phase
+  linked: `> Task :sample:shared:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64`, `> Task
+  :sample:shared:linkReleaseFrameworkIosSimulatorArm64`, `BUILD SUCCESSFUL in 2m 47s`, `** BUILD
+  SUCCEEDED **`: the guard passes inside Xcode's phase. `xcrun nm -m` on
+  `Release-iphonesimulator/HopiSample.app/HopiSample` finds 0 `_hopi_(us|perf|hits)_` and 0
+  `_k[a-z]+:dev\.koga\.hopi\.(core|network|urlsession|android|ui|perf\.internal|start)[.#]`, no
+  `_OBJC_CLASS_$_SharedHopi`, and its bytes hold none of the check's six strings, in a listing of 44756
+  Kotlin symbols with `hopi-api`'s 5 and 217, the Ktor plugin's 24 and the sample's 1587
+  (`nm/release-app-counts.txt`; stage 9: 44737, the Ktor noop's 24, the sample's 1568). The same two
+  patterns find 333 and 4634 in the Debug app's `HopiSample.debug.dylib` (the positive control; stage 9:
+  333 and 4750) and 0 and 0 in the `HOPI_ENABLED=false` Debug dylib. Debug with `HOPI_ENABLED=false`
+  builds (Swift conditions `DEBUG`; its phase relinked the Debug framework without the flag, `BUILD
+  SUCCESSFUL in 20s`), and so does the default Debug (`DEBUG HOPI`; 13 s, the flagged compile from the
+  build cache); both were copied to `apps/nohopi.app` and `apps/hopi.app` for the runs below.
+- **On the simulator** (the Debug app; dev server `python3 sample/devserver/devserver.py`,
+  `devserver.ndjson`): `-verifyRules` (`verify-rules.log`; launched under `--console-pty` and stopped
+  once both done lines appeared, 7 s): `{"engine":"urlsession","failed":0,"rules":"done"}`
+  and `{"rules":"done","real":true,"failed":0,"scenarios":12}`, 33 of 33 `"ok":true` (21 URLSession lines
+  with the pinned check, 12 Ktor Darwin: stage 9's 11 and `mock-302`), no `HopiRules:` line; `mock-302`
+  on Ktor Darwin reads 200 with `/items/1`'s body (`HttpRedirect` followed the mocked 302), and the pinned
+  check reads as in stage 9 (the plain and the edited request `NSURLErrorDomain -999`, the mock 200).
+  `-thirdPartySDK` (through `drive.py` with the CLI; `sdk/`, `sdk-records.txt`): 6 records, each
+  `source=urlsession` and 200: `GET /json`, `POST /echo` twice, `GET /items` twice (`data(for:)` and the
+  app's own Ktor request) and `GET /chunked`; the dev server saw the same 6.
+  `capture-swift-test.sh 'platform=iOS Simulator,id=D81F1D89-DD79-48C6-B019-7983C5A53A27'` (with its own
+  dev server, mine stopped meanwhile; `capture-swift-test.log`): 6 of 6 (`Executed 6 tests, with 0
+  failures`, `** TEST SUCCEEDED **`), its Gradle phase reusing the Debug link. The capture end to end
+  (`benchmark/urlsession/e2e/run.sh <ev>/e2e <ev>/devserver.ndjson <ev>/apps`, then `check.py`; `e2e/`,
+  `e2e-run.log`, `e2e-check.log`): 47 of 47 (`{"checks": 47, "failed": 0}`): the Swift shapes (20 records
+  for 19 server requests), Ktor Darwin (10 for 9) and `-thirdPartySDK` (6), each request recorded once
+  with `source=urlsession`, the 20 MB bodies kept to the 256 KiB cap (`262144/20971479 B`), and the bytes
+  the app read and the requests the server saw identical between the Hopi build and the `nohopi` arm,
+  now the `HOPI_ENABLED=false` build (19 Swift and 9 Ktor scenarios; the app `run.sh` left installed
+  holds 0 runtime symbols).
+- **The perf lab** (`python3 benchmark/perf/verify.py <ev>/perf --platform ios`, which launches
+  `-verifyPerf`): the first run, 80 s after the simulator's boot, failed one check: `FAIL  cpu 2 threads
+  x 5 s: process %  seen: 93.9 % over 3 samples; /proc None % (whole step)  (expected 200 +-15 %, of one
+  core)`; the other 20 passed (`perf-run1/`, `verify-perf-run1.log`). A minute later the host's load
+  average read 36.95 on 8 cores, from the simulator's post-boot daemons and `kernel_task` at 147 % under
+  swap (a fifth 1 GB swap file had appeared during the Release link). Rerun once at a load of 4.0
+  (`load-wait-1.txt`): 21 of 21 (`perf/`, `verify-perf.log`): the CPU step 199.9 % over 4 samples, hangs
+  of 300, 1003, 3010 and 600 ms, each stack naming its `PerfLab#` function (stage 8: 301, 1003, 3009 and
+  600).
+- **The desktop viewer against the simulator** (`./gradlew :hopi-desktop:test --tests
+  '*DeviceViewerUiTest*' -Phopi.desktop.device=ios -Phopi.desktop.evidence=<ev>`, the Debug app
+  reinstalled and the dev server up; `ios-checks.jsonl`, `junit-DeviceViewerUiTest.xml`,
+  `gradle-DeviceViewerUiTest.log`, `ios-app-stopped.png`, `ios-live-rows.png`): 6 of 6 (connected through
+  `bridge.json` on `iPhone 17, iOS 27.0`, stopped on the terminate, reconnected by itself 3841 ms after it
+  (stage 6: 1580 ms), 3 live `/giant` rows from URLSession capture, a body fetched on selection only:
+  262144 B, truncated); JUnit 2 tests, 0 failures (the Android case returns at once); `BUILD SUCCESSFUL
+  in 26s`.
+- **Not run** (section 7's iOS list, outside this part): `benchmark/perf/ios_idle.py` with the Debug and
+  the `HOPI_ENABLED=false` builds, and the URLSession A/B (`benchmark/urlsession/e2e/ab.sh`); the physical
+  devices (none attached).
+- **Machine**: free disk 4.5 GB at the start, 2.6 GB at the lowest (after the Debug builds, with the new
+  swap file), 4.1 GB at the end. MirrorAgent's `mirror-agent serve` (running since 2026-10-24, left
+  alone) listens on `*:8765` over IPv6; the sample's `http://127.0.0.1:8765` reached the dev server on
+  IPv4. At the end the simulator is shut down, both of my dev servers stopped, no Gradle daemon,
+  `xcodebuild` or qemu runs, and the tracked files are as found (`env-end.txt`).
+- **Maven Local** (`./gradlew publishToMavenLocal`, 101 of 429 tasks executed): `hopi-api`,
+  `hopi-core`, `hopi-network`, `hopi-perf`, `hopi-ktor` and `hopi-start` at 0.1.0, with their
+  platform publications (`hopi-api`, `hopi-network`: android, iosarm64, iossimulatorarm64, jvm;
+  `hopi-start`: iosarm64, iossimulatorarm64, jvm), the plugin, its marker and `hopi-instrument`.
+  `~/.m2/repository/dev/koga/hopi` still holds `hopi-android`, `hopi-urlsession`, `hopi-rules`,
+  `hopi-ui` and every `*-noop` from before this plan (with their platform publications): a consumer
+  with `mavenLocal()` resolves them silently if it names them, and deleting them is the owner's call.
+- **Not run**: `benchmark/perf/ios_idle.py`, both capture A/Bs and the ART probe (run in stages 8 to
+  10, no runtime code changed since but `hopi-connect`, the CLI and the viewer), and every check on
+  physical hardware (no phone attached; stage 12 lists the owner's steps).
+
 ## 10. Progress (kept by the executing agent)
 
 Started 2026-10-27 on the branch `feat/runtime-split` (this plan's commit `c7d9cf2` with
@@ -2937,8 +3111,8 @@ whose arguments name Gradle's daemon entry point; 3 of 3 pass in 30 s, no daemon
 | 10. Thin Ktor plugin | 10a done: `hopi-ktor` holds the `Hopi` plugin, `HopiConfig`, `HopiLogSink` and an `@HopiInternalApi` `HopiKtorHooks` over `hopi-api` alone (10.3); the recorder moved into `hopi-network`'s shared Android and JVM source set (`compileOnly` Ktor and `hopi-ktor`), registered by the network tools; `hopi-network` and `hopi-start` gain a JVM target, and `Hopi.start` on the JVM registers the rules and perf runtimes and starts the store and bridge; the start's redaction reaches Ktor records (10.5); `hopi-ktor-noop` and the Ktor twin pair deleted; 10b done: core's rules answer every platform mock and edit with `Cache-Control: no-store` (`ResponseEdits.noStore`; R5), iOS's dead Ktor Darwin cover and `KTOR` among its platform sources removed, R3 and R5 regression tests, `mock-302` in the sample's self-test; [run] results in section 9, a reduced set | `cad60c3` (10a), (this commit) |
 | 11. Remove the remaining twin machinery | done: the root build's parity check (`NoopParityCheck` with its `inline`/`const` rule, `noopTwins`, `checkNoopParity`) and the plugin's `selectTwins` and `TWINS` deleted, `:checkNoopParity` out of README's and section 7's base check, the functional test `publishedCoordinatesAreSwappedPerVariant` renamed `publishedCoordinatesArePerVariant`; the live benchmark scripts' noop arm is the `nohopi` arm (install suffix `.nohopi`), and the readers also read the old labels; the tracked `__pycache__` files deleted and `__pycache__/` ignored; the sample's texts; O7 as applied (`checkKotlinAbi` in six modules); the grep gate from 453 to 235 hits, each under a dated history note or a false positive; [run] results in section 9, two of the stage's three [run] items not run | `09f0dae` |
 | 12. Physical devices | done: `hopi-connect` reaches an iPhone on USB through a usbmuxd client (`Usbmuxd.kt`: `ListDevices` and `Connect`, plist protocol version 1, a host-loopback relay with a `Connect` per connection) and a devicectl reader (`Devicectl.kt`: `list devices` for names, `device copy from` for `bridge.json`, in a 0700 temporary directory deleted on return or by a shutdown hook); `Targets` lists USB iPhones (`usbIphones`) and opens one that `--device` names, or the only one when no adb device is ready and no simulator is booted (`openIos`; the viewer's `openUsbIphone`), and names an unplugged phone as the reason a connection ended; `hopi devices` lists them (`"state":"usb"`), the viewer's picker too, with a Reconnect status; tests against `FakeUsbmuxd` and a fake devicectl in all three modules; Android phones need no code (adb); [run] results in section 9, every hardware check not run (no hardware attached) | (this commit) |
-| 13. Documentation pass | done: README rewritten around the tools and the install paths (Android: the plugin alone; iOS: `hopi-api`, `hopi-start` under `hopi.enabled` with the Xcode build phase, `#if HOPI` and the iOS release guard; JVM: `hopi-ktor` and `Hopi.start`), with "The Ktor plugin", "What reaches a release build" (3.6.1; E2 correction 4, the exported classes named without a count; E2.3's static and dynamic results; Debug builds handed to testers) and a dated migration summary for earlier 0.1.0 builds in place of the stage 9 to 11 bullets; E3.3's `HopiMonitor` import in README, perf-monitors.md and 3.2; the performance rows split into current ones and dated history (R25), the release APK row at stage 10's 32 classes (stage 14 measures it again); the desktop viewer's look; ARCHITECTURE's Migration note gone (A1), the Modules table without its stage column, principle 1 without stage references, and stale passages fixed (the idle-cost row, the summary log's switch, the JVM bridge, the Android socket name, ⌘P, the Ktor recorder's budget dated); ROADMAP: USB iPhones, the viewer's look, O8 as a backlog item, the `no-store` exemption as an open rules item; urlsession-capture.md's stage 6 note in the past tense; `iOSApp.swift`'s comment names `HopiPerf` (stage 8's note), the stage's one edit outside Markdown; rule 8's gate from 235 to 223 hits, each under a dated history note or a false positive (`inputWindows`), the named-term gates likewise; 18 anchor links resolve | (this commit) |
-| 14. Final verification and report | | |
+| 13. Documentation pass | done: README rewritten around the tools and the install paths (Android: the plugin alone; iOS: `hopi-api`, `hopi-start` under `hopi.enabled` with the Xcode build phase, `#if HOPI` and the iOS release guard; JVM: `hopi-ktor` and `Hopi.start`), with "The Ktor plugin", "What reaches a release build" (3.6.1; E2 correction 4, the exported classes named without a count; E2.3's static and dynamic results; Debug builds handed to testers) and a dated migration summary for earlier 0.1.0 builds in place of the stage 9 to 11 bullets; E3.3's `HopiMonitor` import in README, perf-monitors.md and 3.2; the performance rows split into current ones and dated history (R25), the release APK row at stage 10's 32 classes (stage 14 measures it again); the desktop viewer's look; ARCHITECTURE's Migration note gone (A1), the Modules table without its stage column, principle 1 without stage references, and stale passages fixed (the idle-cost row, the summary log's switch, the JVM bridge, the Android socket name, ⌘P, the Ktor recorder's budget dated); ROADMAP: USB iPhones, the viewer's look, O8 as a backlog item, the `no-store` exemption as an open rules item; urlsession-capture.md's stage 6 note in the past tense; `iOSApp.swift`'s comment names `HopiPerf` (stage 8's note), the stage's one edit outside Markdown; rule 8's gate from 235 to 223 hits, each under a dated history note or a false positive (`inputWindows`), the named-term gates likewise; 18 anchor links resolve | `3952fd3` |
+| 14. Final verification and report | done: the base check, the device checks of section 9's Stage 14 block (one perf-lab check, "jank 20 ms x30", over its bound in both runs; `-verifyPerf` passed on its rerun), the new set in Maven Local, the release APK at 32 Hopi classes, and the report below | (this commit) |
 | Later (O8). Plugin on KMP modules | deferred | |
 
 Carried in from before the plan: `DeviceViewerUiTest` on Android was partly stale (ROADMAP,
@@ -3122,6 +3296,41 @@ Stage 12 leaves for later stages:
 - With an iPhone attached, a `--device` that names nothing and no `--platform` still reads "device
   <id> is neither listed by adb devices nor a booted simulator", byte for byte as before; naming
   USB iPhones there is a wording change for the owner.
+
+Report (stage 14, 2026-10-30):
+
+- **What changed for a consumer.** Six published modules: `hopi-api` (`HopiRules`, `HopiPerf` and
+  the runtimes' registry; in every build, no twin), `hopi-core`, `hopi-network` (automatic capture
+  on Android and iOS and the Ktor recorder on Android and the JVM; it replaced `hopi-android` and
+  `hopi-urlsession`), `hopi-perf` (the monitors behind `HopiPerf`), `hopi-ktor` (a thin plugin over
+  `hopi-api`) and `hopi-start` (`Hopi.start` on iOS and the JVM). Every noop twin, the in-app UI,
+  `HopiAndroid`, `HopiUrlSession` and `selectTwins` are gone. A release build carries Hopi only as
+  `hopi-api` and the thin plugin (32 classes in the sample's APK, no runtime or capture type);
+  `hopiReleaseGuard<Variant>` and the iOS release guard fail a release build that links a runtime.
+  The surfaces are the desktop viewer (restyled, `15448b5`) and the CLI, which also reach a USB
+  iPhone (stage 12).
+- **Fixed on the way.** The frames start reply that hinted at an attach already done (stage 8);
+  Android capture of a chunked body under the cap allocating 3.2 to 4.2 times it, now about 2 times
+  (`80f1a46`); the start's redaction lists missing from Ktor-recorded requests on Android with
+  `agentBridge` off (10.5); Ktor's `HttpCache` keeping a platform mock after its rule was removed
+  (`no-store`, 10b).
+- **Measured before and after** (section 9): the release APK's Hopi classes 32 (stage 7, with the
+  noops), 31 (stage 8), 30 (stage 9), 32 (stage 10, the thin plugin replacing the Ktor noop); the
+  provider's start within noise at each stage, perf's part 9.7 to 6.35 ms (stage 8); Android
+  capture +24 and +28 µs of CPU per request (README's 2026-10-27 figures: +22.5 to +24); the
+  URLSession A/B within noise; an idle app with nothing started equal to one with no runtime, on
+  both platforms.
+- **Not verified, and why.** Physical devices: no phone was attached, so the USB iPhone path and an
+  Android phone over USB or wireless adb are the owner's checks (stage 12's steps). Stages 10 and 11
+  ran a reduced set at the owner's request to finish quickly (2026-10-29): stage 10's ART probe and
+  start-line A/B, both capture A/Bs after stage 9, and `ios_idle.py` were not run again. One
+  perf-lab check, "jank 20 ms x30: slow, not janky", read 5 and 4 janky frames (bound 3) in stage 14
+  on a loaded host, where stages 4 to 9 read 2 to 3; no perf code changed after stage 8.
+- **The owner's decisions left open.** D8's letter (9.4: `HopiAndroid` deleted, not internal); an
+  exemption from `no-store` for a rule's own `Cache-Control`; the stale artifacts in Maven Local;
+  E1 R8's CPU at an 8 MiB cap; the plugin on KMP modules (O8); merging `feat/runtime-split` into
+  `main`.
+
 ---
 
 ## Appendix A. Inventory already found (2026-10-27, narrow greps; re-grep in E1.1)
