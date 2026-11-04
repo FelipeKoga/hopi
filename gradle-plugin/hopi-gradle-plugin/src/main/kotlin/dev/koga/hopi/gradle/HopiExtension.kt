@@ -3,21 +3,42 @@ package dev.koga.hopi.gradle
 import org.gradle.api.Action
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Nested
 
 /**
- * The optional `hopi { }` block of an Android application module. Every value has a default, so
- * `plugins { id("dev.koga.hopi") }` alone is the whole setup. The store, redaction, log and bridge
- * settings at the top are the start's, shared by every tool, and mean what they mean for
- * `Hopi.start` on iOS and the JVM and for the Ktor plugin, whose every client's installation makes
- * the start's first; capture's own settings are in [network], the monitors' in [perf].
+ * The optional `hopi { }` block of an Android application module or a Kotlin Multiplatform module.
+ * Every value has a default, so `plugins { id("dev.koga.hopi") }` alone is the whole setup. The
+ * store, redaction, log and bridge settings at the top are the start's, shared by every tool, and
+ * mean what they mean for `Hopi.start` on iOS and the JVM and for the Ktor plugin, whose every
+ * client's installation makes the start's first; capture's own settings are in [network], the
+ * monitors' in [perf].
+ *
+ * In a KMP module the generated `HopiSetup` passes the top settings, `network { rules }`,
+ * `perf { enabled }` (so iOS registers the monitors only with `perf { enabled = true }`, as Android
+ * does) and `perf { remoteControl }` to `Hopi.start`; the others are Android's (iOS always captures
+ * URLSession, and starts monitors at launch with `-hopiPerf`).
  */
 public abstract class HopiExtension {
     /**
-     * False: no variant gets a runtime, a transform or a generated class. The release guard still
-     * runs on every non-debuggable variant: it refuses a runtime whatever this says.
+     * False: no variant gets a runtime, a transform or a generated class, and in a KMP module no
+     * build gets `hopi-start` and `HopiSetup.start()` does nothing. The release guards still run on
+     * every non-debuggable variant and every iOS Release link: they refuse a runtime whatever this
+     * says.
      */
     public abstract val enabled: Property<Boolean>
+
+    /** Set by the plugin in a KMP module: this Gradle invocation is an iOS Debug build (`IosBuild`). */
+    internal var iosDebug: Boolean = false
+
+    /**
+     * Read-only, for a KMP module's own build logic (a debug-only source set, a build label): true
+     * when this Gradle invocation gives the module's iOS compilations `hopi-start` and the generated
+     * `HopiSetup.start()` starts Hopi, which is a Debug build (`-Phopi.enabled=true`, or without the
+     * property Xcode's Debug configuration) with [enabled]; false in any other build, and in an
+     * Android application module.
+     */
+    public val iosRuntime: Provider<Boolean> get() = enabled.map { it && iosDebug }
 
     public abstract val maxEntries: Property<Int>
     public abstract val maxTotalBytes: Property<Long>

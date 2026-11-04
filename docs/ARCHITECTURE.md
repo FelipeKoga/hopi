@@ -157,9 +157,9 @@ it, once per process, on a background thread: the install path only spawns that 
 (see "UI", which also records the in-app UI it held until 2026-10-28).
 
 `hopi-start`, the iOS start since the runtime-split plan's stage 6 and the JVM start since its
-stage 10 (call once, first thing at startup; on iOS in a Debug build, Swift: `Hopi.shared.start()`
-or `Hopi.shared.start { $0.agentBridge = true }`, inside `#if HOPI`, see "Selecting the runtimes in
-a KMP project"; on the JVM first in `main`, before building any `HttpClient`, from the desktop
+stage 10 (call once, first thing at startup; on iOS through the `HopiSetup.shared.start()` the
+`dev.koga.hopi` plugin generates, which calls it in a Debug build with the `hopi { }` block, see
+"Selecting the runtimes in a KMP project"; on the JVM first in `main`, before building any `HttpClient`, from the desktop
 app's module or a KMP module's `jvmMain`, since `hopi-start` has no Android target):
 
 ```kotlin
@@ -377,40 +377,34 @@ commonMain.dependencies {
 }
 ```
 
-The selection happens in the consumer's shared `build.gradle.kts`, for the iOS entry only: to start
-Hopi from Swift, the shared module adds the iOS entry `hopi-start` with the flag only and exports
-it from the framework (an Objective-C framework carries only its own declarations and those it
-exports):
+The selection is the `dev.koga.hopi` plugin's, applied to the shared module (`HopiKmp`, the
+runtime-split plan's O8), per Gradle invocation, since one compilation serves both build types:
+the Gradle property `hopi.enabled` (`true` or `false`) when it is set; else Xcode's environment as
+the Kotlin plugin reads it for `embedAndSignAppleFrameworkForXcode` (`CONFIGURATION` matched
+exactly, ignoring case, to `debug` or `release`; for another name `KOTLIN_FRAMEWORK_BUILD_TYPE`
+the same way; nothing without `CONFIGURATION`); else no runtime. It reads them through providers,
+so the configuration cache keeps them as inputs and a switch from Debug to Release configures
+again. A Debug build (with `hopi { enabled }`, the default) gets `hopi-start` as `api` of `iosMain`,
+exported from every iOS framework (an Objective-C framework carries only its own declarations and
+those it exports); every build gets `hopi-api` as `api` of `commonMain`, exported from every iOS
+framework, so Swift's and shared code's `HopiRules` and `HopiPerf` calls compile in every
+configuration and, without a runtime, return `-1`, `false` or an empty list, or do nothing. The
+runtimes, `hopi-network` and `hopi-perf` (with `hopi-core`), are never named: `hopi-start` brings
+them and names their tools, so Kotlin/Native keeps them in a Debug framework.
 
-```kotlin
-val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
-iosMain.dependencies { if (hopiEnabled) api("dev.koga.hopi:hopi-start:$v") }
-target.binaries.framework { if (hopiEnabled) export("dev.koga.hopi:hopi-start:$v") }
-```
-
-A framework built without the flag has no `Hopi`, so the Swift call sits inside `#if HOPI`, a
-compilation condition derived from the build setting the Gradle build phase reads, which keeps the
-two in step: in the app target's Debug configuration, and in that of a test target that calls
-`Hopi` (it inherits no app setting), `HOPI_ENABLED = YES`, `HOPI_SWIFT_CONDITION_YES = HOPI` (and
-`HOPI_SWIFT_CONDITION_true = HOPI`, for `HOPI_ENABLED=true` on the command line) and
-`SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))`, set
-on the targets so that `$(inherited)` keeps the project's `DEBUG`. The phase passes the flag only
-when `CONFIGURATION` is `Debug` and `HOPI_ENABLED` is `YES` or `true`, the two values that set
-`HOPI`, so Release and `xcodebuild … HOPI_ENABLED=false` (or any other value) compile without the
-call. Not `#if DEBUG`: it removes nothing from a framework, which links what the flag says (Release
-would link Hopi too when the flag is passed, since one framework block serves both build types:
-the iOS release guard, below, fails that link), and a Debug build without the flag has no `Hopi`
-to call. `sample/iosApp/project.yml` is the reference.
-`HopiRules` and `HopiPerf` come from `hopi-api`, which a framework whose Swift calls them takes as
-`api` and exports in every configuration, with or without the flag: Swift's calls to them sit
-outside `#if HOPI`, and without a runtime they return `-1`, `false` or an empty list, or do
-nothing. The runtimes, `hopi-network` and `hopi-perf` (with `hopi-core`), are never named:
-`hopi-start` brings them and names their tools, so Kotlin/Native keeps them in a Debug framework.
-
-Debug builds pass `-Phopi.enabled=true` (the Xcode build phase that calls Gradle; on Android the
-`dev.koga.hopi` plugin, below, replaces the flag). Release builds get the thin Ktor plugin,
-`hopi-api` and no runtime: a Release link that would hold one, because someone passed the flag to
-a Release build, fails in the iOS release guard (below).
+Swift's one call is the same in every configuration, with no `#if` and no Xcode setting:
+`HopiSetup.shared.start()`. The plugin generates `dev.koga.hopi.setup.HopiSetup` into a source
+directory of `iosMain` (`generateHopiSetup`): in a Debug build its `start()` calls `Hopi.start`
+with the module's `hopi { }` block (the store's caps, redaction, `summaryLog`, `agentBridge`,
+`network { rules }`, `perf { enabled }` as `perf`, and `perf { remoteControl }`; the other settings
+are Android's), in any other it does nothing and names no Hopi type, so a Release framework
+declares `HopiSetup` and holds no runtime. `-Phopi.enabled=false` builds a Debug app with no
+runtime (the sample's A/B `nohopi` arm); `hopi.iosRuntime`, a read-only `Provider<Boolean>`, is the
+choice for the module's own build logic. Release builds get the thin Ktor plugin, `hopi-api` and
+no runtime: a Release link that would hold one, because the invocation is a Debug one
+(`-Phopi.enabled=true`, or one invocation linking both build types) or a module names a runtime,
+fails in the iOS release guard (below). CocoaPods' `kotlin.native.cocoapods.configuration` is not
+read (a pod's Xcode build still sets `CONFIGURATION`), and JVM targets get nothing from the plugin.
 
 An Android app module selects nothing either: the thin `hopi-ktor` is the same in every variant,
 whether the app module or a KMP shared module names it. The runtimes need no build-type
@@ -438,11 +432,11 @@ none, whatever `-Phopi.enabled` says. A module that names a runtime itself, by h
 library, is not removed: the release guard (below) fails the release variant that resolves it.
 Without the plugin there is no guard: a release that names a runtime ships it, and only the
 provider's `FLAG_DEBUGGABLE` check (Android capture, "Start") keeps it from starting. The property
-keeps its meaning for iOS frameworks; an Android app without the plugin gets no core through
+is a KMP module's iOS override (above); an Android app without the plugin gets no core through
 `hopi-ktor`, so its debug build merges `hopi-core`'s provider only when a module names core, where
 it starts nothing and writes one notice line (see Android capture, "Start").
-(The generated `HOPI_ENABLED` of `sample/shared` follows the property, so only the iOS app labels
-its build with it; the Android activity reads the network status the network tool writes to
+(The generated `HOPI_ENABLED` of `sample/shared` follows the plugin's iOS choice,
+`hopi.iosRuntime`, so only the iOS app labels its build with it; the Android activity reads the network status the network tool writes to
 `hopi-api`'s registry, `HopiRuntimes.networkStarted` and `okHttpInstrumented` (`@HopiInternalApi`,
 false and false in a build with no runtime), and passes it to `SampleBuild`, so its Diagnostics
 caption and evidence lines say what the plugin selected.)
@@ -477,12 +471,10 @@ module itself, a library), not one only other runtimes bring (the `hopi-core` un
 that reaches a non-debuggable app all the same, where the guard is not applied, starts nothing: the
 provider reads `FLAG_DEBUGGABLE` first and writes one notice line (Android capture, "Start").
 
-*iOS.* `gradle/ios-release-guard.gradle`, a Groovy script plugin (it reads the Kotlin plugin's
-objects dynamically: a script plugin does not see their types), applied after the `kotlin { }`
-block, by `sample/shared` and by any build that copies it. It puts
-`hopiReleaseGuard<LinkTask>` (`hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64`) before
-the link of every RELEASE binary of a Kotlin/Native target (a JS or Wasm target, whose binaries
-have no build type, is left alone), which covers every way a Release framework is linked:
+*iOS.* The `dev.koga.hopi` plugin in a KMP module (`HopiIosReleaseGuard`, whatever
+`hopi { enabled }` says) puts `hopiReleaseGuard<LinkTask>`
+(`hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64`) before the link of every RELEASE binary
+of a Kotlin/Native target (a JS or Wasm target has none), which covers every way a Release framework is linked:
 Xcode's Release configuration, a custom configuration with `KOTLIN_FRAMEWORK_BUILD_TYPE=release`
 (the variable is a fallback for a configuration name Kotlin does not recognise, never an override
 of `Debug` or `Release`; an unrecognised name without it fails in the embed task, before any
@@ -497,16 +489,16 @@ classpath is transitive, which is how `hopi-perf` and `hopi-network` reach it th
 resolved when the configuration cache stores the task or when it runs, never while projects are
 configured (resolving there broke Kotlin's own configurations in the stage 9 experiments). It
 fails with `Hopi's iOS release guard: <path>:<link task> links a Release binary with Hopi's runtime
-on its classpath: <components>`, and names the fixes: build without `-Phopi.enabled=true` (Xcode's
-build phase passes it for the Debug configuration only); name the runtimes (`hopi-start`) only
-under that flag, since a module that names one outside it fails here with or without the flag; or
-link only the Debug binary. For
+on its classpath: <components>`, and names the fixes: link Release in a build that is not a Debug
+one (Xcode's Release configuration, or `-Phopi.enabled=false`; the plugin adds `hopi-start` to a
+Debug build only); name no runtime yourself, since a module that names one fails here in every
+build; or link only the Debug binary. For
 the link the release check consumes it also says to request that check by its own name. It cannot
 see a custom Xcode configuration a consumer maps to `debug`: that links a Debug binary, by the
 consumer's choice. One exemption, for the release check's positive control, which links a Release
-framework with every runtime on purpose: the link the applying script names before applying it
-(`extra["hopiIosReleaseGuardExemptLink"]`, a build-script value; a Gradle property of that name
-exempts nothing), and only while `verifyIosReleaseExcludesCapture` is requested by name
+framework with every runtime on purpose: the link the module's build script names
+(`extra["hopiIosReleaseGuardExemptLink"]`, a build-script value, read when the guard is created,
+after the script ran; a Gradle property of that name exempts nothing), and only while `verifyIosReleaseExcludesCapture` is requested by name
 (`verifyIosReleaseExcludesCapture` or `<path>:verifyIosReleaseExcludesCapture`, no abbreviation):
 its guard still walks the classpath and logs what it would refuse, then passes; every other
 Release link of the invocation stays guarded. The positive control is therefore
@@ -2384,12 +2376,13 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
 - **`sample/shared`** (KMP: `android`, `iosArm64`, `iosSimulatorArm64`; foundation only, no
   Material) holds everything both apps share. It takes the thin `hopi-ktor` in every build (no
   selection since the runtime-split plan's stage 10; see "Selecting the runtimes in a KMP
-  project"), takes `hopi-api`
-  (`HopiRules`, `HopiPerf`) in every build and exports it from the framework, adds and exports the
-  iOS entry `hopi-start`, which brings the runtimes, with the flag only, applies the iOS release
-  guard (`gradle/ios-release-guard.gradle`, naming the link its release check consumes), and
-  generates `HOPI_ENABLED` from the same property, so the iOS app says which one it was built
-  with. On Android the plugin selects per variant whatever the property says, so the activity sets
+  project"), and applies `dev.koga.hopi` (O8): `hopi-api` (`HopiRules`, `HopiPerf`) in every
+  build, exported from the framework, `hopi-start`, which brings the runtimes, in a Debug build
+  only, the generated `HopiSetup`, and the iOS release guard (its build script names the link its
+  release check consumes). Its `hopi { }` block mirrors the Android app's (`agentBridge`, the caps
+  from `-Psample.maxBodyBytes`/`-Psample.maxTotalBytes`, `perf { enabled }`), and it generates
+  `HOPI_ENABLED` from the plugin's choice (`hopi.iosRuntime`), so the iOS app says which one it was
+  built with. On Android the plugin selects per variant whatever the property says, so the activity sets
   `SampleBuild.androidCaptureStarted` from the network status in `hopi-api`'s registry
   (`HopiRuntimes.networkStarted`) before the UI; the Diagnostics
   caption and the evidence lines (`"build"` of the giant-JSON, perf-lab and perf-bench lines,
@@ -2420,7 +2413,9 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   requests, takes the debug build's caps, which `-Psample.maxBodyBytes=N` and
   `-Psample.maxTotalBytes=N` feed into the `hopi { }` block (defaults 256 KiB and 16 MiB) and the
   start presets for the store (since the runtime-split plan's stage 4; ROADMAP.md, "Desktop
-  viewer"). The log goes to the `HopiSample` tag on Android and stdout on
+  viewer"); on iOS, where the plugin installs nothing, the same properties feed `sample/shared`'s
+  `hopi { }` block, which the generated `HopiSetup` passes to the start (since O8). The log goes to
+  the `HopiSample` tag on Android and stdout on
   iOS (`simctl launch --console-pty`). The back gesture (ui-backhandler `BackHandler`) returns to
   the item list. iOS gets `MainViewController()`, a `ComposeUIViewController`; the static
   framework is `Shared`.
@@ -2488,9 +2483,9 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
 - **`sample/iosApp`**: a SwiftUI app (bundle id `dev.koga.hopi.sample`, iOS 16+) whose only
   view hosts `MainViewController()`. `project.yml` describes it and the checked-in
   `iosApp.xcodeproj` is generated from it with XcodeGen (2.46.0); no CocoaPods, no SwiftPM. A
-  pre-build phase runs `./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode`, with
-  `-Phopi.enabled=true` for the Debug configuration only, so Release links no runtime (the thin
-  Ktor plugin and `hopi-api`), and the iOS release guard fails a Release link that would hold one.
+  pre-build phase runs `./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode`, and the
+  plugin reads Xcode's configuration, so Release links no runtime (the thin Ktor plugin and
+  `hopi-api`), and the iOS release guard fails a Release link that would hold one.
   Script sandboxing is off for that phase (Gradle writes to `sample/shared/build`). ATS: the Debug
   configuration's `Info-Debug.plist` allows insecure HTTP loads to `127.0.0.1` and `localhost`
   only (`NSExceptionDomains`; no `NSAllowsArbitraryLoads`, no `NSAllowsLocalNetworking`);
@@ -2500,15 +2495,15 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   that matters, and the sample does not use that name). The simulator build excludes `x86_64`
   (`EXCLUDED_ARCHS[sdk=iphonesimulator*]`), since the framework has only an `iosSimulatorArm64`
   slice and a Release build otherwise builds, and fails on, every architecture.
-  `IOSApp.init` calls `Hopi.shared.start { … }` first thing, inside `#if HOPI` (`agentBridge =
-  true`, and the giant-body launch arguments `-maxBodyBytes`/`-maxTotalBytes`, because the Darwin
-  client's requests are recorded by URLSession capture, not by the plugin); it replaced
-  `HopiUrlSession.shared.start` and `HopiPerf.shared.install` in the runtime-split plan's stage 6.
-  The shared framework exports `hopi-start` with the flag only, and `project.yml` derives the Swift
-  condition `HOPI` from the build setting `HOPI_ENABLED` in the Debug configuration of the app and
-  of `iosAppCaptureTests` (see "Selecting the runtimes in a KMP project"), so the Release build and
-  `HOPI_ENABLED=false` compile without the call. `hopi-api` is exported in every configuration,
-  since Swift calls `HopiRules.shared` outside `#if HOPI` (and it holds `HopiPerf`, which Swift
+  `IOSApp.init` calls `HopiSetup.shared.start()` first thing, the same line in every
+  configuration (O8; before it, `Hopi.shared.start { … }` inside `#if HOPI`, a Swift condition
+  `project.yml` derived from `HOPI_ENABLED`): a Debug build starts Hopi with `sample/shared`'s
+  `hopi { }` block, a Release build does nothing. The giant-body caps are build properties now
+  (`-Psample.maxBodyBytes=N`, as on Android), no longer the launch arguments
+  `-maxBodyBytes`/`-maxTotalBytes`, which only set the Ktor plugin's caps (nothing on iOS).
+  `project.yml` sets no Hopi setting; its build phase runs `embedAndSignAppleFrameworkForXcode`,
+  passing `SAMPLE_GRADLE_ARGS` if the xcodebuild command line sets it. `hopi-api` is exported in
+  every configuration, since Swift calls `HopiRules.shared` (and it holds `HopiPerf`, which Swift
   does not call).
   `ThirdPartySDK.swift` stands in for an SDK the app does not own: plain Swift, no Kotlin import, `URLSession.shared` with a completion
   handler, an ephemeral session with its own data delegate uploading JSON, and `data(for:)`,
@@ -2516,7 +2511,7 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   (`xcrun simctl launch booted dev.koga.hopi.sample -thirdPartySDK`). The XCTest target
   `iosAppCaptureTests`, hosted by the app, calls the five Swift async APIs and the SDK file against
   the dev server and reads each record through `SampleCaptureProbe` (a source directory of
-  `sample/shared` compiled only with `-Phopi.enabled=true`); `sample/iosApp/scripts/capture-swift-test.sh`
+  `sample/shared` compiled only in a Debug build with Hopi, `hopi.iosRuntime`); `sample/iosApp/scripts/capture-swift-test.sh`
   starts the dev server and runs it (not in the base check: it boots a simulator, and the
   Xcode build phase runs Gradle). An earlier Xcode 27.1 build of the Debug app did not launch on the iOS
   18.2 runtime (Kotlin/Native's `platform.CoreGraphics` binding referenced
@@ -2525,10 +2520,10 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   (iOS 18.2) too (the perf lab ran there on 2026-10-26); the Kotlin/Native tests run on both.
   `CaptureVerification.swift` (launch arguments `-verifyCapture`, `-captureBench <spec>`,
   `-idleCPU S`) and `-ktorVerify` (`KtorVerify.kt`, iosMain) drive the end-to-end check in
-  `benchmark/urlsession/e2e/`; the build setting `HOPI_ENABLED=false` (`xcodebuild ...
-  HOPI_ENABLED=false`) builds the Debug app with no runtime (the thin Ktor plugin and `hopi-api`)
-  and without `hopi-start` (its Swift start compiled out), for A/B runs at the same optimisation
-  level (the scripts' `nohopi` arm).
+  `benchmark/urlsession/e2e/`; `xcodebuild ... SAMPLE_GRADLE_ARGS=-Phopi.enabled=false` builds
+  the Debug app with no runtime (the thin Ktor plugin and `hopi-api`) and without `hopi-start`
+  (its `HopiSetup.start()` does nothing), for A/B runs at the same optimisation level (the
+  scripts' `nohopi` arm).
 - **Rules scenarios.** `sample/shared` depends on `hopi-api` in every build, as `api` so the
   Android app names it too; the iOS framework exports it for Swift.
   `RulesVerify.kt` (commonMain) runs the self-test over a list of `RulesTarget`s, each a way of
@@ -2541,9 +2536,9 @@ host, so the inspector, the log stream and the CLI can be exercised (and measure
   the line notes the status expected), each rule limited to the target's
   source and to its own `rv=<target>-<scenario>` query key and removed again afterwards; one
   `{"rules":…,"ok":…}` line per scenario and a `{"rules":"done","failed":N}` line under
-  `HopiSample` (stdout on iOS). A build with no runtime registered (built without the flag, or
-  with `hopi { enabled = false }`) answers `"ok":false` everywhere, the control; on iOS a Debug
-  app built that way (`HOPI_ENABLED=false`) is still a Debug binary, so its first rule also writes
+  `HopiSample` (stdout on iOS). A build with no runtime registered (a Release build,
+  `-Phopi.enabled=false`, or `hopi { enabled = false }`) answers `"ok":false` everywhere, the
+  control; on iOS a Debug app built that way (`-Phopi.enabled=false`) is still a Debug binary, so its first rule also writes
   the one `NSLog` line of a rule added with no runtime.
   `runRulesTargets` instead sends a GET of `/json`, a GET of `/missing` and a POST of `/echo`
   tagged `rv=host-<target>` per target, for rules the host adds with the CLI or the desktop. Android (`--es rulesVerify all`, `--es rulesTargets all`, and

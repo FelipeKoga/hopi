@@ -130,14 +130,97 @@ class HopiPluginUnitTest {
 
     @Test
     fun anExcludePatternThatCoversKtorsAndroidEngineIsRecognized() {
-        val plugin = HopiPlugin()
         val engine = "io/ktor/client/engine/android/AndroidClientEngine"
         for (pattern in listOf("io.ktor.**", "io/ktor/**", "io.ktor.client.engine.android.*", "io/ktor/client/engine/*/AndroidClientEngine", "**")) {
-            assertTrue(plugin.excludes(pattern, engine), pattern)
+            assertTrue(excludes(pattern, engine), pattern)
         }
         for (pattern in listOf("io.ktor.*", "com.vendor.pinned.**", "io/ktor/client/engine/okhttp/**", "io.ktor.client.engine.android.Other")) {
-            assertEquals(false, plugin.excludes(pattern, engine), pattern)
+            assertEquals(false, excludes(pattern, engine), pattern)
         }
+    }
+
+    /**
+     * The iOS build of a Gradle invocation: `-Phopi.enabled` when set, else Xcode's environment as
+     * the Kotlin plugin reads it (`CONFIGURATION` exactly, ignoring case; `KOTLIN_FRAMEWORK_BUILD_TYPE`
+     * only for another configuration name; nothing without `CONFIGURATION`), else no runtime.
+     */
+    @Test
+    fun theIosBuildIsThePropertyElseXcodesConfigurationAsKotlinReadsIt() {
+        fun debug(property: String?, configuration: String?, fallback: String? = null): Boolean {
+            var read = false
+            val result = IosBuild.debug(property, configuration) { read = true; fallback }
+            val expectRead = property == null && configuration != null && configuration.lowercase() !in setOf("debug", "release")
+            assertEquals(expectRead, read, "KOTLIN_FRAMEWORK_BUILD_TYPE read for $property/$configuration")
+            return result
+        }
+        assertTrue(debug("true", null))
+        assertTrue(debug("TRUE", "Release"), "the property wins over Xcode")
+        assertFalse(debug("false", "Debug"), "the no-runtime Debug arm")
+        assertFalse(debug(null, null), "outside Xcode: no runtime")
+        assertFalse(debug(null, null, "debug"), "no CONFIGURATION: the fallback is not read, as Kotlin does")
+        assertTrue(debug(null, "Debug"))
+        assertTrue(debug(null, "debug"))
+        assertFalse(debug(null, "Release"))
+        assertFalse(debug(null, "Release", "debug"), "the fallback never overrides Release")
+        assertTrue(debug(null, "Staging", "Debug"), "a custom configuration takes the fallback")
+        assertFalse(debug(null, "Staging", "release"))
+        assertFalse(debug(null, "Staging"), "a custom configuration without the fallback: none (Kotlin fails its embed task)")
+        assertFalse(debug(null, "Debug-Staging", "nope"))
+        val failure = runCatching { IosBuild.debug("yes", null) { null } }.exceptionOrNull()
+        assertEquals("-Phopi.enabled must be true or false, not 'yes'", failure?.message)
+    }
+
+    private fun setupTask(runtime: Boolean): GenerateHopiSetup {
+        val project = ProjectBuilder.builder().build()
+        return project.tasks.register("generateHopiSetup", GenerateHopiSetup::class.java) { task ->
+            task.runtime.set(runtime)
+            task.maxEntries.set(42)
+            task.maxTotalBytes.set(4096L)
+            task.maxBodyBytes.set(1024L)
+            task.summaryLog.set(false)
+            task.agentBridge.set(true)
+            task.rules.set(false)
+            task.redactedHeaders.set(listOf("X-Api-Key", "Quote\"d\\\$x"))
+            task.redactedQueryParameters.set(listOf("token"))
+            task.redactionDisabled.set(true)
+            task.perf.set(true)
+            task.perfRemoteControl.set(false)
+        }.get()
+    }
+
+    @Test
+    fun theDebugSetupStartsHopiWithTheBlock() {
+        val source = setupTask(runtime = true).render()
+        assertTrue("package dev.koga.hopi.setup\n" in source, source)
+        assertTrue("public object HopiSetup {" in source, source)
+        assertTrue("    public fun start() {\n        dev.koga.hopi.start.Hopi.start {\n" in source, source)
+        for (line in listOf(
+            "maxEntries = 42", "maxTotalBytes = 4096L", "maxBodyBytes = 1024L", "summaryLog = false", "agentBridge = true",
+            "rules = false", "perf = true", "perfRemoteControl = false", "unsafeDisableRedaction()",
+            """redactHeaders("X-Api-Key", "Quote\"d\\\${'$'}x")""", """redactQueryParameters("token")""",
+        )) {
+            assertTrue("            $line\n" in source, "$line in $source")
+        }
+    }
+
+    @Test
+    fun theReleaseSetupDoesNothingAndNamesNoHopiType() {
+        val source = setupTask(runtime = false).render()
+        assertTrue("public object HopiSetup {" in source, source)
+        assertTrue("    public fun start() {\n    }\n" in source, source)
+        assertFalse("dev.koga.hopi.start" in source, source)
+        assertFalse("agentBridge" in source, source)
+    }
+
+    @Test
+    fun theIosReleaseGuardsFailureSaysWhatToDo() {
+        val runtimes = listOf("project ':hopi-start'", "project ':hopi-core' (via project ':hopi-start')")
+        val text = HopiIosReleaseGuard.message(":shared:linkReleaseFrameworkIosArm64", runtimes, releaseCheckLink = false)
+        assertTrue(text.startsWith("Hopi's iOS release guard: :shared:linkReleaseFrameworkIosArm64 links a Release binary"), text)
+        assertTrue("on its classpath: project ':hopi-start', project ':hopi-core' (via project ':hopi-start')." in text, text)
+        assertTrue("-Phopi.enabled=false" in text, text)
+        assertFalse("verifyIosReleaseExcludesCapture" in text, text)
+        assertTrue(HopiIosReleaseGuard.message(":shared:l", runtimes, releaseCheckLink = true).endsWith("for its positive control."))
     }
 
     @Test

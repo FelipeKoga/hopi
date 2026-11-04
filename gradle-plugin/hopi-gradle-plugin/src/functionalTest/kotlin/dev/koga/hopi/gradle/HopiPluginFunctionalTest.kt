@@ -36,7 +36,10 @@ import org.gradle.testkit.runner.TaskOutcome
  * runtime's consumer rules over those missing classes. An app with no such projects gets core and
  * the runtimes by their published coordinates, beside the `hopi-ktor` and `hopi-api` the shared
  * module names, as a consumer of Maven Local does. A runtime that reaches a release variant fails
- * the build in the release guard, before any dex task.
+ * the build in the release guard, before any dex task. In an iOS-only Kotlin Multiplatform module
+ * of a build with no AGP, the Gradle invocation's Xcode configuration (or `-Phopi.enabled`) decides
+ * whether the iOS compilations and frameworks get `hopi-start` and what the generated `HopiSetup`
+ * does, and every Release link gets the iOS release guard.
  */
 class HopiPluginFunctionalTest {
     private val fixtures = File(System.getProperty("hopi.fixturesDir"))
@@ -426,6 +429,124 @@ class HopiPluginFunctionalTest {
         assertTrue("apply dev.koga.hopi to the Android application module" in result.output, result.output)
     }
 
+    /**
+     * The plugin in an iOS-only Kotlin Multiplatform module, in a build with no AGP at all (the
+     * runtime-split plan's O8). The Gradle invocation decides: Xcode's `CONFIGURATION=Debug` gives
+     * every iOS compilation `hopi-start` (with the core it brings, here a stand-in project, as the
+     * plugin takes a project of that name over the coordinates) and every framework exports it with
+     * `hopi-api`, and `HopiSetup` starts Hopi with the `hopi { }` block; `CONFIGURATION=Release`
+     * gives `hopi-api` alone and a `HopiSetup` that does nothing, and configures again, since the
+     * configuration cache keeps the variable as an input (a second Debug run reuses its entry).
+     * Every Release link, and no Debug link, depends on its iOS release guard, which passes in the
+     * Release build and fails with `-Phopi.enabled=true`, naming what it found, unless the release
+     * check its build script names is requested by name. Nothing is compiled or linked: the
+     * fixture reads resolution results only.
+     */
+    @Test
+    fun aKmpModuleGetsHopiStartInADebugBuildOnly() {
+        val project = kmpFixture()
+        val setup = project.resolve("shared/build/generated/hopi/iosMain/kotlin/dev/koga/hopi/setup/HopiSetup.kt")
+        val tasks = arrayOf(":shared:hopiReport", ":shared:generateHopiSetup")
+        val guard = ":shared:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64"
+
+        val debug = kmpRunner(project, mapOf("CONFIGURATION" to "Debug"), *tasks).build()
+        val debugReport = report(debug.output)
+        assertEquals(":hopi-api,:hopi-core,:hopi-start", debugReport["compile"], debug.output)
+        for (framework in listOf("debugFramework", "releaseFramework")) {
+            val exports = debugReport["export $framework"].orEmpty().split(',')
+            assertTrue(":hopi-api" in exports && ":hopi-start" in exports, "$framework exports $exports")
+        }
+        assertEquals("", debugReport["link debugFramework"], "a Debug link has no guard")
+        assertEquals("hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64", debugReport["link releaseFramework"])
+        assertEquals("true", debugReport["iosMain generated"], "HopiSetup's directory is an iosMain source directory")
+        val debugSetup = setup.readText()
+        assertTrue("        dev.koga.hopi.start.Hopi.start {\n" in debugSetup, debugSetup)
+        for (line in listOf("agentBridge = true", "maxBodyBytes = 1024L", "redactHeaders(\"X-Api-Key\")", "perf = true", "rules = true")) {
+            assertTrue("            $line\n" in debugSetup, "$line in $debugSetup")
+        }
+
+        val again = kmpRunner(project, mapOf("CONFIGURATION" to "Debug"), *tasks).build()
+        assertTrue("Reusing configuration cache." in again.output, again.output)
+        assertEquals(debugReport, report(again.output))
+
+        val release = kmpRunner(project, mapOf("CONFIGURATION" to "Release"), *tasks).build()
+        assertTrue("environment variable 'CONFIGURATION' has changed" in release.output, "Release configures again: ${release.output}")
+        val releaseReport = report(release.output)
+        assertEquals(":hopi-api", releaseReport["compile"], release.output)
+        assertEquals(":hopi-api", releaseReport["export debugFramework"])
+        assertEquals(":hopi-api", releaseReport["export releaseFramework"])
+        val passed = kmpRunner(project, mapOf("CONFIGURATION" to "Release"), guard).build()
+        assertEquals(TaskOutcome.SUCCESS, passed.task(guard)?.outcome, passed.output)
+        val releaseSetup = setup.readText()
+        assertTrue("    public fun start() {\n    }\n" in releaseSetup, releaseSetup)
+        assertFalse("dev.koga.hopi.start" in releaseSetup, releaseSetup)
+
+        // The property wins over the (absent) Xcode environment: a Release link in a Debug build.
+        val refused = kmpRunner(project, emptyMap(), guard, "-Phopi.enabled=true").buildAndFail()
+        assertEquals(TaskOutcome.FAILED, refused.task(guard)?.outcome, refused.output)
+        val failure = "Hopi's iOS release guard: :shared:linkReleaseFrameworkIosSimulatorArm64 links a Release binary with " +
+            "Hopi's runtime on its classpath: "
+        assertTrue(failure in refused.output, refused.output)
+        for (component in listOf("project ':hopi-start'", "project ':hopi-core' (via project ':hopi-start')", "verifyIosReleaseExcludesCapture consumes")) {
+            assertTrue(component in refused.output, "the failure names $component: ${refused.output}")
+        }
+        val exempt = kmpRunner(project, emptyMap(), ":shared:verifyIosReleaseExcludesCapture", "-Phopi.enabled=true").build()
+        assertTrue(":shared:linkReleaseFrameworkIosSimulatorArm64 is exempt" in exempt.output, exempt.output)
+    }
+
+    /** The `hopi-report <key>: <value>` lines of the KMP fixture's `hopiReport`. */
+    private fun report(output: String): Map<String, String> = output.lines()
+        .filter { it.startsWith("hopi-report ") }
+        .associate { it.removePrefix("hopi-report ").substringBefore(": ") to it.substringAfter(": ", "") }
+
+    /** [runner] with no Xcode variable of the developer's environment, then [environment]. */
+    private fun kmpRunner(project: File, environment: Map<String, String>, vararg arguments: String): GradleRunner =
+        runner(project, *arguments).withEnvironment(
+            System.getenv() - setOf("CONFIGURATION", "KOTLIN_FRAMEWORK_BUILD_TYPE") +
+                ("GRADLE_RO_DEP_CACHE" to File(System.getProperty("user.home"), ".gradle/caches").path) + environment,
+        )
+
+    /**
+     * An iOS-only KMP build with no AGP: `shared` applies the plugin (with a `hopi { }` block, a
+     * release check that names its link, and `hopiReport`, which prints the Hopi projects each
+     * configuration resolves to and what each link depends on); `hopi-api`, `hopi-start` and
+     * `hopi-core` are KMP stand-ins with no sources, `hopi-start` naming core, as the runtime does.
+     */
+    private fun kmpFixture(): File {
+        val root = fixtures.resolve("kmp")
+        root.deleteRecursively()
+        writeGradleFiles(root)
+        val kotlin = System.getProperty("hopi.kotlinVersion")
+        root.write(
+            "settings.gradle.kts",
+            """
+            pluginManagement {
+                repositories {
+                    maven { url = uri("${System.getProperty("hopi.functionalRepo").replace("\\", "/")}") }
+                    mavenCentral()
+                }
+            }
+            dependencyResolutionManagement { repositories { mavenCentral() } }
+            include(":shared", ":hopi-api", ":hopi-start", ":hopi-core")
+            """.trimIndent() + "\n",
+        )
+        root.write(
+            "build.gradle.kts",
+            """
+            plugins {
+                kotlin("multiplatform") version "$kotlin" apply false
+                id("dev.koga.hopi") version "${System.getProperty("hopi.version")}" apply false
+            }
+            """.trimIndent() + "\n",
+        )
+        val standIn = "plugins { kotlin(\"multiplatform\") }\nkotlin {\n    iosArm64()\n    iosSimulatorArm64()\n"
+        root.write("hopi-api/build.gradle.kts", "$standIn}\n")
+        root.write("hopi-core/build.gradle.kts", "$standIn}\n")
+        root.write("hopi-start/build.gradle.kts", "$standIn    sourceSets.commonMain.dependencies { implementation(project(\":hopi-core\")) }\n}\n")
+        root.write("shared/build.gradle.kts", KMP_MODULE)
+        return root
+    }
+
     private fun runner(project: File, vararg tasks: String): GradleRunner = GradleRunner.create()
         .withProjectDir(project)
         .withTestKitDir(testKit)
@@ -745,6 +866,77 @@ class HopiPluginFunctionalTest {
         /** A JVM running Gradle's daemon entry point; false when the arguments cannot be read. */
         fun ProcessHandle.isGradleDaemon(): Boolean = info().arguments().map { DAEMON_MAIN in it }.orElse(false)
         const val PROVIDER = "dev.koga.hopi.android.internal.HopiInitProvider"
+
+        /** The KMP fixture's module: the plugin, its block, a named release check and the report. */
+        val KMP_MODULE = """
+            import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+            import org.gradle.api.artifacts.result.ResolvedComponentResult
+            import org.gradle.api.artifacts.result.ResolvedDependencyResult
+            import org.jetbrains.kotlin.gradle.plugin.mpp.Framework
+            import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+
+            plugins {
+                kotlin("multiplatform")
+                id("dev.koga.hopi")
+            }
+
+            kotlin {
+                listOf(iosArm64(), iosSimulatorArm64()).forEach { it.binaries.framework { baseName = "Shared" } }
+            }
+
+            hopi {
+                agentBridge.set(true)
+                maxBodyBytes.set(1024L)
+                redactHeaders("X-Api-Key")
+                perf { enabled.set(true) }
+            }
+
+            // A release check's positive control: the guard of its link passes while it is requested by name.
+            extra["hopiIosReleaseGuardExemptLink"] = "linkReleaseFrameworkIosSimulatorArm64"
+            tasks.register("verifyIosReleaseExcludesCapture") { dependsOn("hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64") }
+
+            /** Prints the Hopi projects each configuration resolves to, then [facts]. */
+            abstract class HopiReport : DefaultTask() {
+                @get:Input abstract val keys: ListProperty<String>
+                @get:Internal abstract val graphs: ListProperty<ResolvedComponentResult>
+                @get:Input abstract val facts: ListProperty<String>
+
+                @TaskAction
+                fun report() {
+                    for ((key, root) in keys.get().zip(graphs.get())) {
+                        val found = sortedSetOf<String>()
+                        val seen = mutableSetOf(root.id)
+                        val queue = ArrayDeque(listOf(root))
+                        while (queue.isNotEmpty()) {
+                            for (dependency in queue.removeFirst().dependencies) {
+                                if (dependency !is ResolvedDependencyResult || !seen.add(dependency.selected.id)) continue
+                                (dependency.selected.id as? ProjectComponentIdentifier)?.let { found += it.projectPath }
+                                queue += dependency.selected
+                            }
+                        }
+                        println("hopi-report ${'$'}key: ${'$'}{found.joinToString(",")}")
+                    }
+                    facts.get().forEach { println("hopi-report ${'$'}it") }
+                }
+            }
+
+            tasks.register<HopiReport>("hopiReport") {
+                val target = kotlin.targets.withType<KotlinNativeTarget>().getByName("iosSimulatorArm64")
+                val compile = configurations.getByName(target.compilations.getByName("main").compileDependencyConfigurationName)
+                keys.add("compile")
+                graphs.add(compile.incoming.resolutionResult.rootComponent)
+                for (framework in target.binaries.withType<Framework>()) {
+                    keys.add("export ${'$'}{framework.name}")
+                    graphs.add(configurations.getByName(framework.exportConfigurationName).incoming.resolutionResult.rootComponent)
+                    val guards = tasks.getByName(framework.linkTaskName).dependsOn
+                        .mapNotNull { (it as? TaskProvider<*>)?.name ?: (it as? Task)?.name }
+                        .filter { it.startsWith("hopi") }
+                    facts.add("link ${'$'}{framework.name}: ${'$'}{guards.joinToString(",")}")
+                }
+                val generated = kotlin.sourceSets.getByName("iosMain").kotlin.srcDirs.any { it.invariantSeparatorsPath.endsWith("build/generated/hopi/iosMain/kotlin") }
+                facts.add("iosMain generated: ${'$'}generated")
+            }
+        """.trimIndent() + "\n"
         const val GENERATED_CLASS = "dev/koga/hopi/android/generated/HopiGeneratedConfig"
         const val CONFIG_VALUES_CLASS = "dev/koga/hopi/android/internal/HopiConfigValues"
         const val NETWORK_TOOL_CLASS = "dev/koga/hopi/android/internal/NetworkTool"

@@ -2,7 +2,7 @@
 # The end-to-end URLSession capture check on the booted simulator (iPhone 17, iOS 27.0).
 # Needs: the dev server up and logging to $SERVER_LOG, the CLI installed (:hopi-cli:installDist),
 # and the two Debug apps built (hopi: `xcodebuild ... -configuration Debug`; nohopi, no runtime: the
-# same with HOPI_ENABLED=false) at $APPS/hopi.app and $APPS/nohopi.app.
+# same with SAMPLE_GRADLE_ARGS=-Phopi.enabled=false) at $APPS/hopi.app and $APPS/nohopi.app.
 # Usage: benchmark/urlsession/e2e/run.sh <out dir> <server log> <apps dir>; then check.py <out dir>.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)

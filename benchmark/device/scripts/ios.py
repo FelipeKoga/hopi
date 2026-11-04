@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""iOS counterpart of giant.py: launches the sample on the booted simulator with `-giant <spec>` (and
-`-maxBodyBytes N`) under `simctl launch --console-pty`, collects its `HopiSample:` JSON lines,
-and reads the app's memory with the host's `footprint <pid>` during the spec's delay, after the
-last run, and (with --poll) every second meanwhile.
+"""iOS counterpart of giant.py: launches the sample on the booted simulator with `-giant <spec>`
+under `simctl launch --console-pty`, collects its `HopiSample:` JSON lines, and reads the app's
+memory with the host's `footprint <pid>` during the spec's delay, after the last run, and (with
+--poll) every second meanwhile. Since O8 (2026-11-03) Hopi's capture cap is the installed build's:
+build the Debug app with `SAMPLE_GRADLE_ARGS="-Psample.maxBodyBytes=N -Psample.maxTotalBytes=M"`.
+The old --cap and --store options are refused: they reached only the Ktor plugin, which installs
+nothing on iOS.
 
-usage: ios.py <label> <spec> <out.ndjson> [--cap BYTES] [--store BYTES] [--timeout S] [--poll]
+usage: ios.py <label> <spec> <out.ndjson> [--timeout S] [--poll]
 """
 import json, queue, re, subprocess, sys, threading, time
 
@@ -28,17 +31,14 @@ def app_pid():
 def main():
     label, spec, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
     args = sys.argv[4:]
-    cap = args[args.index("--cap") + 1] if "--cap" in args else None
-    store = args[args.index("--store") + 1] if "--store" in args else None
+    if "--cap" in args or "--store" in args:
+        sys.exit("ios.py: --cap and --store set nothing since O8: the cap is the installed app's, built with "
+                 'SAMPLE_GRADLE_ARGS="-Psample.maxBodyBytes=N -Psample.maxTotalBytes=M"')
     limit = float(args[args.index("--timeout") + 1]) if "--timeout" in args else 900
     poll = "--poll" in args
     if "delay=" not in spec:
         spec += ";delay=6"
     cmd = ["xcrun", "simctl", "launch", "--console-pty", "--terminate-running-process", "booted", BUNDLE, "-giant", spec]
-    if cap:
-        cmd += ["-maxBodyBytes", cap]
-    if store:
-        cmd += ["-maxTotalBytes", store]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     lines = queue.Queue()
 
@@ -85,7 +85,7 @@ def main():
         after = footprint(pid)
     alive = app_pid() is not None
     with open(out_path, "a") as f:
-        f.write(json.dumps({"label": label, "spec": spec, "cap": cap, "done": done, "alive": alive,
+        f.write(json.dumps({"label": label, "spec": spec, "done": done, "alive": alive,
                             "footprintBeforeMb": before, "footprintAfterMb": after, "footprintPeakMb": peak or None,
                             "problems": [], "runs": records}) + "\n")
     print(json.dumps({"label": label, "done": done, "alive": alive, "before": before, "after": after, "peak": peak}))

@@ -287,12 +287,11 @@ so the app pays no extra cost.
     stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
 
 ### Gradle plugin on KMP modules
-Explore (the runtime-split plan's O8, deferred). Apply `dev.koga.hopi` to a KMP shared module too,
-so that it adds `hopi-start` and the runtimes to the iOS Debug framework, exports `hopi-api` and
-applies the iOS release guard itself, in place of the `hopi.enabled` block and the copied guard
-script the README asks for. The choice could then come from Xcode's `CONFIGURATION` during
-`embedAndSignAppleFrameworkForXcode` instead of a free Gradle property; CocoaPods' configuration
-property needs a mapping of its own.
+Done (the runtime-split plan's O8, 2026-11-03): `dev.koga.hopi` in a KMP shared module adds
+`hopi-api` to every build and `hopi-start` to a Debug one (`-Phopi.enabled`, else Xcode's
+`CONFIGURATION` as the Kotlin plugin reads it), generates `HopiSetup` for Swift's one call and
+applies the iOS release guard itself. Left: CocoaPods' configuration property
+(`kotlin.native.cocoapods.configuration`) and JVM targets, which the plugin does not handle.
 
 ### Replay (no priority)
 Backlog, no priority. Re-sending a recorded request (optionally edited) through the app's own

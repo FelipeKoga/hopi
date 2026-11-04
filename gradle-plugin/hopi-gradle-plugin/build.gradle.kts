@@ -28,7 +28,8 @@ gradlePlugin {
             implementationClass = "dev.koga.hopi.gradle.HopiPlugin"
             displayName = "Hopi"
             description = "Hopi's runtimes in the debuggable variants of an Android app (OkHttp and HttpURLConnection capture, " +
-                "the performance monitors), and a build that fails when one reaches another variant."
+                "the performance monitors) and in the Debug iOS frameworks of a Kotlin Multiplatform module (with a generated " +
+                "HopiSetup for Swift), and a build that fails when one reaches a release build."
         }
     }
 }
@@ -69,6 +70,8 @@ gradlePlugin.testSourceSets(functionalTest)
 dependencies {
     implementation(project(":hopi-instrument"))
     compileOnly(libs.android.gradle.api)
+    // The KMP path only (HopiKmp), loaded once org.jetbrains.kotlin.multiplatform is applied.
+    compileOnly(libs.kotlin.gradle.plugin)
     compileOnly(libs.asm)
     compileOnly(kotlin("stdlib"))
     testImplementation(kotlin("stdlib"))
@@ -98,7 +101,7 @@ publishing {
  */
 val functionalTestTask = tasks.register<Test>("functionalTest") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs the plugin's TestKit tests against a fixture Android app."
+    description = "Runs the plugin's TestKit tests against fixture Android apps and a fixture KMP module."
     testClassesDirs = functionalTest.output.classesDirs
     classpath = functionalTest.runtimeClasspath
     dependsOn("publishAllPublicationsToFunctionalRepository", ":hopi-instrument:publishAllPublicationsToFunctionalRepository")
@@ -111,6 +114,7 @@ val functionalTestTask = tasks.register<Test>("functionalTest") {
     systemProperty("hopi.fixturesDir", work.get().asFile.absolutePath)
     systemProperty("hopi.version", hopiVersion)
     systemProperty("hopi.agpVersion", libs.versions.agp.get())
+    systemProperty("hopi.kotlinVersion", libs.versions.kotlin.get())
     systemProperty("hopi.okhttpVersion", libs.versions.okhttp.get())
     systemProperty("hopi.okhttp5Version", libs.versions.okhttp5.get())
     // The network runtime's and core's own consumer rules, which the fixture's stand-ins ship for

@@ -163,7 +163,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Debug links Hopi's runtimes and hopi-start, which Swift starts Hopi with (behind\n# `#if HOPI`); any other configuration no runtime and no hopi-start, only hopi-api and\n# the thin Ktor plugin (docs/ARCHITECTURE.md, \"Selecting the runtimes in a KMP\n# project\"), and the iOS release guard fails a Release link that would hold a runtime.\n# Only the HOPI_ENABLED values that set Swift's HOPI, YES and true, link Hopi, so the two\n# never disagree: any other value, or none (which meant on before HOPI existed), builds a\n# Debug app without Hopi, as `xcodebuild ... HOPI_ENABLED=false` does for A/B runs at the\n# same optimisation level.\nset -eu\ncd \"$SRCROOT/../..\"\ncase \"$CONFIGURATION/${HOPI_ENABLED:-}\" in\n  Debug/YES | Debug/true)\n    ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true\n    ;;\n  *)\n    ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode\n    ;;\nesac\n";
+			shellScript = "# Kotlin's standard build phase, nothing of Hopi's: the dev.koga.hopi plugin reads Xcode's\n# CONFIGURATION, so Debug links Hopi's runtimes and hopi-start (HopiSetup.shared.start()\n# starts Hopi), any other configuration no runtime, only hopi-api and the thin Ktor\n# plugin, and the plugin's iOS release guard fails a Release link that would hold one\n# (docs/ARCHITECTURE.md, \"Selecting the runtimes in a KMP project\"). SAMPLE_GRADLE_ARGS,\n# unset unless the xcodebuild command line sets it, reaches Gradle: the benchmarks'\n# nohopi arm, a Debug app without Hopi at the same optimisation level, is\n# `xcodebuild ... SAMPLE_GRADLE_ARGS=-Phopi.enabled=false`, and the giant-body caps are\n# `SAMPLE_GRADLE_ARGS=\"-Psample.maxBodyBytes=8388608 -Psample.maxTotalBytes=33554432\"`.\nset -eu\ncd \"$SRCROOT/../..\"\n# Word splitting on purpose: one argument per Gradle flag.\n./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode ${SAMPLE_GRADLE_ARGS:-}\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -332,9 +332,6 @@
 					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
 				);
 				GENERATE_INFOPLIST_FILE = NO;
-				HOPI_ENABLED = YES;
-				HOPI_SWIFT_CONDITION_YES = HOPI;
-				HOPI_SWIFT_CONDITION_true = HOPI;
 				INFOPLIST_FILE = "iosApp/Info-Debug.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -352,7 +349,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample;
 				PRODUCT_NAME = HopiSample;
 				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -368,9 +364,6 @@
 					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
-				HOPI_ENABLED = YES;
-				HOPI_SWIFT_CONDITION_YES = HOPI;
-				HOPI_SWIFT_CONDITION_true = HOPI;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -378,7 +371,6 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.sample.capturetests;
 				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))";
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HopiSample.app/HopiSample";
 			};

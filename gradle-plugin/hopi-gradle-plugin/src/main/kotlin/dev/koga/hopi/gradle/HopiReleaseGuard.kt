@@ -58,8 +58,9 @@ public abstract class HopiReleaseGuard : DefaultTask() {
 }
 
 /**
- * Hopi's runtimes in a resolved dependency graph, for the release guard. An object, not a function
- * of the plugin: the configuration cache stores the provider mappings that use it.
+ * Hopi's runtimes in a resolved dependency graph, for both release guards (Android's and iOS's,
+ * [HopiIosReleaseGuard]). An object, not a function of the plugin: the configuration cache stores
+ * the provider mappings that use it.
  */
 internal object HopiRuntimeGraph {
     private const val GROUP = "dev.koga.hopi"

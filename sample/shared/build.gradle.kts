@@ -9,16 +9,27 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose.multiplatform)
+    // Hopi's whole iOS setup (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project"):
+    // hopi-api in every build, exported; hopi-start, which brings the runtimes, in a Debug build
+    // only (-Phopi.enabled, else Xcode's configuration), exported; the generated HopiSetup Swift
+    // calls in every configuration; the iOS release guard before every Release link. The thin
+    // hopi-ktor is in every build and installs nothing in a Release framework.
+    id("dev.koga.hopi")
 }
 
-// The selection every KMP consumer makes (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP
-// project"): a shared module has no build types, so a Gradle property picks hopi-start, the iOS
-// entry that brings the runtimes, for every target at once; the thin hopi-ktor is in every build
-// and installs nothing in a Release framework (no recorder is registered there). Debug runs pass
-// -Phopi.enabled=true (the Xcode build phase does for the Debug configuration); anything built
-// without it has no runtime, and the iOS release guard (below) fails a Release link that would
-// hold one.
-val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
+// The start's settings, which HopiSetup passes to Hopi.start in a Debug build: the Android app's
+// (sample/androidApp). The CLI and the desktop viewer reach the app through its bridge; the
+// giant-body measurements set the caps at build time (`-Psample.maxBodyBytes=8388608`, through the
+// Xcode build phase's SAMPLE_GRADLE_ARGS); the monitors are registered, none started.
+hopi {
+    agentBridge.set(true)
+    maxBodyBytes.set(providers.gradleProperty("sample.maxBodyBytes").map { it.toLong() }.orElse(256L * 1024))
+    maxTotalBytes.set(providers.gradleProperty("sample.maxTotalBytes").map { it.toLong() }.orElse(16L * 1024 * 1024))
+    perf { enabled.set(true) }
+}
+
+/** The plugin's choice for this invocation: a Debug build, whose iOS framework links Hopi's runtimes. */
+val hopiRuntime: Boolean = hopi.iosRuntime.get()
 
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
 abstract class GenerateSampleBuildInfo : DefaultTask() {
@@ -38,7 +49,7 @@ abstract class GenerateSampleBuildInfo : DefaultTask() {
             """
             |package dev.koga.hopi.sample
             |
-            |/** Generated from the `hopi.enabled` Gradle property: true when an iOS build links Hopi's runtimes (hopi-start). */
+            |/** Generated from the dev.koga.hopi plugin's choice (`hopi.iosRuntime`): true when an iOS build links Hopi's runtimes (hopi-start). */
             |internal const val HOPI_ENABLED: Boolean = ${realHopi.get()}
             |
             """.trimMargin(),
@@ -47,7 +58,7 @@ abstract class GenerateSampleBuildInfo : DefaultTask() {
 }
 
 val generateSampleBuildInfo = tasks.register<GenerateSampleBuildInfo>("generateSampleBuildInfo") {
-    realHopi.set(hopiEnabled)
+    realHopi.set(hopi.iosRuntime)
     outputDirectory.set(layout.buildDirectory.dir("generated/sampleBuildInfo/commonMain/kotlin"))
 }
 
@@ -70,14 +81,10 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
-            // Swift calls HopiRules.shared in the rules scenarios (CaptureVerification.swift) with no
-            // guard, so every framework exports hopi-api, which holds it and HopiPerf: with no
-            // runtime (built without the flag) each call returns -1, false or an empty list, or does
-            // nothing.
-            export(project(":hopi-api"))
-            // Hopi.shared.start { … } from Swift (iOSApp.swift, inside `#if HOPI`): with the flag only,
-            // so a framework built without it (Xcode's Release) has no Hopi.
-            if (hopiEnabled) export(project(":hopi-start"))
+            // The plugin exports hopi-api (HopiRules, which the rules scenarios call from Swift,
+            // CaptureVerification.swift, and HopiPerf) from every framework, and hopi-start from a
+            // Debug build's only: with no runtime each HopiRules call returns -1, false or an
+            // empty list, or does nothing.
         }
     }
 
@@ -90,12 +97,11 @@ kotlin {
                 // on iOS, where URLSession capture records the Darwin engine.
                 implementation(project(":hopi-ktor"))
                 // HopiRules (mock, fail, delay, edit), which the rules scenarios call, and HopiPerf,
-                // which the perf lab and bench start, in every build: a debug build's start
-                // registers the runtimes behind them (on Android the plugin adds hopi-perf with
-                // `perf { enabled }`; on iOS hopi-start names perf's tool, so Kotlin/Native keeps
-                // hopi-perf). api: the Android app's rules scenarios name HopiRules too, and the
-                // iOS framework exports it.
-                api(project(":hopi-api"))
+                // which the perf lab and bench start, come from hopi-api, which the plugin adds as
+                // api in every build (the Android app's rules scenarios name HopiRules too): a debug
+                // build's start registers the runtimes behind them (on Android the app's plugin adds
+                // hopi-perf with `perf { enabled }`; on iOS hopi-start names perf's tool, so
+                // Kotlin/Native keeps hopi-perf).
                 implementation(libs.compose.runtime)
                 implementation(libs.compose.foundation)
                 implementation(libs.compose.ui)
@@ -112,13 +118,11 @@ kotlin {
         iosMain {
             // Test-only accessor for the Swift capture tests (iosAppCaptureTests), which read the
             // records from the store: built only with the runtimes, never into a release.
-            if (hopiEnabled) kotlin.srcDir("src/iosCaptureProbe/kotlin")
+            if (hopiRuntime) kotlin.srcDir("src/iosCaptureProbe/kotlin")
             dependencies {
                 implementation(libs.ktor.client.darwin)
-                // The iOS entry Swift starts Hopi with, which brings the network and perf runtimes;
-                // api: the framework exports it.
-                if (hopiEnabled) api(project(":hopi-start"))
-                if (hopiEnabled) implementation(project(":hopi-core"))
+                // The probe's store (the plugin adds hopi-start, which brings core, in a Debug build).
+                if (hopiRuntime) implementation(project(":hopi-core"))
             }
         }
     }
@@ -144,7 +148,7 @@ kotlin {
  * and `@protocol` lists), never as text: the exported KDoc names types in prose.
  *
  * Run it both ways, each requested by its own name: with the flag the Release link it consumes
- * holds every runtime, which the iOS release guard (gradle/ios-release-guard.gradle) lets through
+ * holds every runtime, which the iOS release guard (the dev.koga.hopi plugin's) lets through
  * only for that link and only while this task is requested by name, so
  * `./gradlew check -Phopi.enabled=true`, like any invocation that links a Release framework with
  * the flag, fails in the guard.
@@ -249,12 +253,11 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
     }
 }
 
-// The iOS release guard (gradle/ios-release-guard.gradle): every Release link of this module first
-// fails on a Hopi runtime, except the link the release check below consumes, and that one only while
-// the check is requested by name (its positive control links every runtime with the flag).
+// The iOS release guard (the dev.koga.hopi plugin's): every Release link of this module first fails
+// on a Hopi runtime, except the link the release check below consumes, and that one only while the
+// check is requested by name (its positive control links every runtime with -Phopi.enabled=true).
 val releaseCheckLink = "linkReleaseFrameworkIosSimulatorArm64"
 extra["hopiIosReleaseGuardExemptLink"] = releaseCheckLink
-apply(from = rootProject.file("gradle/ios-release-guard.gradle"))
 
 // The release framework, simulator slice: what an App Store build links, minus the device slice.
 tasks.register<VerifyIosCaptureSelection>("verifyIosReleaseExcludesCapture") {
@@ -264,7 +267,7 @@ tasks.register<VerifyIosCaptureSelection>("verifyIosReleaseExcludesCapture") {
     dependsOn(link)
     binary.set(link.flatMap { it.outputFile }.map { project.layout.projectDirectory.file(it.resolve("Shared").absolutePath) })
     header.set(link.flatMap { it.outputFile }.map { project.layout.projectDirectory.file(it.resolve("Headers/Shared.h").absolutePath) })
-    real.set(hopiEnabled)
+    real.set(hopi.iosRuntime)
 }
 
 if (System.getProperty("os.name").startsWith("Mac")) {

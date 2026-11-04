@@ -2,7 +2,7 @@ import Foundation
 
 /// Stands in for a third-party SDK the app does not own (analytics, ads, a crash reporter): plain
 /// URLSession code that knows nothing about Hopi and imports no Kotlin. Hopi records its requests
-/// anyway, because `Hopi.shared.start { … }` captures every URLSession task of the process.
+/// anyway, because `HopiSetup.shared.start()` captures every URLSession task of the process.
 ///
 /// It runs at launch with the `-thirdPartySDK` argument:
 /// `xcrun simctl launch booted dev.koga.hopi.sample -thirdPartySDK`.

@@ -4,7 +4,10 @@
 # request plus full read) and -giant (Ktor Darwin: 1/5/20 MB fetch plus JSON parse).
 # Usage: benchmark/urlsession/e2e/ab.sh <out dir> <apps dir> [rounds [launch argument...]]; then
 # abtable.py <out dir>. Launch arguments after the rounds are appended to both drive.py launches of
-# every round, e.g. `4 -maxBodyBytes 8388608 -maxTotalBytes 33554432` for an 8 MiB capture cap.
+# every round. Hopi's capture cap is the hopi build's, set at build time since O8 (2026-11-03): for an
+# 8 MiB cap build it with `SAMPLE_GRADLE_ARGS="-Psample.maxBodyBytes=8388608
+# -Psample.maxTotalBytes=33554432"` (the launch arguments -maxBodyBytes/-maxTotalBytes no longer
+# reach Hopi.start).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 OUT=$1

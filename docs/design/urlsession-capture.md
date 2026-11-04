@@ -529,11 +529,12 @@ HopiUrlSession.shared.start()
 ```
 
 The call compiles in both configurations, because the noop exports the same API. The sample
-did this in `iOSApp.swift` until the runtime-split plan's stage 6. Since then it calls
-`Hopi.shared.start { … }` from `hopi-start` inside `#if HOPI`, a Swift condition that follows the
-same build setting as the Gradle build phase (docs/ARCHITECTURE.md, "Consumer API" and
-"Selecting the runtimes in a KMP project"): a framework without the flag has no `hopi-start`, so no
-`Hopi`, and the call compiles only where it has.
+did this in `iOSApp.swift` until the runtime-split plan's stage 6. Then it called
+`Hopi.shared.start { … }` from `hopi-start` inside `#if HOPI`, a Swift condition that followed the
+same build setting as the Gradle build phase; since O8 (2026-11-03) it calls
+`HopiSetup.shared.start()` in every configuration, which the `dev.koga.hopi` plugin generates into
+`sample/shared`: it starts Hopi in a Debug build and does nothing in any other
+(docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project").
 
 ### Release exclusion
 

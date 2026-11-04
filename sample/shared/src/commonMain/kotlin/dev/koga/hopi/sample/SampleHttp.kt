@@ -53,7 +53,8 @@ public object SampleHttp {
      * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start]. On
      * Android it reaches only the requests the plugin records itself: OkHttp capture records the
      * rest at the debug build's cap (`-Psample.maxBodyBytes=N`). On iOS only `Hopi.start`'s cap
-     * applies (the launch argument reaches it, `iOSApp.swift`): the plugin installs nothing there.
+     * applies, the same build property (`sample/shared`'s `hopi { }` block): the plugin installs
+     * nothing there.
      */
     public var maxBodyBytes: Long? = null
 

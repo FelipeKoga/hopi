@@ -59,17 +59,6 @@ targets:
           # The capture tests call the Kotlin framework's test accessor through the host app's
           # binary, which a dead-stripping link would drop as unreferenced.
           DEAD_CODE_STRIPPING: NO
-          # One setting for the build phase below and for Swift: HOPI_ENABLED (on in Debug) makes the
-          # phase build the framework with Hopi and sets the Swift condition HOPI (`#if HOPI` around
-          # Hopi.shared.start, iOSApp.swift), so `xcodebuild ... HOPI_ENABLED=false` compiles
-          # neither. XcodeGen writes a boolean as YES, hence the YES condition; the true one serves
-          # `HOPI_ENABLED=true` on the command line, and the phase links Hopi for these two values
-          # only. Set on this target, not the project, so $(inherited) keeps the project's DEBUG
-          # condition; Release sets none of them.
-          HOPI_ENABLED: "YES"
-          HOPI_SWIFT_CONDITION_YES: HOPI
-          HOPI_SWIFT_CONDITION_true: HOPI
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))"
         Release:
           INFOPLIST_FILE: iosApp/Info-Release.plist
     preBuildScripts:
@@ -77,26 +66,21 @@ targets:
         basedOnDependencyAnalysis: false
         shell: /bin/sh
         script: |
-          # Debug links Hopi's runtimes and hopi-start, which Swift starts Hopi with (behind
-          # `#if HOPI`); any other configuration no runtime and no hopi-start, only hopi-api and
-          # the thin Ktor plugin (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP
-          # project"), and the iOS release guard fails a Release link that would hold a runtime.
-          # Only the HOPI_ENABLED values that set Swift's HOPI, YES and true, link Hopi, so the two
-          # never disagree: any other value, or none (which meant on before HOPI existed), builds a
-          # Debug app without Hopi, as `xcodebuild ... HOPI_ENABLED=false` does for A/B runs at the
-          # same optimisation level.
+          # Kotlin's standard build phase, nothing of Hopi's: the dev.koga.hopi plugin reads Xcode's
+          # CONFIGURATION, so Debug links Hopi's runtimes and hopi-start (HopiSetup.shared.start()
+          # starts Hopi), any other configuration no runtime, only hopi-api and the thin Ktor
+          # plugin, and the plugin's iOS release guard fails a Release link that would hold one
+          # (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project"). SAMPLE_GRADLE_ARGS,
+          # unset unless the xcodebuild command line sets it, reaches Gradle: the benchmarks'
+          # nohopi arm, a Debug app without Hopi at the same optimisation level, is
+          # `xcodebuild ... SAMPLE_GRADLE_ARGS=-Phopi.enabled=false`, and the giant-body caps are
+          # `SAMPLE_GRADLE_ARGS="-Psample.maxBodyBytes=8388608 -Psample.maxTotalBytes=33554432"`.
           set -eu
           cd "$SRCROOT/../.."
-          case "$CONFIGURATION/${HOPI_ENABLED:-}" in
-            Debug/YES | Debug/true)
-              ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true
-              ;;
-            *)
-              ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode
-              ;;
-          esac
+          # Word splitting on purpose: one argument per Gradle flag.
+          ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode ${SAMPLE_GRADLE_ARGS:-}
   # Swift concurrency's URLSession APIs under automatic capture (Kotlin/Native cannot call them):
-  # hosted by the app, so they run in its process, after its Hopi.shared.start { … }.
+  # hosted by the app, so they run in its process, after its HopiSetup.shared.start().
   iosAppCaptureTests:
     type: bundle.unit-test
     platform: iOS
@@ -116,11 +100,3 @@ targets:
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
-      configs:
-        # The app's HOPI condition, which this target's settings do not inherit: without it the
-        # `#if HOPI` in CaptureTests.swift would compile its start assertion out.
-        Debug:
-          HOPI_ENABLED: "YES"
-          HOPI_SWIFT_CONDITION_YES: HOPI
-          HOPI_SWIFT_CONDITION_true: HOPI
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) $(HOPI_SWIFT_CONDITION_$(HOPI_ENABLED))"
