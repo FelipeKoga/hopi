@@ -6,6 +6,7 @@ public final class dev/koga/hopi/start/Hopi {
 }
 
 public final class dev/koga/hopi/start/HopiStartConfig {
+	public static final field DEFAULT_MAX_BODY_BYTES J
 	public final fun getAgentBridge ()Z
 	public final fun getEnabled ()Z
 	public final fun getMaxBodyBytes ()J

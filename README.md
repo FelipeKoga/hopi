@@ -73,7 +73,7 @@ What the published artifacts need from your build (the versions they are built a
 older ones are not tested):
 
 - **Gradle 9.7.1 and JDK 17**; the plugin is compiled against **AGP 9.4.0**'s API.
-- **Kotlin 2.4.20**: the klibs and the Kotlin metadata are written by it.
+- **Kotlin 2.2.21**: the klibs and the Kotlin metadata are written by it.
 - **Android**: the app module applies `com.android.application` (the plugin refuses any other
   module but a Kotlin Multiplatform one, see [iOS](#ios-every-urlsession-request-automatically))
   with `compileSdk = 37` or higher, since the AARs declare `minCompileSdk=37` and AGP refuses a
@@ -911,10 +911,12 @@ the iOS install section; perf lab run on the iPhone 16, 2026-10-26).
 
 ## Building
 
-JDK 17, Gradle through `./gradlew` (9.7.1), Kotlin 2.4.20, Compose Multiplatform 1.12.0, Ktor
-3.5.2. `./gradlew check` runs the tests (including the iOS simulator tests), the ABI dump checks
-(`checkKotlinAbi` on `hopi-api`, `hopi-ktor`, `hopi-start`, the runtimes' empty dumps and
-`hopi-connect`) and the publication check. The base check, one Gradle invocation:
+JDK 17, Gradle through `./gradlew` (9.7.1), Kotlin 2.2.21, Compose Multiplatform 1.12.0 (1.10.3 in
+the sample, whose iOS klibs Kotlin/Native 2.2 reads), Ktor 3.3.3 (`-Phopi.ktorForward=true` runs
+`hopi-network`'s and `hopi-ktor`'s tests on 3.5.2). `./gradlew check` runs the tests (including the
+iOS simulator tests), the ABI dump checks (`checkLegacyAbi` on `hopi-api`, `hopi-ktor`,
+`hopi-start`, the runtimes' empty dumps and `hopi-connect`; `updateLegacyAbi` rewrites a dump) and
+the publication check. The base check, one Gradle invocation:
 
 ```bash
 ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-network:jvmTest \

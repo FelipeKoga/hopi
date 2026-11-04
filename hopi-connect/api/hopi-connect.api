@@ -9,6 +9,7 @@ public final class dev/koga/hopi/connect/AdbDevice {
 public final class dev/koga/hopi/connect/BridgeClient : java/lang/AutoCloseable {
 	public static final field Companion Ldev/koga/hopi/connect/BridgeClient$Companion;
 	public static final field PROTOCOL J
+	public synthetic fun <init> (Ljava/net/Socket;Ldev/koga/hopi/connect/BridgeEndpoint;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
 	public final fun getHello ()Ldev/koga/hopi/connect/Reply;
 	public final fun handshake (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;

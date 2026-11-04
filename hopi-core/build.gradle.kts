@@ -22,6 +22,9 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        // An app needs compileSdk 34, not this module's: AGP would otherwise write compileSdk into
+        // the AAR's minCompileSdk, and an older AGP refuses an AAR that asks for more than it supports.
+        aarMetadata { minCompileSdk = libs.versions.android.minCompileSdk.get().toInt() }
         // Keeps the manifest's provider and the generated configuration it loads by name in a
         // minified debuggable build; only debuggable variants get this module from the plugin.
         optimization {
@@ -75,7 +78,7 @@ fun hitsShim(targetName: String): TaskProvider<Exec> {
     val outDir = layout.buildDirectory.dir("hits/$targetName")
     val objectFile = outDir.map { it.file("hopi_hits.o") }
     // Kotlin/Native's minimum iOS, as hopi-network's URLSession library (checkUrlSessionMinIos).
-    val minIos = "15.0"
+    val minIos = "12.0"
     val compile = tasks.register<Exec>("compileHitsShim$suffix") {
         description = "Compiles the rules' hit counter library for $targetName."
         inputs.files(source, header).withPathSensitivity(PathSensitivity.RELATIVE)

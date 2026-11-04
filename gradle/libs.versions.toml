@@ -1,11 +1,25 @@
 [versions]
-# Same toolchain as the other local KMP projects, so Gradle and ~/.konan caches are reused.
-kotlin = "2.4.20"
+# Kotlin 2.2.21 writes every published artifact, so apps on Kotlin 2.2 can consume them: Kotlin/Native
+# 2.2 skips a klib whose abi_version is above 2.2.0, and no flag of a newer compiler lowers it. It also
+# drives the Compose compiler and the serialization plugin, here and in the included plugin build.
+kotlin = "2.2.21"
 agp = "9.4.0"
+# The Compose Gradle plugin and the desktop viewer's screens (hopi-ui, hopi-desktop: JVM only, whose
+# 1.12.0 jars carry Kotlin metadata 2.2.0).
 compose-multiplatform = "1.12.0"
+# The sample's Compose (sample/shared and sample/androidApp): the newest release whose iOS klibs are at
+# abi_version 2.2.0 (1.11 and 1.12's are at 2.3.0, which Kotlin/Native 2.2.21 skips).
+compose-multiplatform-sample = "1.10.3"
+# Built with Kotlin 2.2.20; the published modules declare nothing above it (checkPublication).
 coroutines = "1.11.0"
-serialization = "1.11.0"
-ktor = "3.5.2"
+# The newest release built with Kotlin 2.2 (1.10 and later are built with 2.3).
+serialization = "1.9.0"
+# The newest release built with Kotlin 2.2 (3.4.0 is built with 2.3.0): hopi-ktor's consumers resolve
+# no Ktor above it from Hopi (checkPublication).
+ktor = "3.3.3"
+# The Ktor the pilot app runs (Kotlin 2.4.20): `-Phopi.ktorForward=true` runs hopi-network's and
+# hopi-ktor's tests on it (their test runtime classpaths only; they still compile against `ktor`).
+ktor-forward = "3.5.2"
 androidx-activity = "1.13.0"
 # AGP 9.4.0's own ASM: the Gradle plugin's rewriter compiles against it, AGP supplies it at run time.
 asm = "9.9"
@@ -24,6 +38,9 @@ okio-okhttp5 = "3.17.0"
 skiko = "0.150.1"
 
 android-compileSdk = "37"
+# The compileSdk the five Android libraries' AARs require of an app (their aar-metadata's
+# minCompileSdk): every android.* reference in them exists in API 34, which AGP 8.1.1 supports.
+android-minCompileSdk = "34"
 android-minSdk = "24"
 android-targetSdk = "37"
 
@@ -48,8 +65,12 @@ compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.re
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
 compose-animation = { module = "org.jetbrains.compose.animation:animation", version.ref = "compose-multiplatform" }
-compose-ui-backhandler = { module = "org.jetbrains.compose.ui:ui-backhandler", version.ref = "compose-multiplatform" }
 compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "compose-multiplatform" }
+# The sample's Compose (compose-multiplatform-sample).
+compose-sample-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform-sample" }
+compose-sample-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform-sample" }
+compose-sample-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform-sample" }
+compose-sample-ui-backhandler = { module = "org.jetbrains.compose.ui:ui-backhandler", version.ref = "compose-multiplatform-sample" }
 
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
 asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }

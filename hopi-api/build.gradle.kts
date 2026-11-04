@@ -24,8 +24,11 @@ kotlin {
     // members that show the runtime what was set.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
+        enabled.set(true)
         filters {
-            exclude.annotatedWith.add("dev.koga.hopi.api.HopiInternalApi")
+            excluded {
+                annotatedWith.add("dev.koga.hopi.api.HopiInternalApi")
+            }
         }
     }
 
@@ -34,6 +37,9 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        // An app needs compileSdk 34, not this module's: AGP would otherwise write compileSdk into
+        // the AAR's minCompileSdk, and an older AGP refuses an AAR that asks for more than it supports.
+        aarMetadata { minCompileSdk = libs.versions.android.minCompileSdk.get().toInt() }
     }
     jvm()
     iosArm64()
@@ -46,3 +52,6 @@ kotlin {
         }
     }
 }
+
+// KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-api:updateLegacyAbi`) is not part of `check` by itself.
+tasks.named("check") { dependsOn("checkLegacyAbi") }

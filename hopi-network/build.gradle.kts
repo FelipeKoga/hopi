@@ -29,6 +29,7 @@ kotlin {
     // dev.koga.hopi.android.internal and dev.koga.hopi.network.internal shows up there.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
+        enabled.set(true)
         filters {
             // Android: the hooks the rewritten bytecode calls, the interceptor, the wrappers and the
             // network tool the app's generated configuration names (public in the binary: the hooks
@@ -36,8 +37,10 @@ kotlin {
             // and the network tool hopi-start lists. Android and the JVM: the Ktor plugin's recorder
             // (internal); the JVM: the network tool hopi-start lists. All @HopiInternalApi, no
             // consumer API. The provider that starts the tools is hopi-core's.
-            exclude.byNames.add("dev.koga.hopi.android.internal.**")
-            exclude.byNames.add("dev.koga.hopi.network.internal.**")
+            excluded {
+                byNames.add("dev.koga.hopi.android.internal.**")
+                byNames.add("dev.koga.hopi.network.internal.**")
+            }
         }
     }
 
@@ -53,6 +56,9 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        // An app needs compileSdk 34, not this module's: AGP would otherwise write compileSdk into
+        // the AAR's minCompileSdk, and an older AGP refuses an AAR that asks for more than it supports.
+        aarMetadata { minCompileSdk = libs.versions.android.minCompileSdk.get().toInt() }
         // Keeps the hooks, the annotation and RealCall's name in a minified debuggable build;
         // only debuggable variants depend on this module.
         optimization {
@@ -156,6 +162,9 @@ kotlin {
     }
 }
 
+// KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-network:updateLegacyAbi`) is not part of `check` by itself.
+tasks.named("check") { dependsOn("checkLegacyAbi") }
+
 // The compile SDK's android.jar, whose URLConnection classes the wrapper completeness test reads.
 val bootClasspath = extensions.getByType<KotlinMultiplatformAndroidComponentsExtension>().sdkComponents.bootClasspath
 
@@ -166,7 +175,7 @@ val okhttpJars = mapOf(
     "okhttp312" to listOf("com.squareup.okhttp3:okhttp:${libs.versions.okhttp3.old.get()}", "com.squareup.okio:okio:${libs.versions.okio.okhttp3.old.get()}"),
     "okhttp314" to listOf("com.squareup.okhttp3:okhttp:${libs.versions.okhttp3.last.get()}", "com.squareup.okio:okio:${libs.versions.okio.okhttp3.last.get()}"),
     "ktorOkhttp" to listOf(
-        "io.ktor:ktor-client-okhttp-jvm:${libs.versions.ktor.get()}",
+        "io.ktor:ktor-client-okhttp-jvm:${libs.versions.ktor.asProvider().get()}",
         "com.squareup.okhttp3:okhttp-jvm:${libs.versions.okhttp5.get()}",
         "com.squareup.okio:okio-jvm:${libs.versions.okio.okhttp5.get()}",
     ),
@@ -176,6 +185,22 @@ val okhttpJars = mapOf(
         isCanBeConsumed = false
         coordinates.forEach { dependencies.add(project.dependencies.create("$it@jar")) }
     }.incoming.files
+}
+
+// `-Phopi.ktorForward=true` runs the tests on the Ktor the pilot app runs (the catalog's ktor-forward):
+// io.ktor moves on the JVM and Android host tests' runtime classpaths and on the scenario jars
+// (ktorOkhttpJars, which load with them), while everything still compiles against `ktor`, the Ktor
+// consumers get from Hopi. The recorder uses Ktor internals, which a newer Ktor may change.
+if (providers.gradleProperty("hopi.ktorForward").map(String::toBoolean).getOrElse(false)) {
+    val ktorForward = libs.versions.ktor.forward.get()
+    configurations.matching { it.name.endsWith("TestRuntimeClasspath") || it.name == "ktorOkhttpJars" }.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "io.ktor") {
+                useVersion(ktorForward)
+                because("-Phopi.ktorForward=true")
+            }
+        }
+    }
 }
 
 tasks.withType<Test>().configureEach {
@@ -194,7 +219,7 @@ tasks.withType<Test>().configureEach {
  * Kotlin/Native's minimum iOS version (`minVersion.ios` in its `konan.properties`), so the archive
  * links into any framework Kotlin builds. :hopi-network:checkUrlSessionMinIos compares the two.
  */
-val urlSessionMinIos = "15.0"
+val urlSessionMinIos = "12.0"
 
 /** Compiles and archives the URLSession capture library for one iOS target; returns the archive task. */
 fun urlSessionShim(targetName: String): TaskProvider<Exec> {
@@ -269,7 +294,7 @@ fun fixturesArchive(targetName: String): TaskProvider<Exec> {
         commandLine(
             "xcrun", "--sdk", if (simulator) "iphonesimulator" else "iphoneos", "clang", "-c", "-x", "objective-c",
             "-fobjc-arc", "-fmodules", "-O1", "-Wall", "-Wno-unused-parameter",
-            "-target", "arm64-apple-ios15.0" + if (simulator) "-simulator" else "",
+            "-target", "arm64-apple-ios$urlSessionMinIos" + if (simulator) "-simulator" else "",
             "-o", objectPath.absolutePath, source.asFile.absolutePath,
         )
     }

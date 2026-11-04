@@ -84,7 +84,8 @@ dependencies {
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
     implementation(project(":sample:fakesdk"))
     implementation(libs.androidx.activity.compose)
-    implementation(libs.compose.runtime)
+    // The shared module's Compose (compose-multiplatform-sample).
+    implementation(libs.compose.sample.runtime)
 }
 
 /**

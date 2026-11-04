@@ -11,12 +11,15 @@ kotlin {
 
     // Every public declaration is @HopiInternalApi; the dump keeps the surface reviewed.
     @OptIn(ExperimentalAbiValidation::class)
-    abiValidation()
+    abiValidation { enabled.set(true) }
 
     compilerOptions {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
     }
 }
+
+// KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-connect:updateLegacyAbi`) is not part of `check` by itself.
+tasks.named("check") { dependsOn("checkLegacyAbi") }
 
 dependencies {
     // The JSON writer (requests) and parseFlatJsonObject (bridge.json); JsonWriter is in the API.

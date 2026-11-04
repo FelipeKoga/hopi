@@ -18,7 +18,7 @@ kotlin {
 
     // The consumer API dump: Hopi and HopiStartConfig; everything else here is internal.
     @OptIn(ExperimentalAbiValidation::class)
-    abiValidation()
+    abiValidation { enabled.set(true) }
 
     compilerOptions {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
@@ -48,6 +48,9 @@ kotlin {
         }
     }
 }
+
+// KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-start:updateLegacyAbi`) is not part of `check` by itself.
+tasks.named("check") { dependsOn("checkLegacyAbi") }
 
 // `-Phopi.simulator=<udid>` runs the iOS tests on that already booted simulator (see hopi-core).
 providers.gradleProperty("hopi.simulator").orNull?.let { udid ->

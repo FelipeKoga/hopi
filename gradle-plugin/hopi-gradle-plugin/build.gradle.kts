@@ -18,7 +18,12 @@ java {
 
 kotlin {
     explicitApi()
-    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+        // gradleApi() and gradleTestKit() put the running Gradle's own Kotlin libraries (2.4.0 in
+        // Gradle 9.7.1) on every classpath here, whose metadata Kotlin 2.2.21 reads only up to 2.3.0.
+        freeCompilerArgs.add("-Xskip-metadata-version-check")
+    }
 }
 
 gradlePlugin {

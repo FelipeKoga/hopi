@@ -138,7 +138,7 @@ int64_t hopi_perf_process_cpu_ns(void);
 /** TASK_VM_INFO.phys_footprint, bytes (what jetsam counts); -1 on error. */
 int64_t hopi_perf_footprint(void);
 
-/** os_proc_available_memory(), bytes; 0 where the OS gives no limit (the simulator). */
+/** os_proc_available_memory(), bytes; 0 where the OS gives no limit (the simulator) or before iOS 13. */
 int64_t hopi_perf_available_memory(void);
 
 /** One thread of the per-thread scan. */

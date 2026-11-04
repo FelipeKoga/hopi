@@ -102,10 +102,12 @@ kotlin {
                 // build's start registers the runtimes behind them (on Android the app's plugin adds
                 // hopi-perf with `perf { enabled }`; on iOS hopi-start names perf's tool, so
                 // Kotlin/Native keeps hopi-perf).
-                implementation(libs.compose.runtime)
-                implementation(libs.compose.foundation)
-                implementation(libs.compose.ui)
-                implementation(libs.compose.ui.backhandler)
+                // The sample's Compose, 1.10.3 (the catalog's compose-multiplatform-sample): Kotlin/Native
+                // 2.2.21 reads its iOS klibs.
+                implementation(libs.compose.sample.runtime)
+                implementation(libs.compose.sample.foundation)
+                implementation(libs.compose.sample.ui)
+                implementation(libs.compose.sample.ui.backhandler)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)

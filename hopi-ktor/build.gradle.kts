@@ -17,8 +17,11 @@ kotlin {
     // runtime implements and the configuration's members that show the recorder what was set.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
+        enabled.set(true)
         filters {
-            exclude.annotatedWith.add("dev.koga.hopi.api.HopiInternalApi")
+            excluded {
+                annotatedWith.add("dev.koga.hopi.api.HopiInternalApi")
+            }
         }
     }
 
@@ -31,6 +34,9 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
+        // An app needs compileSdk 34, not this module's: AGP would otherwise write compileSdk into
+        // the AAR's minCompileSdk, and an older AGP refuses an AAR that asks for more than it supports.
+        aarMetadata { minCompileSdk = libs.versions.android.minCompileSdk.get().toInt() }
     }
     jvm()
     iosArm64()
@@ -51,6 +57,24 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.ktor.client.mock)
+        }
+    }
+}
+
+// KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-ktor:updateLegacyAbi`) is not part of `check` by itself.
+tasks.named("check") { dependsOn("checkLegacyAbi") }
+
+// `-Phopi.ktorForward=true` runs the tests on the Ktor the pilot app runs (the catalog's ktor-forward):
+// io.ktor moves on the JVM tests' runtime classpath only, while everything still compiles against
+// `ktor`, the Ktor consumers get from Hopi (see hopi-network, whose recorder uses Ktor internals).
+if (providers.gradleProperty("hopi.ktorForward").map(String::toBoolean).getOrElse(false)) {
+    val ktorForward = libs.versions.ktor.forward.get()
+    configurations.matching { it.name.endsWith("TestRuntimeClasspath") }.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "io.ktor") {
+                useVersion(ktorForward)
+                because("-Phopi.ktorForward=true")
+            }
         }
     }
 }

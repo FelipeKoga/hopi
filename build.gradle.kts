@@ -34,6 +34,13 @@ tasks.named("check") {
  * [hopiVersion]: what a consumer outside this repository resolves from Maven Local. A `project()`
  * dependency that leaked would name the group `hopi` or the version `unspecified`. No published
  * archive may contain [buildMachinePath].
+ *
+ * It also holds the published libraries to the oldest build a consumer may have: every kotlin-stdlib
+ * dependency at [kotlinStdlibVersion], no io.ktor above [maxKtorVersion] and no kotlinx-coroutines
+ * above [maxCoroutinesVersion] (module files and POMs); no `.kotlin_module` file in `META-INF` above
+ * [maxKotlinMetadataVersion] in a JVM jar or in an AAR's jars; no AAR asking for a compileSdk above
+ * [maxMinCompileSdk]; and every klib, the cinterop ones and the metadata jars' included, at
+ * [klibAbiVersion], since Kotlin/Native skips a klib whose ABI version is newer than its own.
  */
 abstract class PublicationCheck : DefaultTask() {
     @get:InputFiles
@@ -49,6 +56,30 @@ abstract class PublicationCheck : DefaultTask() {
     /** The repository's absolute path, which no published archive may contain (a klib's source paths). */
     @get:Input
     abstract val buildMachinePath: Property<String>
+
+    /** The version every kotlin-stdlib dependency of a published module requires: the oldest Kotlin a consumer may build with. */
+    @get:Input
+    abstract val kotlinStdlibVersion: Property<String>
+
+    /** The newest Kotlin metadata (major.minor) a published JVM class may carry, in a `-jvm` jar or an AAR. */
+    @get:Input
+    abstract val maxKotlinMetadataVersion: Property<String>
+
+    /** The `abi_version` of every published klib. */
+    @get:Input
+    abstract val klibAbiVersion: Property<String>
+
+    /** The newest io.ktor a published module may depend on. */
+    @get:Input
+    abstract val maxKtorVersion: Property<String>
+
+    /** The newest kotlinx-coroutines a published module may depend on. */
+    @get:Input
+    abstract val maxCoroutinesVersion: Property<String>
+
+    /** The highest `minCompileSdk` a published AAR may ask of an app. */
+    @get:Input
+    abstract val maxMinCompileSdk: Property<Int>
 
     @TaskAction
     fun check() {
@@ -68,7 +99,10 @@ abstract class PublicationCheck : DefaultTask() {
         for ((root, file) in published) {
             val name = file.relativeTo(root).invariantSeparatorsPath
             when (file.extension) {
-                "klib", "jar", "aar" -> if (containsText(file, machinePath)) problems += "$name contains the build machine's path $machinePath"
+                "klib", "jar", "aar" -> {
+                    if (containsText(file, machinePath)) problems += "$name contains the build machine's path $machinePath"
+                    problems += archiveFloorProblems(name, file)
+                }
                 "module" -> {
                     @Suppress("UNCHECKED_CAST")
                     val variants = (groovy.json.JsonSlurper().parse(file) as Map<String, Any?>)["variants"] as List<Map<String, Any?>>
@@ -87,6 +121,7 @@ abstract class PublicationCheck : DefaultTask() {
                             if ((group == GROUP || group == "hopi" || depVersion == "unspecified") && !(group == GROUP && published(module, depVersion))) {
                                 problems += "$name: $variantName depends on $group:$module:$depVersion, which is not published here"
                             }
+                            problems += dependencyFloorProblems("$name: $variantName", group, module, dependency["version"] as Map<*, *>?)
                         }
                     }
                 }
@@ -101,6 +136,7 @@ abstract class PublicationCheck : DefaultTask() {
                         if ((group == GROUP || group == "hopi" || depVersion == "unspecified") && !(group == GROUP && published(child("artifactId")!!, depVersion))) {
                             problems += "$name depends on $group:${child("artifactId")}:$depVersion, which is not published here"
                         }
+                        problems += dependencyFloorProblems(name, group, child("artifactId")!!, mapOf("requires" to depVersion))
                     }
                 }
             }
@@ -115,9 +151,87 @@ abstract class PublicationCheck : DefaultTask() {
         }
     }
 
+    /**
+     * What a dependency on [group]:[module] at [versions] (a module file's `version` map, or a POM's
+     * version as `requires`) breaks of the consumer floors.
+     */
+    private fun dependencyFloorProblems(where: String, group: Any?, module: String, versions: Map<*, *>?): List<String> {
+        val declared = versions.orEmpty().filterKeys { it in VERSION_KEYS }.values.map { it.toString() }
+        fun above(max: String) = declared.filter { compareVersions(it, max) > 0 }
+        return when {
+            group == "org.jetbrains.kotlin" && module == "kotlin-stdlib" ->
+                if (declared.isNotEmpty() && declared.all { it == kotlinStdlibVersion.get() }) emptyList()
+                else listOf("$where requires kotlin-stdlib $declared, not ${kotlinStdlibVersion.get()}: an app on an older Kotlin would be moved to it")
+            group == "io.ktor" -> above(maxKtorVersion.get()).map { "$where depends on io.ktor:$module:$it, above ${maxKtorVersion.get()}" }
+            group == "org.jetbrains.kotlinx" && module.startsWith("kotlinx-coroutines") ->
+                above(maxCoroutinesVersion.get()).map { "$where depends on $group:$module:$it, above ${maxCoroutinesVersion.get()}" }
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * What the archive [file] breaks of the consumer floors: each klib manifest's `abi_version` (a
+     * klib's own, and every metadata klib's in a jar), an AAR's `minCompileSdk`, and the Kotlin
+     * metadata of each `.kotlin_module` file in `META-INF` of a `-jvm` jar or of an AAR's jars.
+     */
+    private fun archiveFloorProblems(name: String, file: File): List<String> = java.util.zip.ZipFile(file).use { zip ->
+        val problems = mutableListOf<String>()
+        val jvmJar = file.extension == "jar" && file.parentFile.parentFile.name.endsWith("-jvm")
+        for (entry in zip.entries().asSequence().filterNot { it.isDirectory }) {
+            val path = entry.name
+            fun bytes() = zip.getInputStream(entry).use { it.readBytes() }
+            when {
+                path == "default/manifest" || path.endsWith("/default/manifest") -> {
+                    val abi = properties(bytes()).getProperty("abi_version")
+                    if (abi != klibAbiVersion.get()) problems += "$name: $path has abi_version $abi, not ${klibAbiVersion.get()}"
+                }
+                file.extension == "aar" && path == AAR_METADATA -> {
+                    val sdk = properties(bytes()).getProperty("minCompileSdk")?.trim()?.toIntOrNull()
+                    if (sdk != null && sdk > maxMinCompileSdk.get()) problems += "$name asks for minCompileSdk=$sdk, above ${maxMinCompileSdk.get()}"
+                }
+                file.extension == "aar" && path.endsWith(".jar") -> java.util.zip.ZipInputStream(zip.getInputStream(entry)).use { jar ->
+                    generateSequence { jar.nextEntry }.filter { isKotlinModule(it.name) }.forEach {
+                        problems += metadataFloorProblems("$name!$path", it.name, jar.readBytes())
+                    }
+                }
+                jvmJar && isKotlinModule(path) -> problems += metadataFloorProblems(name, path, bytes())
+            }
+        }
+        problems
+    }
+
+    /** A `.kotlin_module` file starts with its metadata version: an int count, then that many ints. */
+    private fun metadataFloorProblems(where: String, path: String, bytes: ByteArray): List<String> {
+        val input = java.io.DataInputStream(bytes.inputStream())
+        val version = IntArray(input.readInt()) { input.readInt() }.joinToString(".")
+        return if (compareVersions(version.split('.').take(2).joinToString("."), maxKotlinMetadataVersion.get()) > 0) {
+            listOf("$where: $path has Kotlin metadata $version, above ${maxKotlinMetadataVersion.get()}")
+        } else {
+            emptyList()
+        }
+    }
+
+    private fun isKotlinModule(path: String) = path.startsWith("META-INF/") && path.endsWith(".kotlin_module")
+
+    private fun properties(bytes: ByteArray) = java.util.Properties().apply { load(bytes.inputStream()) }
+
+    /** Compares dotted versions by their numeric segments (`3.10.0` is above `3.9.1`); a qualifier counts as 0. */
+    private fun compareVersions(a: String, b: String): Int {
+        fun segments(v: String) = v.split('.', '-').map { part -> part.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        val x = segments(a)
+        val y = segments(b)
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val c = x.getOrElse(i) { 0 }.compareTo(y.getOrElse(i) { 0 })
+            if (c != 0) return c
+        }
+        return 0
+    }
+
     private companion object {
         const val GROUP = "dev.koga.hopi"
         const val GROUP_PATH = "dev/koga/hopi"
+        const val AAR_METADATA = "META-INF/com/android/build/gradle/aar-metadata.properties"
+        val VERSION_KEYS = setOf("requires", "strictly", "prefers")
     }
 }
 
@@ -143,6 +257,20 @@ val publishedCinterops = mapOf(
     "hopi-network" to listOf("urlsession"),
     "hopi-perf" to listOf("perf"),
 )
+
+// The oldest Kotlin a consumer may build with. The published libraries are compiled by the catalog's
+// Kotlin (2.2.21) at its default language version, 2.2, and declare this standard library, not the
+// compiler's own, so an app on 2.2.0 is not moved to a newer one; :checkPublication holds them there.
+val kotlinFloor = "2.2.0"
+publishedModules.keys.forEach { module ->
+    project(":$module") {
+        plugins.withId("org.jetbrains.kotlin.multiplatform") {
+            extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension> {
+                coreLibrariesVersion = kotlinFloor
+            }
+        }
+    }
+}
 
 // One source for the version: this build's gradle.properties, which the dev.koga.hopi plugin's build
 // reads too (its HOPI_VERSION, and hopi-instrument's version). An override with -P or
@@ -190,6 +318,16 @@ val checkPublication = tasks.register<PublicationCheck>("checkPublication") {
     repositories.from(layout.buildDirectory.dir("publication-check"), layout.projectDirectory.dir("gradle-plugin/build/functional-repo"))
     hopiVersion.set(publishedVersion)
     buildMachinePath.set(layout.projectDirectory.asFile.absolutePath)
+    // The consumer floors, set here rather than read from the catalog, so that raising a version
+    // there fails this check instead of moving a floor: Kotlin 2.2 (the standard library, the JVM
+    // metadata and Kotlin/Native's klib ABI), Ktor 3.3.3 (3.4 is built with Kotlin 2.3),
+    // kotlinx-coroutines 1.11.0 (built with 2.2.20) and compileSdk 34 (AGP 8.1.1).
+    kotlinStdlibVersion.set(kotlinFloor)
+    maxKotlinMetadataVersion.set("2.2")
+    klibAbiVersion.set("2.2.0")
+    maxKtorVersion.set("3.3.3")
+    maxCoroutinesVersion.set("1.11.0")
+    maxMinCompileSdk.set(34)
     expectedFiles.set(
         publishedModules.flatMap { (module, targets) -> expectedPublication(module, targets) } +
             listOf(

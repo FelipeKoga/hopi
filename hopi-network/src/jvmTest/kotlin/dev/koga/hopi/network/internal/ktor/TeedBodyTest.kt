@@ -268,9 +268,18 @@ class TeedBodyTest {
                 runCatching {
                     source.writeFully(payload, 0, 512 * 1024)
                     source.flush()
-                    // The rest is still on the network when the app cancels.
+                    // The rest is still on the network when the app cancels, and keeps arriving in
+                    // chunks: Ktor below 3.5.0 (no attachWriterJob) passes the app's cancel to the
+                    // body only at the copy's next write, and the rest in one piece would have ended
+                    // the body by then (a body that arrived whole is rightly recorded complete).
                     cancelled.await()
-                    source.writeFully(payload, 512 * 1024, payload.size)
+                    var offset = 512 * 1024
+                    while (offset < payload.size) {
+                        val end = minOf(offset + 64 * 1024, payload.size)
+                        source.writeFully(payload, offset, end)
+                        source.flush()
+                        offset = end
+                    }
                     source.flushAndClose()
                 }
             }
