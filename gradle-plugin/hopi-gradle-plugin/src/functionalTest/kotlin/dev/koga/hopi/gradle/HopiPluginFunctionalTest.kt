@@ -39,11 +39,36 @@ import org.gradle.testkit.runner.TaskOutcome
  * the build in the release guard, before any dex task. In an iOS-only Kotlin Multiplatform module
  * of a build with no AGP, the Gradle invocation's Xcode configuration (or `-Phopi.enabled`) decides
  * whether the iOS compilations and frameworks get `hopi-start` and what the generated `HopiSetup`
- * does, and every Release link gets the iOS release guard.
+ * does, and every Release link gets the iOS release guard. A KMP module whose Kotlin plugin is
+ * declared below the plugin's scope fails with the same-scope rule.
+ *
+ * functionalTest runs them on the catalog's Gradle, AGP and Kotlin; functionalTestFloor on the
+ * plugin's floor (Gradle 8.0.2, AGP 8.0.2 with compileSdk 34, the Kotlin Gradle plugin 2.2.0), where
+ * AGP has no `lifecycleTasks` and the release guard is a dependency of the variant's preBuild task.
  */
 class HopiPluginFunctionalTest {
     private val fixtures = File(System.getProperty("hopi.fixturesDir"))
     private val testKit = File(System.getProperty("hopi.testKitDir"))
+
+    /** The fixtures' Gradle, when not the one running these tests (functionalTestFloor's). */
+    private val gradleVersion: String? = System.getProperty("hopi.gradleVersion")
+    private val compileSdk: String = System.getProperty("hopi.compileSdk") ?: "36"
+    private val buildToolsVersion: String? = System.getProperty("hopi.buildToolsVersion")
+
+    /** Lines of every fixture's gradle.properties beyond its own (functionalTestFloor's AGP 8.0 flag). */
+    private val fixtureProperties: List<String> = System.getProperty("hopi.fixtureProperties")?.split('|').orEmpty()
+
+    /** The fixtures' Gradle as (major, minor); null when it is the one running these tests (9.7.1). */
+    private val fixtureGradle: Pair<Int, Int>? = gradleVersion?.split('.')?.map { it.toInt() }?.let { (major, minor) -> major to minor }
+
+    /** Gradle 8.2 added `=` for lazy properties in Kotlin build scripts; 8.0 and 8.1 need `set`. */
+    private val lazyAssignment: Boolean = fixtureGradle?.let { (major, minor) -> major > 8 || major == 8 && minor >= 2 } ?: true
+
+    /**
+     * A project as the fixtures' Gradle displays it in the release guards' failures, which name what
+     * the resolution result names: `project ':app'` on Gradle 9.7.1, `project :app` on Gradle 8.0.
+     */
+    private fun projectComponent(path: String): String = if ((fixtureGradle?.first ?: 9) >= 9) "project '$path'" else "project $path"
 
     /** One instance per test: a fixture daemon this test started logs after this. */
     private val started = System.currentTimeMillis()
@@ -229,7 +254,7 @@ class HopiPluginFunctionalTest {
             androidModule(
                 "com.android.application", "com.example.consumer", hopi = true,
                 dependencies = "implementation(project(\":shared\"))",
-            ) + "\nhopi { perf { enabled = true } }\n",
+            ) + "\nhopi { perf { ${assign("enabled", "true")} } }\n",
         )
         project.write("app/src/main/AndroidManifest.xml", MANIFEST)
 
@@ -374,7 +399,8 @@ class HopiPluginFunctionalTest {
         val apps = fixture("apps")
         val byProject = runner(apps, ":app:assembleRelease", "-Phopi.guardCase=project").buildAndFail()
         // Each component as Gradle displays it, then what depends on it, the app itself left out.
-        assertGuardFailed(apps, byProject, "project ':hopi-network'", "project ':hopi-network'", "project ':hopi-core' (via project ':hopi-network')")
+        val networkProject = projectComponent(":hopi-network")
+        assertGuardFailed(apps, byProject, networkProject, networkProject, "${projectComponent(":hopi-core")} (via $networkProject)")
 
         val root = fixtures.resolve("guard")
         root.deleteRecursively()
@@ -404,7 +430,7 @@ class HopiPluginFunctionalTest {
         val byCoordinates = runner(consumer, ":app:assembleRelease", "-Phopi.guardCase=coordinates").buildAndFail()
         assertGuardFailed(consumer, byCoordinates, network, network, core)
         val byLibrary = runner(consumer, ":app:assembleRelease", "-Phopi.guardCase=transitive").buildAndFail()
-        assertGuardFailed(consumer, byLibrary, network, "$network (via project ':sdk')", core)
+        assertGuardFailed(consumer, byLibrary, network, "$network (via ${projectComponent(":sdk")})", core)
     }
 
     /**
@@ -487,11 +513,53 @@ class HopiPluginFunctionalTest {
         val failure = "Hopi's iOS release guard: :shared:linkReleaseFrameworkIosSimulatorArm64 links a Release binary with " +
             "Hopi's runtime on its classpath: "
         assertTrue(failure in refused.output, refused.output)
-        for (component in listOf("project ':hopi-start'", "project ':hopi-core' (via project ':hopi-start')", "verifyIosReleaseExcludesCapture consumes")) {
+        val start = projectComponent(":hopi-start")
+        for (component in listOf(start, "${projectComponent(":hopi-core")} (via $start)", "verifyIosReleaseExcludesCapture consumes")) {
             assertTrue(component in refused.output, "the failure names $component: ${refused.output}")
         }
         val exempt = kmpRunner(project, emptyMap(), ":shared:verifyIosReleaseExcludesCapture", "-Phopi.enabled=true").build()
         assertTrue(":shared:linkReleaseFrameworkIosSimulatorArm64 is exempt" in exempt.output, exempt.output)
+    }
+
+    /**
+     * `dev.koga.hopi` in the root's `plugins { }` (with `apply false`) and the Kotlin plugin in the
+     * module's: the plugin's classes, in the root's scope, cannot see the module's Kotlin plugin, so
+     * applying it fails with the same-scope rule, not by calling that Kotlin plugin too old.
+     */
+    @Test
+    fun aKotlinPluginOutOfTheHopiPluginsScopeFailsWithTheScopeRule() {
+        val root = fixtures.resolve("kmp-scope")
+        root.deleteRecursively()
+        writeGradleFiles(root)
+        root.write(
+            "settings.gradle.kts",
+            """
+            pluginManagement {
+                repositories {
+                    maven { url = uri("${System.getProperty("hopi.functionalRepo").replace("\\", "/")}") }
+                    mavenCentral()
+                }
+            }
+            dependencyResolutionManagement { repositories { mavenCentral() } }
+            include(":shared")
+            """.trimIndent() + "\n",
+        )
+        root.write("build.gradle.kts", "plugins {\n    id(\"dev.koga.hopi\") version \"${System.getProperty("hopi.version")}\" apply false\n}\n")
+        root.write(
+            "shared/build.gradle.kts",
+            """
+            plugins {
+                kotlin("multiplatform") version "${System.getProperty("hopi.kotlinVersion")}"
+                id("dev.koga.hopi")
+            }
+            kotlin { iosSimulatorArm64() }
+            """.trimIndent() + "\n",
+        )
+        val result = kmpRunner(root, emptyMap(), ":shared:help").buildAndFail()
+        val rule = "dev.koga.hopi cannot see the classes of the Kotlin Gradle plugin that :shared applies, which it runs on: " +
+            "declare org.jetbrains.kotlin.multiplatform and dev.koga.hopi in the same plugins { } block"
+        assertTrue(rule in result.output, result.output)
+        assertFalse("too old to report itself" in result.output, result.output)
     }
 
     /** The `hopi-report <key>: <value>` lines of the KMP fixture's `hopiReport`. */
@@ -550,6 +618,7 @@ class HopiPluginFunctionalTest {
     private fun runner(project: File, vararg tasks: String): GradleRunner = GradleRunner.create()
         .withProjectDir(project)
         .withTestKitDir(testKit)
+        .let { runner -> gradleVersion?.let(runner::withGradleVersion) ?: runner }
         .withArguments(*tasks, "--configuration-cache", "--stacktrace")
         // Gradle's read-only dependency cache: AGP and its dependencies come from the developer's
         // cache without writing to it; anything missing is downloaded into the TestKit directory.
@@ -669,8 +738,15 @@ class HopiPluginFunctionalTest {
             """.trimIndent(),
         )
         // Network off with perf on, and every tool off: a generated configuration with perf's tool or none.
-        root.write("nonet/build.gradle.kts", androidModule("com.android.application", "com.example.nonet", hopi = true) + "\nhopi {\n    network { enabled = false }\n    perf { enabled = true }\n}\n")
-        root.write("notools/build.gradle.kts", androidModule("com.android.application", "com.example.notools", hopi = true) + "\nhopi { network { enabled = false } }\n")
+        root.write(
+            "nonet/build.gradle.kts",
+            androidModule("com.android.application", "com.example.nonet", hopi = true) +
+                "\nhopi {\n    network { ${assign("enabled", "false")} }\n    perf { ${assign("enabled", "true")} }\n}\n",
+        )
+        root.write(
+            "notools/build.gradle.kts",
+            androidModule("com.android.application", "com.example.notools", hopi = true) + "\nhopi { network { ${assign("enabled", "false")} } }\n",
+        )
         for (module in listOf("nonet", "notools")) {
             root.write(
                 "$module/src/main/java/com/example/$module/AppCode.java",
@@ -827,7 +903,8 @@ class HopiPluginFunctionalTest {
         }
         android {
             namespace = "$namespace"
-            compileSdk = 36
+            compileSdk = $compileSdk
+            ${buildToolsVersion?.let { "buildToolsVersion = \"$it\"" }.orEmpty()}
             defaultConfig { minSdk = 24 }
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17
@@ -849,9 +926,12 @@ class HopiPluginFunctionalTest {
             org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m
             org.gradle.daemon.idletimeout=60000
             android.useAndroidX=true
-            """.trimIndent(),
+            """.trimIndent() + fixtureProperties.joinToString("") { "\n$it" } + "\n",
         )
     }
+
+    /** `property = value` in a fixture's build script, or `property.set(value)` before Gradle 8.2. */
+    private fun assign(property: String, value: String): String = if (lazyAssignment) "$property = $value" else "$property.set($value)"
 
     private fun File.write(path: String, text: String) {
         resolve(path).apply { parentFile.mkdirs() }.writeText(text)

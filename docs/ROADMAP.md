@@ -293,6 +293,21 @@ Done (the runtime-split plan's O8, 2026-11-03): `dev.koga.hopi` in a KMP shared 
 applies the iOS release guard itself. Left: CocoaPods' configuration property
 (`kotlin.native.cocoapods.configuration`) and JVM targets, which the plugin does not handle.
 
+### Consumer floor: Kotlin 2.2, AGP 8.0, Gradle 8.0
+Done (compat W1 and W2, 2026-11-04): Hopi is built by Kotlin 2.2.21, with Ktor 3.3.3 and
+kotlinx-serialization 1.9.0, so apps on Kotlin 2.2.0 (Android and JVM) and 2.2.21 (iOS) consume
+it; the AARs ask for compileSdk 34; the plugin runs on Gradle 8.0, AGP 8.0 and, in a KMP module,
+the Kotlin Gradle plugin 2.2.0 (README's requirements). `:checkPublication` holds the published
+artifacts to the floor, `functionalTestFloor` runs the plugin's TestKit tests on it, and
+`compat/run.sh` builds an Android, a JVM and a KMP app on it and on the current toolchain. While
+the floor stands, Hopi stays on dependencies built by Kotlin 2.2 (Ktor 3.4 and
+kotlinx-serialization 1.10 are built by 2.3). Left:
+- Kotlin/Native 2.2.0 to 2.2.20 reading Hopi's klibs (`compat/README.md` has the 2.2.0 run; it
+  needs 5 GB free), which would lower the iOS floor from 2.2.21.
+- An Xcode older than 27.1 (Kotlin 2.2.21 lists 26.0), which needs a CI Mac.
+- The fixtures' APKs and frameworks at work on a device or simulator, and a KMP module with an
+  Android target on the floor.
+
 ### Replay (no priority)
 Backlog, no priority. Re-sending a recorded request (optionally edited) through the app's own
 client was built on every source and then removed from the product, because it is the only feature

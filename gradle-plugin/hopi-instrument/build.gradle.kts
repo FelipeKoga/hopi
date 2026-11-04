@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -20,15 +22,25 @@ kotlin {
     compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
+// Loaded by the app's Gradle with the plugin, so held to the plugin's floor: Kotlin 1.8, for
+// Gradle 8.0's Kotlin 1.8.10 (hopi-gradle-plugin's build); its tests compile at the compiler's level.
+tasks.named<KotlinCompile>("compileKotlin") {
+    compilerOptions {
+        languageVersion.set(KotlinVersion.KOTLIN_1_8)
+        apiVersion.set(KotlinVersion.KOTLIN_1_8)
+    }
+}
+
 // One OkHttp per configuration (the 4.x and 5.x jars define the same classes), resolved without
 // dependencies: the tests read RealCall from each jar, they do not run it.
 val okhttp4: Configuration = configurations.create("okhttp4") { isTransitive = false }
 val okhttp5: Configuration = configurations.create("okhttp5") { isTransitive = false }
 
 dependencies {
-    // AGP brings ASM at run time; the rewriter must use that one.
-    compileOnly(libs.asm)
-    compileOnly(libs.asm.tree)
+    // AGP brings ASM at run time; the rewriter must use that one, so it compiles against the oldest,
+    // AGP 8.0.0's (floor-asm), and its tests run on the catalog's.
+    compileOnly(libs.floor.asm)
+    compileOnly(libs.floor.asm.tree)
     compileOnly(kotlin("stdlib"))
     testImplementation(kotlin("stdlib"))
     testImplementation(libs.kotlin.test)

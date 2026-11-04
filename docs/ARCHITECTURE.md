@@ -330,15 +330,17 @@ initializer threw fail it; and that its test runtime classpath holds no `hopi-co
 `hopi-api`. The recorder's tests moved with it to `hopi-network`'s JVM tests.
 
 **The consumer API is checked mechanically.** The modules below enable the Kotlin Gradle plugin's
-built-in ABI validation (`kotlin { abiValidation { … } }`, KGP 2.4.20, `@ExperimentalAbiValidation`),
-which writes JVM, Android and klib (iOS) dumps to each module's `api/` directory
-(`updateKotlinAbi`) and fails `check` when the code no longer matches them (`checkKotlinAbi`, in
-each module's `check`). The dumps are checked in, and a change to a consumer API changes them in
-the same commit (`./gradlew :hopi-ktor:updateKotlinAbi`). Which modules have them (the
-runtime-split plan's O7):
+built-in ABI validation (`kotlin { abiValidation { enabled.set(true); filters { … } } }`, KGP
+2.2.21, `@ExperimentalAbiValidation`), which writes JVM and klib (iOS) dumps to each module's
+`api/` directory (`updateLegacyAbi`) and fails `check` when the code no longer matches them
+(`checkLegacyAbi`, which each module adds to its `check`: KGP 2.2 does not). KGP 2.2 dumps no
+target of AGP's KMP Android library plugin, so Android-only API has no dump (the Android dumps
+were identical to the JVM ones when they went, with the Kotlin 2.2 floor). The dumps are checked
+in, and a change to a consumer API changes them in the same commit
+(`./gradlew :hopi-ktor:updateLegacyAbi`). Which modules have them (the runtime-split plan's O7):
 - The modules a consumer compiles against, `hopi-api`, `hopi-ktor` and `hopi-start`: their dumps
   hold the consumer API alone. `hopi-api`'s and `hopi-ktor`'s filter out `@HopiInternalApi`
-  declarations (`exclude.annotatedWith`): the registry, the rules and perf runtimes' interfaces and
+  declarations (`excluded { annotatedWith }`): the registry, the rules and perf runtimes' interfaces and
   the builders' members that show the runtime what was set; `hopi-ktor`'s hooks interface and the
   configuration's three members that show the recorder what was set. `hopi-ktor`'s hold `Hopi`,
   `HopiConfig` and `HopiLogSink` (unchanged by the plan's stage 10), `hopi-start`'s `Hopi` and
@@ -1993,7 +1995,7 @@ produces a runnable `hopi-cli/build/install/hopi-cli/bin/hopi`. Everything that
 reaches an app (adb, simctl, usbmuxd and devicectl, the targets below, `bridge.json`, the bridge client with its
 handshake and proof check) lives in the JVM module `hopi-connect`, shared with the desktop
 viewer; the CLI adds argument parsing, rendering and exit codes on top. Its whole public API is
-`@HopiInternalApi`, kept in `hopi-connect/api/` by `updateKotlinAbi`.
+`@HopiInternalApi`, kept in `hopi-connect/api/` by `updateLegacyAbi` (`checkLegacyAbi` in its `check`).
 
 For the desktop viewer, `hopi-connect` also holds `BridgeDecoder` (summary and `get` lines
 back into `HttpTransaction`s: the inverse of core's `TransactionJson`, round-trip tested) and

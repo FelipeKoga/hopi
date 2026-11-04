@@ -21,7 +21,8 @@ ktor = "3.3.3"
 # hopi-ktor's tests on it (their test runtime classpaths only; they still compile against `ktor`).
 ktor-forward = "3.5.2"
 androidx-activity = "1.13.0"
-# AGP 9.4.0's own ASM: the Gradle plugin's rewriter compiles against it, AGP supplies it at run time.
+# AGP 9.4.0's own ASM, which the tests run on: the Gradle plugin's rewriter compiles against
+# floor-asm, and the app's AGP supplies its own ASM at run time.
 asm = "9.9"
 # hopi-network compiles against the lowest OkHttp it supports, so no 5.x-only API creeps in; the
 # rewriter's tests also run against the 5.x that Ktor brings.
@@ -36,6 +37,21 @@ okio-okhttp3-last = "1.17.2"
 okio-okhttp5 = "3.17.0"
 # The skiko native runtime that compose-multiplatform 1.12.0 resolves; JVM UI tests only.
 skiko = "0.150.1"
+
+# The dev.koga.hopi plugin's floor: the oldest Gradle, AGP and Kotlin Gradle plugin it runs on. It
+# compiles against the oldest APIs it calls (compileOnly: the consumer's build supplies them; Gradle's
+# is the running one's) and its tests keep the versions above; BytecodeFloorTest holds its references
+# to floor-gradle's and floor-agp-plugin's APIs, and functionalTestFloor runs its TestKit tests on
+# floor-gradle, floor-agp-plugin and floor-kgp. AGP 8.3.2's API declares every member the plugin calls: below 8.3
+# it reads build types instead of Component.debuggable and depends on preBuild instead of lifecycleTasks.
+floor-agp-api = "8.3.2"
+floor-agp-plugin = "8.0.2"
+floor-gradle = "8.0.2"
+floor-kgp = "2.2.0"
+# AGP 8.0.0's own ASM, strictly: gradle-api 8.3.2 names 9.6.
+floor-asm = { strictly = "9.2" }
+# Gradle 8.0's Kotlin standard library: the plugin and hopi-instrument reference nothing outside it.
+floor-kotlin-stdlib = "1.8.10"
 
 android-compileSdk = "37"
 # The compileSdk the five Android libraries' AARs require of an app (their aar-metadata's
@@ -78,9 +94,17 @@ asm-util = { module = "org.ow2.asm:asm-util", version.ref = "asm" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp5-jvm = { module = "com.squareup.okhttp3:okhttp-jvm", version.ref = "okhttp5" }
 android-gradle-api = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
-# The dev.koga.hopi plugin compiles its Kotlin Multiplatform path against the Kotlin Gradle plugin
-# (compileOnly: a KMP build supplies it).
-kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+# The dev.koga.hopi plugin's compile floor (compileOnly: the app's build supplies them; floor-kgp for
+# its Kotlin Multiplatform path), and what its bytecode is checked against (BytecodeFloorTest): the
+# standard library, Gradle 8.0.2's API (the gradle-api jar Gradle generates for plugins, which
+# dev.gradleplugins republishes on Maven Central; 158 MB) and AGP 8.0.2's.
+floor-agp-api = { module = "com.android.tools.build:gradle-api", version.ref = "floor-agp-api" }
+floor-kgp = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "floor-kgp" }
+floor-asm = { module = "org.ow2.asm:asm", version.ref = "floor-asm" }
+floor-asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "floor-asm" }
+floor-kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "floor-kotlin-stdlib" }
+floor-gradle-api = { module = "dev.gradleplugins:gradle-api", version.ref = "floor-gradle" }
+floor-agp-plugin-api = { module = "com.android.tools.build:gradle-api", version.ref = "floor-agp-plugin" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 

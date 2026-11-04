@@ -11,6 +11,7 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.language.base.plugins.LifecycleBasePlugin
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
+import org.jetbrains.kotlin.gradle.plugin.getKotlinPluginVersion
 import org.jetbrains.kotlin.gradle.plugin.mpp.AbstractNativeLibrary
 import org.jetbrains.kotlin.gradle.plugin.mpp.Framework
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
@@ -124,6 +125,70 @@ internal object HopiKmp {
         val extra = project.extensions.extraProperties
         return if (extra.has(EXEMPT_LINK) && !project.providers.gradleProperty(EXEMPT_LINK).isPresent) extra.get(EXEMPT_LINK) as? String else null
     }
+}
+
+/**
+ * The Kotlin Gradle plugin a KMP module needs: [FLOOR], because Hopi's iOS libraries are built by
+ * Kotlin 2.2.21 at klib ABI 2.2.0, and Kotlin/Native skips a library whose ABI is newer than its
+ * own. [HopiPlugin] checks it before [HopiKmp] loads any other type of the Kotlin plugin. First,
+ * that this plugin's classes see the applied Kotlin plugin's: they do not when `dev.koga.hopi` is
+ * declared in a parent scope (the root's `plugins { }`, buildSrc) and the Kotlin plugin in the
+ * module's, and every call into it would fail ([scopeMessage]). Then the version, from
+ * `Project.getKotlinPluginVersion()`, which the Kotlin plugin has had since 1.x (1.8.22 and 1.9.24
+ * have it); one that lacks it counts as older.
+ */
+internal object KotlinPluginFloor {
+    const val FLOOR = "2.2.0"
+
+    /** The Kotlin plugin's class [check] calls, `getKotlinPluginVersion`'s file facade, by name. */
+    const val VERSION_FACADE = "org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt"
+
+    fun check(project: Project) {
+        val applied = project.plugins.findPlugin("org.jetbrains.kotlin.multiplatform")
+        if (applied != null && !sameClass(VERSION_FACADE, KotlinPluginFloor::class.java.classLoader, applied.javaClass.classLoader)) {
+            throw GradleException(scopeMessage(project.path))
+        }
+        val found = try {
+            project.getKotlinPluginVersion()
+        } catch (missing: NoSuchMethodError) {
+            null
+        }
+        if (found == null || isBelowFloor(found)) throw GradleException(message(project.path, found))
+    }
+
+    /**
+     * Whether [ours] resolves the class [name] to the one [theirs] does. Gradle defines a plugin's
+     * generated subclass in its class's loader, so [theirs] can be the applied plugin's.
+     */
+    fun sameClass(name: String, ours: ClassLoader?, theirs: ClassLoader?): Boolean = load(name, ours) === load(name, theirs)
+
+    private fun load(name: String, loader: ClassLoader?): Class<*>? = try {
+        Class.forName(name, false, loader)
+    } catch (absent: ClassNotFoundException) {
+        null
+    } catch (absent: LinkageError) {
+        null
+    }
+
+    fun scopeMessage(path: String): String =
+        "dev.koga.hopi cannot see the classes of the Kotlin Gradle plugin that $path applies, which it runs on: declare " +
+            "org.jetbrains.kotlin.multiplatform and dev.koga.hopi in the same plugins { } block, the root build script's " +
+            "(with apply false) or $path's (dev.koga.hopi in a parent build script or in buildSrc does not see a Kotlin " +
+            "plugin declared below it)."
+
+    /** Compares major, minor and patch only, so 2.2.0's own pre-releases and 2.2.20-Beta1 pass. */
+    fun isBelowFloor(version: String): Boolean {
+        fun numbers(v: String) = v.split('.', '-').take(3).map { part -> part.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        for ((found, needed) in numbers(version).zip(numbers(FLOOR))) {
+            if (found != needed) return found < needed
+        }
+        return false
+    }
+
+    fun message(path: String, found: String?): String =
+        "dev.koga.hopi needs the Kotlin Gradle plugin $FLOOR or newer in a Kotlin Multiplatform module, and $path applies " +
+            "org.jetbrains.kotlin.multiplatform ${found ?: "of a version too old to report itself"}: Hopi's iOS libraries are built by " +
+            "Kotlin 2.2.21, and Kotlin/Native skips a library built for a newer Kotlin than its own. Use Kotlin $FLOOR or newer."
 }
 
 /**

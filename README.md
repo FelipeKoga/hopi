@@ -69,17 +69,38 @@ dependencyResolutionManagement {
 }
 ```
 
-What the published artifacts need from your build (the versions they are built and tested with;
-older ones are not tested):
+What the published artifacts need from your build. `compat/run.sh` builds an Android, a JVM and a
+KMP app on the oldest versions below and on the newest it names (see
+[`compat/README.md`](compat/README.md)); the versions between are not tested:
 
-- **Gradle 9.7.1 and JDK 17**; the plugin is compiled against **AGP 9.4.0**'s API.
-- **Kotlin 2.2.21**: the klibs and the Kotlin metadata are written by it.
-- **Android**: the app module applies `com.android.application` (the plugin refuses any other
-  module but a Kotlin Multiplatform one, see [iOS](#ios-every-urlsession-request-automatically))
-  with `compileSdk = 37` or higher, since the AARs declare `minCompileSdk=37` and AGP refuses a
-  lower one, and `minSdk = 24` or higher. A KMP shared module uses
-  `com.android.kotlin.multiplatform.library`, with the same `compileSdk` in its `android { }` block.
-- **Ktor 3.5.2** for `hopi-ktor`.
+- **Kotlin 2.2.0** or newer for Android and JVM apps, **2.2.21** or newer for iOS (tested up to
+  2.4.20). Hopi is built by Kotlin 2.2.21, at Kotlin metadata 2.2.0 and klib ABI 2.2.0; Kotlin/Native
+  skips a klib whose ABI is newer than its own, and whether 2.2.0 to 2.2.20 link klibs built by
+  2.2.21 is not tested. In a Kotlin Multiplatform module the plugin stops the build, with the
+  reason, on a Kotlin Gradle plugin older than 2.2.0.
+- **Gradle 8.0** or newer (tested up to 9.7.1) and **JDK 17**. Before Gradle 8.2 a build script
+  cannot assign a property with `=`: write `enabled.set(true)` where this README writes
+  `enabled = true`.
+- **Android**: AGP 8.0 or newer (tested up to 9.4.0). The app module applies
+  `com.android.application` (the plugin refuses any other module but a Kotlin Multiplatform one,
+  see [iOS](#ios-every-urlsession-request-automatically)) with `compileSdk = 34` or higher, since
+  the AARs declare `minCompileSdk=34` and AGP refuses a lower one, and `minSdk = 24` or higher.
+  AGP 8.0 to 8.1.0 warn about compileSdk 34 unless `gradle.properties` sets
+  `android.suppressUnsupportedCompileSdk=34`.
+- **A KMP shared module with an Android target**: `com.android.kotlin.multiplatform.library`,
+  which AGP ships from 8.2.0 on, with the same `compileSdk` for that target. No `compat/run.sh` run
+  builds one; only the repository's sample does, on AGP 9.4.0 and from Hopi's projects, not the
+  published artifacts.
+- **Ktor 3.3.3** or newer for `hopi-ktor` (tested up to 3.5.2).
+- **Xcode**: the one your app's Kotlin requires (tested only with Xcode 27.1).
+- **The Kotlin plugin and `dev.koga.hopi` in one build-script scope**: declare them, and AGP, in
+  the same `plugins { }`, the root's (with `apply false`) or the module's, since the plugin runs on
+  their classes. In a KMP module the plugin stops the build with this rule when it cannot see the
+  Kotlin plugin's classes.
+- **R8 below 8.10.21** (AGP below 8.10) does not read Kotlin 2.2's metadata: where the app's rules
+  keep `kotlin.Metadata`, a minified build warns "An error occurred when parsing kotlin metadata"
+  and goes on. AGP 8.0's lint likewise prints an `e: … incompatible version of Kotlin` line for
+  each Kotlin 2 library on a release build, and passes.
 
 What you add depends on the app; a KMP app with both platforms does the first two:
 
@@ -936,7 +957,12 @@ and no archive holds this repository's absolute path (the klibs store source pat
 build refuses a `-Phopi.version` that differs from it. The
 artifacts and the plugin are published by `gradle/publishing.gradle.kts`, which each published
 module applies; `hopi-connect`, the CLI, the desktop viewer with its screens (`hopi-ui`) and the
-sample are not published.
+sample are not published. The consumer floors under [Install](#install) are checked after
+`:checkPublication` by `compat/run.sh`, which builds the apps in `compat/` on the oldest and the
+newest toolchains it names (Gradle 8.0.2 from `compat/floor-gradle`, in `build/compat-home`, a
+Gradle user home of its own; see [`compat/README.md`](compat/README.md)), and by
+`./gradlew :gradle-plugin:hopi-gradle-plugin:functionalTestFloor`, the plugin's TestKit tests on
+Gradle 8.0.2, AGP 8.0.2 and the Kotlin Gradle plugin 2.2.0; neither is part of `check`.
 The giant-body benchmarks are opt-in and slow (minutes): run one module at a time with
 `./gradlew :hopi-network:jvmGiantBodyBenchmark` (the Ktor plugin's recorder; also `:hopi-core:` and
 `:hopi-ui:`), `./gradlew :hopi-cli:testGiantBodyBenchmark` or

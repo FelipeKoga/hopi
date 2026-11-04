@@ -4,6 +4,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Dependency
+import org.gradle.util.GradleVersion
 
 /**
  * `plugins { id("dev.koga.hopi") }`, the whole setup, with an optional `hopi { }` block
@@ -20,9 +21,16 @@ import org.gradle.api.artifacts.Dependency
  *
  * Each path's code is a class of its own, loaded only once its Gradle plugin is applied, so this
  * plugin loads where AGP is absent (an iOS-only KMP module) or the Kotlin plugin is.
+ *
+ * The oldest builds it supports: Gradle 8.0, AGP 8.0 ([HopiAndroid]) and, in a KMP module, the
+ * Kotlin Gradle plugin 2.2.0 ([KotlinPluginFloor]); an older one fails here with the reason.
  */
 public class HopiPlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        val gradle = GradleVersion.current()
+        if (gradle.baseVersion < GRADLE_FLOOR) {
+            throw GradleException("dev.koga.hopi needs Gradle ${GRADLE_FLOOR.version} or newer, and this build runs Gradle ${gradle.version}")
+        }
         val extension = project.extensions.create("hopi", HopiExtension::class.java)
         extension.applyDefaults()
         var applied = false
@@ -32,6 +40,8 @@ public class HopiPlugin : Plugin<Project> {
         }
         project.pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
             applied = true
+            // Before HopiKmp loads any of the Kotlin plugin's types, which an older one may lack.
+            KotlinPluginFloor.check(project)
             HopiKmp.configure(project, extension)
         }
         project.afterEvaluate {
@@ -43,6 +53,10 @@ public class HopiPlugin : Plugin<Project> {
                 )
             }
         }
+    }
+
+    private companion object {
+        val GRADLE_FLOOR: GradleVersion = GradleVersion.version("8.0")
     }
 }
 

@@ -1,5 +1,6 @@
 package dev.koga.hopi.gradle
 
+import com.android.build.api.AndroidPluginVersion
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.instrumentation.InstrumentationScope
 import com.android.build.api.variant.ApplicationAndroidComponentsExtension
@@ -12,6 +13,7 @@ import dev.koga.hopi.gradle.HopiModules.NETWORK
 import dev.koga.hopi.gradle.HopiModules.PERF
 import org.gradle.api.GradleException
 import org.gradle.api.Project
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.language.base.plugins.LifecycleBasePlugin
 
 /**
@@ -46,16 +48,38 @@ import org.gradle.language.base.plugins.LifecycleBasePlugin
  *   starts the `autoStart` ones (docs/design/perf-monitors.md).
  *
  * `hopi-core`'s manifest declares the provider that starts the generated tools, so the app adds no code.
+ *
+ * AGP 8.0 is the oldest it supports. The plugin compiles against AGP 8.3's API, whose
+ * `Component.debuggable` and `lifecycleTasks` it calls from 8.3 on only, in [debuggable] and
+ * [runBeforePreBuild] (BytecodeFloorTest holds every other reference to AGP 8.0.2's API); below 8.3
+ * a variant is as debuggable as its build type, and the guard is a dependency of the variant's
+ * preBuild task.
  */
 internal object HopiAndroid {
     private const val KTOR_ANDROID_ENGINE = "io/ktor/client/engine/android/AndroidClientEngine"
 
+    /** The oldest AGP the plugin supports. */
+    private val FLOOR = AndroidPluginVersion(8, 0)
+
+    /** The AGP that added `Component.debuggable` and `Variant.lifecycleTasks`. */
+    private val VARIANT_LIFECYCLE_API = AndroidPluginVersion(8, 3)
+
     fun configure(project: Project, extension: HopiExtension) {
         val components = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
+        val agp = components.pluginVersion
+        if (agp < FLOOR) {
+            throw GradleException(
+                "dev.koga.hopi needs the Android Gradle plugin 8.0 or newer, and ${project.path} applies " +
+                    "${agp.major}.${agp.minor}.${agp.micro}: update com.android.application",
+            )
+        }
+        val variantLifecycleApi = agp >= VARIANT_LIFECYCLE_API
         // Debuggable is a build-type property; finalizeDsl is the last point dependencies can be declared.
         val realByBuildType = mutableMapOf<String, Boolean>()
+        val debuggableByBuildType = mutableMapOf<String, Boolean>()
         components.finalizeDsl { dsl: ApplicationExtension ->
             for (buildType in dsl.buildTypes) {
+                debuggableByBuildType[buildType.name] = buildType.isDebuggable
                 val real = extension.enabled.get() && buildType.isDebuggable
                 realByBuildType[buildType.name] = real
                 // Debuggable build types only: the others get no runtime, which their guard checks.
@@ -73,19 +97,24 @@ internal object HopiAndroid {
             }
         }
         components.onVariants(components.selector().all()) { variant ->
-            val real = extension.enabled.get() && variant.debuggable
+            // A variant with no build type the DSL declared counts as not debuggable: it gets the guard.
+            val debuggable = if (variantLifecycleApi) debuggable(variant) else debuggableByBuildType[variant.buildType] == true
+            val real = extension.enabled.get() && debuggable
             val expected = realByBuildType[variant.buildType]
             if (expected != null && expected != real) {
                 throw GradleException(
-                    "variant ${variant.name} is ${if (variant.debuggable) "" else "not "}debuggable, unlike its build type " +
+                    "variant ${variant.name} is ${if (debuggable) "" else "not "}debuggable, unlike its build type " +
                         "${variant.buildType}; dev.koga.hopi gave it ${if (expected) "Hopi's runtimes" else "no runtime"}",
                 )
             }
             if (real && extension.network.enabled.get()) instrument(extension.network, variant)
             if (real) generateConfig(project, extension, variant)
-            if (!variant.debuggable) guard(project, variant)
+            if (!debuggable) guard(project, variant, variantLifecycleApi)
         }
     }
+
+    /** AGP 8.3's `Component.debuggable`: called from AGP 8.3 on only, so older AGPs never link it. */
+    private fun debuggable(variant: ApplicationVariant): Boolean = variant.debuggable
 
     /** The bytecode transform and its excludes: `network { enabled }`, debuggable variants only. */
     private fun instrument(network: HopiNetworkExtension, variant: ApplicationVariant) {
@@ -138,10 +167,10 @@ internal object HopiAndroid {
     /**
      * The release guard of a variant that is not debuggable ([HopiReleaseGuard]): its inputs are the
      * variant's runtime classpath mapped to the runtimes it holds and the ones to remove, when the
-     * task's inputs are read; AGP runs it before `pre<Variant>Build`, so before any compile or dex
-     * task of the variant.
+     * task's inputs are read; it runs before `pre<Variant>Build`, so before any compile or dex task
+     * of the variant ([runBeforePreBuild]).
      */
-    private fun guard(project: Project, variant: ApplicationVariant) {
+    private fun guard(project: Project, variant: ApplicationVariant, variantLifecycleApi: Boolean) {
         val name = variant.name.replaceFirstChar(Char::uppercaseChar)
         val graph = variant.runtimeConfiguration.incoming.resolutionResult.rootComponent
         val guard = project.tasks.register("hopiReleaseGuard$name", HopiReleaseGuard::class.java) { task ->
@@ -152,7 +181,21 @@ internal object HopiAndroid {
             task.runtimes.set(graph.map(HopiRuntimeGraph::refused))
             task.remove.set(graph.map(HopiRuntimeGraph::toRemove))
         }
-        variant.lifecycleTasks.registerPreBuild(guard)
+        runBeforePreBuild(project, variant, guard, variantLifecycleApi)
+    }
+
+    /**
+     * Makes [task] run before the variant's `pre<Variant>Build`: through AGP 8.3's `lifecycleTasks`
+     * from 8.3 on (called there only, so older AGPs never link it); below 8.3, as a dependency of the
+     * task of that name, which AGP registers after the variant callbacks.
+     */
+    private fun runBeforePreBuild(project: Project, variant: ApplicationVariant, task: TaskProvider<*>, variantLifecycleApi: Boolean) {
+        if (variantLifecycleApi) {
+            variant.lifecycleTasks.registerPreBuild(task)
+            return
+        }
+        val preBuild = "pre${variant.name.replaceFirstChar(Char::uppercaseChar)}Build"
+        project.tasks.configureEach { candidate -> if (candidate.name == preBuild) candidate.dependsOn(task) }
     }
 
     /**

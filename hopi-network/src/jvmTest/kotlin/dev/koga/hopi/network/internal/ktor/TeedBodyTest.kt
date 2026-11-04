@@ -6,6 +6,7 @@ import dev.koga.hopi.ktor.HopiLogSink
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.onDownload
 import io.ktor.client.request.get
@@ -35,6 +36,7 @@ import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.IOException
 import java.lang.management.ManagementFactory
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -43,10 +45,12 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -322,23 +326,26 @@ class TeedBodyTest {
             "readFully" to { channel -> channel.readFully(ByteArray(1024 * 1024)) },
         )
         val scope = this
-        for ((name, read) in readers) {
-            for (failAt in intArrayOf(10_000, 300_000)) {
-                for (direct in listOf(true, false)) {
-                    // The reset comes before the app reads on, or while it waits for more. In the
-                    // second case the resetter runs on this test's own thread, so it can run only
-                    // once the reader has suspended in its wait for bytes that never come, and the
-                    // ByteChannel resumes that wait with the failure (a reset just before the wait
-                    // suspends ends it with false instead: aSourceThatFailsDuringAWaitEndsItAsAByteChannelDoes).
-                    for (whileWaiting in listOf(false, true)) {
-                        // With one byte left unread, the app's channel still holds bytes when the source
-                        // fails, which a failed ByteChannel no longer hands out either.
-                        for (unread in intArrayOf(0, 1)) {
-                            for (progress in if (unread == 0) listOf(false, true) else listOf(false)) {
-                                val label = "$name, failing at $failAt, ${if (direct) "rawContent" else "bodyAsChannel"}" +
-                                    "${if (whileWaiting) ", while waiting" else ""}, $unread unread" +
-                                    if (progress) ", onDownload" else ""
-                                sourceFailure(scope, label, read, failAt - unread, failAt, direct, whileWaiting, progress)
+        // The engine's dispatcher, where Ktor's own copies of the body run (sourceFailure).
+        Executors.newSingleThreadExecutor { Thread(it, "teed-engine") }.asCoroutineDispatcher().use { engineThread ->
+            for ((name, read) in readers) {
+                for (failAt in intArrayOf(10_000, 300_000)) {
+                    for (direct in listOf(true, false)) {
+                        // The reset comes before the app reads on, or while it waits for more. In the
+                        // second case the resetter starts on this test's own thread, so it can run only
+                        // once the reader has suspended in its wait for bytes that never come, and the
+                        // ByteChannel resumes that wait with the failure (a reset just before the wait
+                        // suspends ends it with false instead: aSourceThatFailsDuringAWaitEndsItAsAByteChannelDoes).
+                        for (whileWaiting in listOf(false, true)) {
+                            // With one byte left unread, the app's channel still holds bytes when the source
+                            // fails, which a failed ByteChannel no longer hands out either.
+                            for (unread in intArrayOf(0, 1)) {
+                                for (progress in if (unread == 0) listOf(false, true) else listOf(false)) {
+                                    val label = "$name, failing at $failAt, ${if (direct) "rawContent" else "bodyAsChannel"}" +
+                                        "${if (whileWaiting) ", while waiting" else ""}, $unread unread" +
+                                        if (progress) ", onDownload" else ""
+                                    sourceFailure(scope, engineThread, label, read, failAt - unread, failAt, direct, whileWaiting, progress)
+                                }
                             }
                         }
                     }
@@ -349,6 +356,7 @@ class TeedBodyTest {
 
     private suspend fun sourceFailure(
         scope: CoroutineScope,
+        engineThread: CoroutineDispatcher,
         label: String,
         read: suspend (ByteReadChannel) -> Unit,
         head: Int,
@@ -357,22 +365,35 @@ class TeedBodyTest {
         whileWaiting: Boolean,
         progress: Boolean,
     ) {
-        // The connection resets after failAt bytes, once the app has read the first head of them.
+        // The connection resets after failAt bytes, once the app has read the first head of them and
+        // holds its channel. The reset runs on the engine's one thread, where Ktor's own copies of the
+        // body run (BodyProgress's writer with onDownload, bodyAsChannel's copy), after everything
+        // queued there: each copy has started and waits for more bytes. Before Ktor 3.5.0, a
+        // bodyAsChannel copy that first looks at its source after the source failed ends normally
+        // (it did not rethrow the source's close cause), so without the plugin the app saw a short
+        // body instead of the failure whenever the scheduler started that copy late.
         suspend fun failure(newClient: (MockEngine) -> HttpClient): Throwable {
             val headRead = CompletableDeferred<Unit>()
+            val appHasChannel = CompletableDeferred<Unit>()
             val reset = CompletableDeferred<Unit>()
-            val engine = MockEngine {
-                val body = ByteChannel()
-                body.writeFully(asciiBytes(failAt, seed = 14))
-                body.flush()
-                val resetter = if (whileWaiting) scope else CoroutineScope(Dispatchers.Default)
-                resetter.launch {
-                    headRead.await()
-                    body.cancel(IOException("connection reset"))
-                    reset.complete(Unit)
-                }
-                respond(body, HttpStatusCode.OK, plain)
-            }
+            val engine = MockEngine(
+                MockEngineConfig().apply {
+                    dispatcher = engineThread
+                    addHandler {
+                        val body = ByteChannel()
+                        body.writeFully(asciiBytes(failAt, seed = 14))
+                        body.flush()
+                        val resetter = if (whileWaiting) scope else CoroutineScope(Dispatchers.Default)
+                        resetter.launch {
+                            headRead.await()
+                            appHasChannel.await()
+                            withContext(engineThread) { body.cancel(IOException("connection reset")) }
+                            reset.complete(Unit)
+                        }
+                        respond(body, HttpStatusCode.OK, plain)
+                    }
+                },
+            )
             return assertFailsWith<Throwable>(label) {
                 newClient(engine).prepareGet("https://api.example.com/reset") {
                     // BodyProgress's writer holds what it copied until the end or 1 MB, so the app
@@ -380,6 +401,8 @@ class TeedBodyTest {
                     if (progress) onDownload { sent, _ -> if (sent >= failAt) headRead.complete(Unit) }
                 }.execute { response ->
                     val channel = if (direct) response.rawContent else response.bodyAsChannel()
+                    // bodyAsChannel has queued its copy on the engine's thread, ahead of the reset.
+                    appHasChannel.complete(Unit)
                     if (!progress) {
                         channel.readFully(ByteArray(head))
                         headRead.complete(Unit)

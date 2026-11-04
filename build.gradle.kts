@@ -40,7 +40,9 @@ tasks.named("check") {
  * above [maxCoroutinesVersion] (module files and POMs); no `.kotlin_module` file in `META-INF` above
  * [maxKotlinMetadataVersion] in a JVM jar or in an AAR's jars; no AAR asking for a compileSdk above
  * [maxMinCompileSdk]; and every klib, the cinterop ones and the metadata jars' included, at
- * [klibAbiVersion], since Kotlin/Native skips a klib whose ABI version is newer than its own.
+ * [klibAbiVersion], since Kotlin/Native skips a klib whose ABI version is newer than its own. The
+ * dev.koga.hopi plugin and hopi-instrument, which the app's Gradle loads, hold a `.kotlin_module`
+ * no newer than [maxPluginKotlinMetadataVersion].
  */
 abstract class PublicationCheck : DefaultTask() {
     @get:InputFiles
@@ -68,6 +70,13 @@ abstract class PublicationCheck : DefaultTask() {
     /** The `abi_version` of every published klib. */
     @get:Input
     abstract val klibAbiVersion: Property<String>
+
+    /**
+     * The newest Kotlin metadata (major.minor) of the plugin's and hopi-instrument's jars: the oldest
+     * Gradle the plugin supports compiles build scripts against the plugin with its own Kotlin.
+     */
+    @get:Input
+    abstract val maxPluginKotlinMetadataVersion: Property<String>
 
     /** The newest io.ktor a published module may depend on. */
     @get:Input
@@ -172,11 +181,14 @@ abstract class PublicationCheck : DefaultTask() {
     /**
      * What the archive [file] breaks of the consumer floors: each klib manifest's `abi_version` (a
      * klib's own, and every metadata klib's in a jar), an AAR's `minCompileSdk`, and the Kotlin
-     * metadata of each `.kotlin_module` file in `META-INF` of a `-jvm` jar or of an AAR's jars.
+     * metadata of each `.kotlin_module` file in `META-INF` of a `-jvm` jar or of an AAR's jars, and
+     * of the plugin's and hopi-instrument's jars, which must hold one.
      */
     private fun archiveFloorProblems(name: String, file: File): List<String> = java.util.zip.ZipFile(file).use { zip ->
         val problems = mutableListOf<String>()
         val jvmJar = file.extension == "jar" && file.parentFile.parentFile.name.endsWith("-jvm")
+        val pluginJar = file.extension == "jar" && file.parentFile.parentFile.name in PLUGIN_ARTIFACTS && !file.name.endsWith("-sources.jar")
+        if (pluginJar && zip.entries().asSequence().none { isKotlinModule(it.name) }) problems += "$name holds no .kotlin_module to check"
         for (entry in zip.entries().asSequence().filterNot { it.isDirectory }) {
             val path = entry.name
             fun bytes() = zip.getInputStream(entry).use { it.readBytes() }
@@ -195,17 +207,18 @@ abstract class PublicationCheck : DefaultTask() {
                     }
                 }
                 jvmJar && isKotlinModule(path) -> problems += metadataFloorProblems(name, path, bytes())
+                pluginJar && isKotlinModule(path) -> problems += metadataFloorProblems(name, path, bytes(), maxPluginKotlinMetadataVersion.get())
             }
         }
         problems
     }
 
     /** A `.kotlin_module` file starts with its metadata version: an int count, then that many ints. */
-    private fun metadataFloorProblems(where: String, path: String, bytes: ByteArray): List<String> {
+    private fun metadataFloorProblems(where: String, path: String, bytes: ByteArray, max: String = maxKotlinMetadataVersion.get()): List<String> {
         val input = java.io.DataInputStream(bytes.inputStream())
         val version = IntArray(input.readInt()) { input.readInt() }.joinToString(".")
-        return if (compareVersions(version.split('.').take(2).joinToString("."), maxKotlinMetadataVersion.get()) > 0) {
-            listOf("$where: $path has Kotlin metadata $version, above ${maxKotlinMetadataVersion.get()}")
+        return if (compareVersions(version.split('.').take(2).joinToString("."), max) > 0) {
+            listOf("$where: $path has Kotlin metadata $version, above $max")
         } else {
             emptyList()
         }
@@ -232,6 +245,9 @@ abstract class PublicationCheck : DefaultTask() {
         const val GROUP_PATH = "dev/koga/hopi"
         const val AAR_METADATA = "META-INF/com/android/build/gradle/aar-metadata.properties"
         val VERSION_KEYS = setOf("requires", "strictly", "prefers")
+
+        /** The artifacts the app's Gradle loads: the dev.koga.hopi plugin and its rewriter. */
+        val PLUGIN_ARTIFACTS = setOf("hopi-gradle-plugin", "hopi-instrument")
     }
 }
 
@@ -324,6 +340,8 @@ val checkPublication = tasks.register<PublicationCheck>("checkPublication") {
     // kotlinx-coroutines 1.11.0 (built with 2.2.20) and compileSdk 34 (AGP 8.1.1).
     kotlinStdlibVersion.set(kotlinFloor)
     maxKotlinMetadataVersion.set("2.2")
+    // Gradle 8.0, the plugin's floor, compiles build scripts against it with Kotlin 1.8.10.
+    maxPluginKotlinMetadataVersion.set("1.8")
     klibAbiVersion.set("2.2.0")
     maxKtorVersion.set("3.3.3")
     maxCoroutinesVersion.set("1.11.0")

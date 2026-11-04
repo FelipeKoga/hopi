@@ -1,6 +1,8 @@
 package dev.koga.hopi.gradle
 
 import java.io.File
+import java.net.URL
+import java.net.URLClassLoader
 import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -304,6 +306,47 @@ class HopiPluginUnitTest {
         val failure = runCatching { (project as org.gradle.api.internal.project.ProjectInternal).evaluate() }.exceptionOrNull()
         val messages = generateSequence(failure) { it.cause }.mapNotNull { it.message }.toList()
         assertTrue(messages.any { "apply dev.koga.hopi to the Android application module" in it }, messages.toString())
+    }
+
+    @Test
+    fun aKmpModuleNeedsTheKotlinGradlePlugin220() {
+        // Major, minor and patch: 2.2.0's pre-releases and a later patch's pass.
+        for (version in listOf("2.2.0", "2.2.0-RC2", "2.2.20-Beta1", "2.2.21", "2.4.20", "3.0.0", "2.2")) {
+            assertFalse(KotlinPluginFloor.isBelowFloor(version), version)
+        }
+        for (version in listOf("2.1.21", "2.1.0", "2.0.21", "1.9.24", "1.8.22", "2.1.255-SNAPSHOT")) {
+            assertTrue(KotlinPluginFloor.isBelowFloor(version), version)
+        }
+        val message = KotlinPluginFloor.message(":shared", "2.1.21")
+        assertTrue("needs the Kotlin Gradle plugin 2.2.0 or newer in a Kotlin Multiplatform module" in message, message)
+        assertTrue(":shared applies org.jetbrains.kotlin.multiplatform 2.1.21: " in message, message)
+        val unknown = KotlinPluginFloor.message(":shared", null)
+        assertTrue(":shared applies org.jetbrains.kotlin.multiplatform of a version too old to report itself" in unknown, unknown)
+    }
+
+    /**
+     * A Kotlin plugin whose classes the plugin's loader does not resolve to the same ones (declared in
+     * the module while dev.koga.hopi is in the root or buildSrc) is refused with the same-scope rule,
+     * not a version: a child loader of the plugin's sees them, another copy or a loader without them
+     * does not. The TestKit test covers it in a build.
+     */
+    @Test
+    fun aKotlinPluginTheHopiPluginCannotSeeIsRefusedWithTheScopeRule() {
+        val name = KotlinPluginFloor::class.java.name
+        val ours = KotlinPluginFloor::class.java.classLoader
+        val platform = ClassLoader.getPlatformClassLoader()
+        URLClassLoader(emptyArray<URL>(), ours).use { child ->
+            URLClassLoader(arrayOf(KotlinPluginFloor::class.java.protectionDomain.codeSource.location), platform).use { copy ->
+                assertTrue(KotlinPluginFloor.sameClass(name, ours, ours))
+                assertTrue(KotlinPluginFloor.sameClass(name, ours, child), "a child scope's loader")
+                assertFalse(KotlinPluginFloor.sameClass(name, ours, copy), "another copy of the class")
+                assertFalse(KotlinPluginFloor.sameClass(name, platform, ours), "a loader without the class")
+            }
+        }
+        val message = KotlinPluginFloor.scopeMessage(":shared")
+        assertTrue(message.startsWith("dev.koga.hopi cannot see the classes of the Kotlin Gradle plugin that :shared applies"), message)
+        assertTrue("declare org.jetbrains.kotlin.multiplatform and dev.koga.hopi in the same plugins { } block" in message, message)
+        assertFalse("too old" in message, message)
     }
 }
 
