@@ -318,12 +318,12 @@ abstract class PublicationCheck : DefaultTask() {
     }
 }
 
-// Every library a consumer needs (README, "Install"), by its targets and the cinterop klibs of its
-// main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the desktop
-// viewer with its screens (hopi-ui) and the sample are not published. The io.github.felipekoga.hopi
-// plugin injects the network runtime (hopi-network), hopi-core and, with `perf { enabled }`,
-// hopi-perf into debuggable build types only and aligns hopi-api (HopiRules, HopiPerf) and hopi-ktor
-// (the thin Ktor plugin) with its own version, all of them listed here.
+// Every library a consumer needs (docs/GUIDE.md, "Install"), by its targets and the cinterop klibs
+// of its main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the
+// desktop viewer with its screens (hopi-ui) and the sample are not published. The
+// io.github.felipekoga.hopi plugin injects the network runtime (hopi-network), hopi-core and, with
+// `perf { enabled }`, hopi-perf into debuggable build types only and aligns hopi-api (HopiRules,
+// HopiPerf) and hopi-ktor (the thin Ktor plugin) with its own version, all of them listed here.
 // hopi-start, the iOS entry a Debug framework exports and the JVM entry, brings hopi-network and
 // hopi-perf; hopi-network's JVM target holds the Ktor plugin's recorder.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")

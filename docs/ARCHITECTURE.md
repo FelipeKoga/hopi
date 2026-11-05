@@ -2668,10 +2668,10 @@ codings; gzip and deflate are decoded), or when the app's Hopi does not support 
 
 The Ktor plugin's recorder, measured with a JVM benchmark against `ktor-client-mock`, plugin
 installed vs not (`HopiOverheadBenchmark` and `TeedBodyTest`, in `hopi-network`'s JVM tests since
-the runtime-split plan's stage 10, 2026-10-29, through the thin plugin's hooks; the README's
-figures were measured on 2026-10-23, with the recorder inside `hopi-ktor`). The platform recorders
-state their own cost, measured on the emulator and the simulator, under "Android capture" and
-"URLSession capture" ("Measured"):
+the runtime-split plan's stage 10, 2026-10-29, through the thin plugin's hooks; the figures in
+GUIDE.md, "Measured performance", were measured on 2026-10-23, with the recorder inside
+`hopi-ktor`). The platform recorders state their own cost, measured on the emulator and the
+simulator, under "Android capture" and "URLSession capture" ("Measured"):
 
 - Added latency per request on the caller path: < 50 µs median for a 1 KB JSON response.
 - No added allocation proportional to body size beyond `maxBodyBytes`.

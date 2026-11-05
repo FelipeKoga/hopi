@@ -1,5 +1,5 @@
-// Publishing of every library a consumer needs (README, "Install"): to build/publication-check
-// (:checkPublication), to Maven Local, and, through the release build and
+// Publishing of every library a consumer needs (docs/GUIDE.md, "Install"): to
+// build/publication-check (:checkPublication), to Maven Local, and, through the release build and
 // scripts/central-release.sh, to Maven Central (docs/RELEASING.md). Applied by each published
 // module after its `description`; the Kotlin Multiplatform plugin creates the publications (the
 // root one with the Gradle module metadata, one per target with its sources jar, the iOS ones with

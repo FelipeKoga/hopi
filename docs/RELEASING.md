@@ -3,8 +3,8 @@
 Every Hopi artifact, the Gradle plugin and its marker included, goes to Maven Central under the
 group `io.github.felipekoga.hopi`, in the namespace `io.github.felipekoga` that the Central
 Publisher Portal grants the FelipeKoga GitHub account. The plugin is not on the Gradle Plugin
-Portal: apps resolve it from `mavenCentral()` (README, "Install"). A release is a tag: the release
-workflow (`.github/workflows/`) builds, signs and uploads it, and the owner presses Publish.
+Portal: apps resolve it from `mavenCentral()` (README, "Quick start"). A release is a tag: the
+release workflow (`.github/workflows/`) builds, signs and uploads it, and the owner presses Publish.
 
 ## Once, by the owner
 
