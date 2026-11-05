@@ -66,7 +66,7 @@ targets:
         basedOnDependencyAnalysis: false
         shell: /bin/sh
         script: |
-          # Kotlin's standard build phase, nothing of Hopi's: the dev.koga.hopi plugin reads Xcode's
+          # Kotlin's standard build phase, nothing of Hopi's: the io.github.felipekoga.hopi plugin reads Xcode's
           # CONFIGURATION, so Debug links Hopi's runtimes and hopi-start (HopiSetup.shared.start()
           # starts Hopi), any other configuration no runtime, only hopi-api and the thin Ktor
           # plugin, and the plugin's iOS release guard fails a Release link that would hold one

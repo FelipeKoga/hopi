@@ -5,7 +5,7 @@ import dev.koga.hopi.core.start.HopiTool
 
 /**
  * Hopi's start on iOS and the JVM: one call, first thing at startup. On iOS, in a Debug build,
- * through the `HopiSetup.shared.start()` the dev.koga.hopi Gradle plugin generates into the
+ * through the `HopiSetup.shared.start()` the io.github.felipekoga.hopi Gradle plugin generates into the
  * shared module, which calls this with the module's `hopi { }` block; on the JVM, first
  * in `main`, before any `HttpClient` is built (`HopiStart.start { agentBridge = true }`, imported
  * under an alias: the Ktor plugin is also named `Hopi`). It runs core's start sequence

@@ -1,7 +1,7 @@
 rootProject.name = "hopi"
 
 pluginManagement {
-    // The `dev.koga.hopi` Gradle plugin (docs/design/android-capture.md).
+    // The `io.github.felipekoga.hopi` Gradle plugin (docs/design/android-capture.md).
     includeBuild("gradle-plugin")
     repositories {
         google {

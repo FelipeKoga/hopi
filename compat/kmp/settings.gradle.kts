@@ -1,4 +1,4 @@
-// A Kotlin Multiplatform consumer of Hopi as an app gets it: the dev.koga.hopi plugin and hopi-ktor,
+// A Kotlin Multiplatform consumer of Hopi as an app gets it: the io.github.felipekoga.hopi plugin and hopi-ktor,
 // resolved from the repositories :checkPublication fills (run it first), never Maven Local. The
 // Kotlin Gradle plugin is -Pkgp's (default 2.4.20, the pilot app's), Ktor -Pktor's (default 3.5.2).
 // It builds with the repository's wrapper or the floor's Gradle 8.0.2 (compat/floor-gradle):
@@ -15,7 +15,7 @@ pluginManagement {
     val repository = settingsDir.resolve("../..").canonicalFile
     val kgp = providers.gradleProperty("kgp").getOrElse("2.4.20")
     repositories {
-        // The dev.koga.hopi plugin, its marker and hopi-instrument (the plugin's functional-test
+        // The io.github.felipekoga.hopi plugin, its marker and hopi-instrument (the plugin's functional-test
         // repository, which :checkPublication publishes them into).
         maven(repository.resolve("gradle-plugin/build/functional-repo"))
         google()
@@ -24,7 +24,7 @@ pluginManagement {
     }
     plugins {
         id("org.jetbrains.kotlin.multiplatform") version kgp
-        id("dev.koga.hopi") version "0.1.0"
+        id("io.github.felipekoga.hopi") version "0.1.0"
     }
 }
 

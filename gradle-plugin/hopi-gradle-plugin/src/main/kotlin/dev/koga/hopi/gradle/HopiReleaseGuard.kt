@@ -50,7 +50,7 @@ public abstract class HopiReleaseGuard : DefaultTask() {
 
     internal companion object {
         fun message(variant: String, buildType: String, runtimes: List<String>, remove: List<String>): String =
-            "dev.koga.hopi: variant $variant is not debuggable, but its runtime classpath holds Hopi's runtime: " +
+            "io.github.felipekoga.hopi: variant $variant is not debuggable, but its runtime classpath holds Hopi's runtime: " +
                 "${runtimes.joinToString()}. Hopi's runtimes belong in debuggable variants only, where this plugin adds them: " +
                 "remove ${remove.joinToString()} from $variant (in this module or the one that brings it: name it for debuggable " +
                 "build types only, as debugImplementation, not as implementation or ${buildType}Implementation)."
@@ -63,7 +63,7 @@ public abstract class HopiReleaseGuard : DefaultTask() {
  * the provider mappings that use it.
  */
 internal object HopiRuntimeGraph {
-    private const val GROUP = "dev.koga.hopi"
+    private const val GROUP = "io.github.felipekoga.hopi"
     private val RUNTIMES = setOf("hopi-core", "hopi-network", "hopi-perf", "hopi-start")
 
     /** A KMP root's coordinates redirect to its platform module's (`hopi-network-android`). */
@@ -71,14 +71,14 @@ internal object HopiRuntimeGraph {
 
     /**
      * Whether [id] is one of Hopi's runtimes: the projects `:hopi-core`, `:hopi-network`,
-     * `:hopi-perf` and `:hopi-start`, or those modules of `dev.koga.hopi`, with or without a
+     * `:hopi-perf` and `:hopi-start`, or those modules of `io.github.felipekoga.hopi`, with or without a
      * platform suffix. Exact names, not prefixes: the `-noop` modules the runtime-split plan deleted
      * (2026-10-28 and 29), which Maven Local may still hold at 0.1.0, are not runtimes; neither are
      * `hopi-api` and `hopi-ktor`.
      */
     fun isRuntime(id: ComponentIdentifier): Boolean = isOneOf(id, RUNTIMES)
 
-    /** [id] is the project `:<name>` or the module `dev.koga.hopi:<name>[<platform suffix>]` of one of [names]. */
+    /** [id] is the project `:<name>` or the module `io.github.felipekoga.hopi:<name>[<platform suffix>]` of one of [names]. */
     private fun isOneOf(id: ComponentIdentifier, names: Set<String>): Boolean = when (id) {
         is ProjectComponentIdentifier -> names.any { id.projectPath == ":$it" }
         is ModuleComponentIdentifier -> id.group == GROUP &&
@@ -89,7 +89,7 @@ internal object HopiRuntimeGraph {
     /**
      * Each runtime in the graph under [root], in the order a walk from the root meets them, as its
      * display name followed by the components that depend on it, the root left out
-     * (`project ':hopi-core' (via project ':hopi-network')`, `dev.koga.hopi:hopi-network:0.1.0`).
+     * (`project ':hopi-core' (via project ':hopi-network')`, `io.github.felipekoga.hopi:hopi-network:0.1.0`).
      */
     fun refused(root: ResolvedComponentResult): List<String> = runtimesIn(root).map { describe(it, root.id) }
 

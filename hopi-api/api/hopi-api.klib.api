@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <dev.koga.hopi:hopi-api>
+// Library unique name: <io.github.felipekoga.hopi:hopi-api>
 open annotation class dev.koga.hopi.api/HopiInternalApi : kotlin/Annotation { // dev.koga.hopi.api/HopiInternalApi|null[0]
     constructor <init>() // dev.koga.hopi.api/HopiInternalApi.<init>|<init>(){}[0]
 }

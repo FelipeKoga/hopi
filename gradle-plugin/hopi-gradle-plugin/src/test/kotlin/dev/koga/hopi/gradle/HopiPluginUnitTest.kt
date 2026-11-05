@@ -279,8 +279,8 @@ class HopiPluginUnitTest {
                 ),
             ),
         )
-        assertEquals("dev.koga.hopi:hopi-network:0.1.0 (via project ':sdk')", HopiRuntimeGraph.refused(app).first())
-        assertEquals(listOf("dev.koga.hopi:hopi-network:0.1.0"), HopiRuntimeGraph.toRemove(app))
+        assertEquals("io.github.felipekoga.hopi:hopi-network:0.1.0 (via project ':sdk')", HopiRuntimeGraph.refused(app).first())
+        assertEquals(listOf("io.github.felipekoga.hopi:hopi-network:0.1.0"), HopiRuntimeGraph.toRemove(app))
 
         // A constraint brings nothing: core, constrained by the app and brought by hopi-network only, goes with it.
         app = Component(ProjectId(":app"))
@@ -293,7 +293,7 @@ class HopiPluginUnitTest {
     @Test
     fun theReleaseGuardsFailureSaysWhatToRemove() {
         val text = HopiReleaseGuard.message("freeQa", "qa", listOf("project ':hopi-network'", "project ':hopi-core' (via project ':hopi-network')"), listOf("project ':hopi-network'"))
-        assertTrue(text.startsWith("dev.koga.hopi: variant freeQa is not debuggable"), text)
+        assertTrue(text.startsWith("io.github.felipekoga.hopi: variant freeQa is not debuggable"), text)
         assertTrue("remove project ':hopi-network' from freeQa (" in text, text)
         assertTrue(text.endsWith("not as implementation or qaImplementation)."), text)
     }
@@ -305,7 +305,7 @@ class HopiPluginUnitTest {
         project.pluginManager.apply(HopiPlugin::class.java)
         val failure = runCatching { (project as org.gradle.api.internal.project.ProjectInternal).evaluate() }.exceptionOrNull()
         val messages = generateSequence(failure) { it.cause }.mapNotNull { it.message }.toList()
-        assertTrue(messages.any { "apply dev.koga.hopi to the Android application module" in it }, messages.toString())
+        assertTrue(messages.any { "apply io.github.felipekoga.hopi to the Android application module" in it }, messages.toString())
     }
 
     @Test
@@ -326,7 +326,7 @@ class HopiPluginUnitTest {
 
     /**
      * A Kotlin plugin whose classes the plugin's loader does not resolve to the same ones (declared in
-     * the module while dev.koga.hopi is in the root or buildSrc) is refused with the same-scope rule,
+     * the module while io.github.felipekoga.hopi is in the root or buildSrc) is refused with the same-scope rule,
      * not a version: a child loader of the plugin's sees them, another copy or a loader without them
      * does not. The TestKit test covers it in a build.
      */
@@ -344,13 +344,13 @@ class HopiPluginUnitTest {
             }
         }
         val message = KotlinPluginFloor.scopeMessage(":shared")
-        assertTrue(message.startsWith("dev.koga.hopi cannot see the classes of the Kotlin Gradle plugin that :shared applies"), message)
-        assertTrue("declare org.jetbrains.kotlin.multiplatform and dev.koga.hopi in the same plugins { } block" in message, message)
+        assertTrue(message.startsWith("io.github.felipekoga.hopi cannot see the classes of the Kotlin Gradle plugin that :shared applies"), message)
+        assertTrue("declare org.jetbrains.kotlin.multiplatform and io.github.felipekoga.hopi in the same plugins { } block" in message, message)
         assertFalse("too old" in message, message)
     }
 }
 
-private const val GROUP = "dev.koga.hopi"
+private const val GROUP = "io.github.felipekoga.hopi"
 
 /** A resolved coordinate, displayed as Gradle displays one. */
 private class ModuleId(private val groupName: String, private val moduleName: String) : ModuleComponentIdentifier {

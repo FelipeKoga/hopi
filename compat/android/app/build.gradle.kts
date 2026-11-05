@@ -10,7 +10,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 // since assigning a Property with `=` needs Gradle 8.2.
 plugins {
     id("com.android.application")
-    id("dev.koga.hopi")
+    id("io.github.felipekoga.hopi")
 }
 
 // AGP 8 compiles Kotlin with the Kotlin Android plugin; AGP 9 with its built-in Kotlin, which
@@ -62,8 +62,8 @@ hopi {
 }
 
 dependencies {
-    implementation("dev.koga.hopi:hopi-api:0.1.0")
-    implementation("dev.koga.hopi:hopi-ktor:0.1.0")
+    implementation("io.github.felipekoga.hopi:hopi-api:0.1.0")
+    implementation("io.github.felipekoga.hopi:hopi-ktor:0.1.0")
     implementation("io.ktor:ktor-client-okhttp:3.3.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
@@ -85,7 +85,7 @@ tasks.register("compatReport") {
             }
             collect(root.get())
             val modules = components.mapNotNull { it.moduleVersion }
-            val hopi = modules.filter { it.group == "dev.koga.hopi" }.map { it.name.removeSuffix("-android") }.distinct().sorted()
+            val hopi = modules.filter { it.group == "io.github.felipekoga.hopi" }.map { it.name.removeSuffix("-android") }.distinct().sorted()
             val stdlib = modules.firstOrNull { it.group == "org.jetbrains.kotlin" && it.name == "kotlin-stdlib" }?.version
             println("compat-report $variant hopi=${hopi.joinToString(",")} kotlin-stdlib=$stdlib")
         }

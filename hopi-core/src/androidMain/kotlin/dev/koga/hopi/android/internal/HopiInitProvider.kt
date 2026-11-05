@@ -17,7 +17,7 @@ import dev.koga.hopi.core.start.StartConfig
 import dev.koga.hopi.core.start.ToolStart
 
 /**
- * Starts Hopi with no code in the app: `hopi-core`'s manifest declares it, and the `dev.koga.hopi`
+ * Starts Hopi with no code in the app: `hopi-core`'s manifest declares it, and the `io.github.felipekoga.hopi`
  * Gradle plugin adds `hopi-core`, with the runtimes the `hopi { }` block enables, to debuggable
  * build types only (a release build that resolves one fails the plugin's release guard). It runs on the
  * main thread before `Application.onCreate`, so it starts nothing in an app that is not debuggable,
@@ -78,7 +78,7 @@ public class HopiInitProvider : ContentProvider() {
             val begin = SystemClock.elapsedRealtimeNanos()
             val values = GeneratedConfig.read(loader)
             if (values == null) {
-                write(emit, noticeLine("not started: no generated configuration; apply the dev.koga.hopi Gradle plugin to the app"))
+                write(emit, noticeLine("not started: no generated configuration; apply the io.github.felipekoga.hopi Gradle plugin to the app"))
                 return null
             }
             val configured = SystemClock.elapsedRealtimeNanos()

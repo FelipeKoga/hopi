@@ -11,7 +11,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Test support for `iosAppCaptureTests` (Swift, in the host app's process): watches the store for
- * the record of one URL. Compiled only in a Debug build with Hopi (the dev.koga.hopi plugin's
+ * the record of one URL. Compiled only in a Debug build with Hopi (the io.github.felipekoga.hopi plugin's
  * `hopi.iosRuntime`), never into a build without the runtimes.
  */
 @OptIn(HopiInternalApi::class)

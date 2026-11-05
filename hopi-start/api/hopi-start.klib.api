@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <dev.koga.hopi:hopi-start>
+// Library unique name: <io.github.felipekoga.hopi:hopi-start>
 final class dev.koga.hopi.start/HopiStartConfig { // dev.koga.hopi.start/HopiStartConfig|null[0]
     final var agentBridge // dev.koga.hopi.start/HopiStartConfig.agentBridge|{}agentBridge[0]
         final fun <get-agentBridge>(): kotlin/Boolean // dev.koga.hopi.start/HopiStartConfig.agentBridge.<get-agentBridge>|<get-agentBridge>(){}[0]

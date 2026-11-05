@@ -7,8 +7,8 @@ plugins {
 }
 
 dependencies {
-    implementation("dev.koga.hopi:hopi-start:0.1.0")
-    implementation("dev.koga.hopi:hopi-ktor:0.1.0")
+    implementation("io.github.felipekoga.hopi:hopi-start:0.1.0")
+    implementation("io.github.felipekoga.hopi:hopi-ktor:0.1.0")
     implementation("io.ktor:ktor-client-mock:3.3.3")
 }
 

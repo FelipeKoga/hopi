@@ -7,7 +7,7 @@ import org.gradle.api.artifacts.Dependency
 import org.gradle.util.GradleVersion
 
 /**
- * `plugins { id("dev.koga.hopi") }`, the whole setup, with an optional `hopi { }` block
+ * `plugins { id("io.github.felipekoga.hopi") }`, the whole setup, with an optional `hopi { }` block
  * ([HopiExtension]), in either of two kinds of module:
  *
  * - an Android application module (`com.android.application`; [HopiAndroid],
@@ -29,7 +29,7 @@ public class HopiPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val gradle = GradleVersion.current()
         if (gradle.baseVersion < GRADLE_FLOOR) {
-            throw GradleException("dev.koga.hopi needs Gradle ${GRADLE_FLOOR.version} or newer, and this build runs Gradle ${gradle.version}")
+            throw GradleException("io.github.felipekoga.hopi needs Gradle ${GRADLE_FLOOR.version} or newer, and this build runs Gradle ${gradle.version}")
         }
         val extension = project.extensions.create("hopi", HopiExtension::class.java)
         extension.applyDefaults()
@@ -47,7 +47,7 @@ public class HopiPlugin : Plugin<Project> {
         project.afterEvaluate {
             if (!applied) {
                 throw GradleException(
-                    "apply dev.koga.hopi to the Android application module (com.android.application) or to a Kotlin " +
+                    "apply io.github.felipekoga.hopi to the Android application module (com.android.application) or to a Kotlin " +
                         "Multiplatform module (org.jetbrains.kotlin.multiplatform), not to ${project.path}; on Android it " +
                         "instruments the libraries from the application module",
                 )
@@ -62,7 +62,7 @@ public class HopiPlugin : Plugin<Project> {
 
 /** Hopi's modules, as the plugin adds them. */
 internal object HopiModules {
-    const val GROUP = "dev.koga.hopi"
+    const val GROUP = "io.github.felipekoga.hopi"
     const val CORE = "hopi-core"
     const val API = "hopi-api"
     const val KTOR = "hopi-ktor"

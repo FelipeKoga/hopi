@@ -38,7 +38,7 @@ okio-okhttp5 = "3.17.0"
 # The skiko native runtime that compose-multiplatform 1.12.0 resolves; JVM UI tests only.
 skiko = "0.150.1"
 
-# The dev.koga.hopi plugin's floor: the oldest Gradle, AGP and Kotlin Gradle plugin it runs on. It
+# The io.github.felipekoga.hopi plugin's floor: the oldest Gradle, AGP and Kotlin Gradle plugin it runs on. It
 # compiles against the oldest APIs it calls (compileOnly: the consumer's build supplies them; Gradle's
 # is the running one's) and its tests keep the versions above; BytecodeFloorTest holds its references
 # to floor-gradle's and floor-agp-plugin's APIs, and functionalTestFloor runs its TestKit tests on
@@ -94,7 +94,7 @@ asm-util = { module = "org.ow2.asm:asm-util", version.ref = "asm" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp5-jvm = { module = "com.squareup.okhttp3:okhttp-jvm", version.ref = "okhttp5" }
 android-gradle-api = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
-# The dev.koga.hopi plugin's compile floor (compileOnly: the app's build supplies them; floor-kgp for
+# The io.github.felipekoga.hopi plugin's compile floor (compileOnly: the app's build supplies them; floor-kgp for
 # its Kotlin Multiplatform path), and what its bytecode is checked against (BytecodeFloorTest): the
 # standard library, Gradle 8.0.2's API (the gradle-api jar Gradle generates for plugins, which
 # dev.gradleplugins republishes on Maven Central; 158 MB) and AGP 8.0.2's.

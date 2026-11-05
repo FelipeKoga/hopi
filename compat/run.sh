@@ -26,7 +26,7 @@ floor_ktor=3.3.3        # ktor
 current_agp=9.4.0       # agp
 current_kgp=2.4.20
 current_ktor=3.5.2      # ktor-forward
-old_kgp=2.1.21          # below the Kotlin Gradle plugin dev.koga.hopi needs in a KMP module, 2.2.0
+old_kgp=2.1.21          # below the Kotlin Gradle plugin io.github.felipekoga.hopi needs in a KMP module, 2.2.0
 
 only=${1:-all}
 case "$only" in
@@ -34,8 +34,8 @@ case "$only" in
     *) echo "usage: compat/run.sh [floor|current]" >&2; exit 2 ;;
 esac
 
-if [ ! -d "$repo/build/publication-check/dev/koga/hopi" ] ||
-    [ ! -d "$repo/gradle-plugin/build/functional-repo/dev/koga/hopi/hopi-gradle-plugin" ]; then
+if [ ! -d "$repo/build/publication-check/io/github/felipekoga/hopi" ] ||
+    [ ! -d "$repo/gradle-plugin/build/functional-repo/io/github/felipekoga/hopi/hopi-gradle-plugin" ]; then
     echo "compat/run.sh: build/publication-check or gradle-plugin/build/functional-repo is missing: run ./gradlew checkPublication first" >&2
     exit 2
 fi
@@ -154,7 +154,7 @@ run_kmp() {
     result "$name" "$stack kmp: Gradle $5, Kotlin $kgp, Ktor $ktor" "$problems" "${task#:shared:}${enabled:+ $enabled}" "$start"
 }
 
-# run_old_kotlin: the floor's Gradle with a Kotlin Gradle plugin below dev.koga.hopi's floor for a KMP
+# run_old_kotlin: the floor's Gradle with a Kotlin Gradle plugin below io.github.felipekoga.hopi's floor for a KMP
 # module; the plugin must refuse it before Kotlin/Native downloads anything (its data directory goes
 # to build/compat-home/konan, and ~/.konan must not change).
 run_old_kotlin() {
@@ -163,14 +163,14 @@ run_old_kotlin() {
     : > "$marker"
     if build_fixture floor kmp -Pkgp="$old_kgp" -Pkonan.data.dir="$floor_home/konan" help > "$log" 2>&1; then
         problems="; the build configured"
-    elif ! grep -q 'dev.koga.hopi needs the Kotlin Gradle plugin 2.2.0 or newer' "$log"; then
-        problems="; the build failed without dev.koga.hopi's message"
+    elif ! grep -q 'io.github.felipekoga.hopi needs the Kotlin Gradle plugin 2.2.0 or newer' "$log"; then
+        problems="; the build failed without io.github.felipekoga.hopi's message"
     fi
     touched=$(find "$HOME/.konan" -newer "$marker" 2>/dev/null | head -1)
     [ -z "$touched" ] || problems="$problems; ~/.konan changed ($touched)"
     rm -f "$marker"
     result "$name" "floor kmp: Gradle $floor_gradle, Kotlin $old_kgp" "$problems" \
-        "help: refused with dev.koga.hopi's message; ~/.konan unchanged" "$start"
+        "help: refused with io.github.felipekoga.hopi's message; ~/.konan unchanged" "$start"
 }
 
 if [ "$only" != current ]; then

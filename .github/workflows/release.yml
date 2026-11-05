@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publishing_type:
+        description: USER_MANAGED stops at VALIDATED (publish it on central.sonatype.com); AUTOMATIC publishes once validated.
+        type: choice
+        options:
+          - USER_MANAGED
+          - AUTOMATIC
+        default: USER_MANAGED
+
+# One release of a tag at a time, never cancelled halfway through an upload.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # As in ci.yml: Xcode 27.1 unless the repository variable HOPI_XCODE names another Xcode .app.
+  DEVELOPER_DIR: ${{ vars.HOPI_XCODE || '/Applications/Xcode_27.1.app' }}/Contents/Developer
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    # As in ci.yml: xcode-27 unless the repository variable HOPI_RUNNER names another runner.
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Before any setup or build (only the checkout, for gradle.properties): a tag, and the one of
+      # hopi.version. A dispatch from a branch fails here too.
+      - name: Check that the tag is v + hopi.version
+        run: |
+          version=$(sed -n 's/^hopi\.version=//p' gradle.properties | tr -d '[:space:]')
+          if [ -z "$version" ]; then
+            echo "::error file=gradle.properties::no hopi.version"
+            exit 1
+          elif [ "$GITHUB_REF_TYPE" != tag ]; then
+            echo "::error::A release runs on the tag v$version, not on the branch $GITHUB_REF_NAME"
+            exit 1
+          elif [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME is not v$version (hopi.version in gradle.properties)"
+            exit 1
+          fi
+          echo "Releasing Hopi $version"
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Read the Kotlin version
+        id: kotlin
+        run: |
+          version=$(sed -n 's/^kotlin = "\([^"]*\)".*/\1/p' gradle/libs.versions.toml | head -n 1)
+          [ -n "$version" ] || { echo "::error file=gradle/libs.versions.toml::no kotlin version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Kotlin/Native (~/.konan)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
+      # The Xcode whose clang compiles the Objective-C objects inside the published iOS klibs.
+      - name: Show the Xcode
+        run: xcodebuild -version
+      # With hopi.release=true the build signs every artifact (and fails without a key) and
+      # :checkPublication also asserts Central's rules.
+      - name: Build, sign and check the publication
+        env:
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: ./gradlew --no-configuration-cache checkPublication -Phopi.release=true
+      # Bundles build/publication-check and gradle-plugin/build/functional-repo and uploads it; exits 0
+      # on VALIDATED (USER_MANAGED, the default on a tag push) or PUBLISHED (AUTOMATIC).
+      - name: Upload to the Central Portal
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          CENTRAL_PUBLISHING_TYPE: ${{ inputs.publishing_type || 'USER_MANAGED' }}
+        run: scripts/central-release.sh

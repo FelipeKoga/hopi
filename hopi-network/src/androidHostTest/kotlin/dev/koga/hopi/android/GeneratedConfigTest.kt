@@ -109,7 +109,7 @@ class GeneratedConfigTest {
         val empty = object : ClassLoader(null) {}
         assertNull(GeneratedConfig.read(empty))
         assertNull(HopiInitProvider.start(empty, null, lines::add))
-        assertEquals(listOf(notice("not started: no generated configuration; apply the dev.koga.hopi Gradle plugin to the app")), lines)
+        assertEquals(listOf(notice("not started: no generated configuration; apply the io.github.felipekoga.hopi Gradle plugin to the app")), lines)
         assertNull(HopiStart.config)
     }
 

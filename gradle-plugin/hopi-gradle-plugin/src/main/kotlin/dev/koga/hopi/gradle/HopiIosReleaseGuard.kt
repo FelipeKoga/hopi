@@ -65,7 +65,7 @@ public abstract class HopiIosReleaseGuard : DefaultTask() {
     internal companion object {
         fun message(link: String, runtimes: List<String>, releaseCheckLink: Boolean): String =
             "Hopi's iOS release guard: $link links a Release binary with Hopi's runtime on its classpath: ${runtimes.joinToString()}. " +
-                "A Release binary must hold none: the dev.koga.hopi plugin adds hopi-start to a Debug build only " +
+                "A Release binary must hold none: the io.github.felipekoga.hopi plugin adds hopi-start to a Debug build only " +
                 "(-Phopi.enabled=true, or Xcode's Debug configuration), so link Release in a build without them (Xcode's " +
                 "Release configuration, or -Phopi.enabled=false); name no runtime yourself (a module that names one fails " +
                 "here in every build); or link only the Debug binary (link<…>Debug…, assemble<Name>DebugXCFramework)." +

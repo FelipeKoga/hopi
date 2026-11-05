@@ -13,7 +13,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     // The one line an Android app needs for automatic capture (docs/design/android-capture.md).
-    id("dev.koga.hopi")
+    id("io.github.felipekoga.hopi")
 }
 
 android {
@@ -74,7 +74,7 @@ hopi {
 
 dependencies {
     // Hopi's Ktor plugin comes with the shared module, the thin one in every build: it records only
-    // through the recorder a debug build's network runtime registered. The dev.koga.hopi plugin adds,
+    // through the recorder a debug build's network runtime registered. The io.github.felipekoga.hopi plugin adds,
     // in debug only, the network runtime (hopi-network, whose network tool registers that recorder),
     // core, whose start registers the runtime behind HopiRules, and, for `perf { enabled }`,
     // hopi-perf, whose tool registers the runtime behind HopiPerf: release gets no runtime (its
@@ -95,7 +95,7 @@ dependencies {
  *
  * - the release runtime classpath's Hopi components are exactly `hopi-api` (`HopiRules` and
  *   `HopiPerf`) and the thin Ktor plugin (`hopi-ktor`, which installs nothing without a runtime):
- *   no runtime, as a project or as `dev.koga.hopi` coordinates; and the APK's Hopi classes are
+ *   no runtime, as a project or as `io.github.felipekoga.hopi` coordinates; and the APK's Hopi classes are
  *   exactly the classes their jars hold (unminified);
  * - no type of `dev.koga.hopi.core`, `.android`, `.perf.internal`, `.ui`, `.network`, `.urlsession`
  *   or `.start` is defined or even referenced (an instrumented call site would reference a hook
@@ -317,7 +317,7 @@ abstract class VerifyDebugCapture : DefaultTask() {
 object HopiGraph {
     /**
      * The Hopi components in a resolved dependency graph: this repository's projects by path
-     * (`:hopi-api`), published ones as `dev.koga.hopi:<module>`.
+     * (`:hopi-api`), published ones as `io.github.felipekoga.hopi:<module>`.
      */
     fun componentsIn(root: ResolvedComponentResult): Set<String> {
         val found = sortedSetOf<String>()
@@ -336,14 +336,14 @@ object HopiGraph {
 
     private fun name(id: ComponentIdentifier): String? = when (id) {
         is ProjectComponentIdentifier -> id.projectPath.takeIf { it.startsWith(":hopi-") }
-        is ModuleComponentIdentifier -> "${id.group}:${id.module}".takeIf { id.group == "dev.koga.hopi" }
+        is ModuleComponentIdentifier -> "${id.group}:${id.module}".takeIf { id.group == "io.github.felipekoga.hopi" }
         else -> null
     }
 }
 
 // What every consumer relies on: the release APK holds hopi-api and the thin Ktor plugin, no
 // runtime and no instrumentation, whatever -Phopi.enabled says (the property no longer reaches an
-// Android build: the dev.koga.hopi plugin gives only debuggable variants the runtimes).
+// Android build: the io.github.felipekoga.hopi plugin gives only debuggable variants the runtimes).
 val verifyReleaseHasNoRuntime = tasks.register<VerifyReleaseHasNoRuntime>("verifyReleaseHasNoRuntime") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "Checks that the release APK holds hopi-api and the thin Ktor plugin only: no Hopi runtime, no capture code, no instrumentation."

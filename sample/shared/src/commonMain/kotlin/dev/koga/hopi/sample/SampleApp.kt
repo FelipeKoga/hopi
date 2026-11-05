@@ -52,10 +52,10 @@ public class PlatformAction(public val label: String, public val run: suspend ()
 
 /**
  * Which Hopi this process runs: the Diagnostics caption says it, and the evidence lines carry it
- * (`"build":"real"` or `"nohopi"`, `"real":true` or `false`). On iOS the dev.koga.hopi plugin's
+ * (`"build":"real"` or `"nohopi"`, `"real":true` or `false`). On iOS the io.github.felipekoga.hopi plugin's
  * choice for the build (a Debug build, `-Phopi.enabled=false` excepted) decides whether the
  * framework links the runtimes, so the generated [HOPI_ENABLED] says which. On
- * Android the dev.koga.hopi plugin decides per variant whatever the property says (the runtimes in
+ * Android the io.github.felipekoga.hopi plugin decides per variant whatever the property says (the runtimes in
  * debug, none in release and with `-Psample.hopiCapture=false`), so the activity reports what runs
  * instead.
  */
@@ -73,9 +73,9 @@ public object SampleBuild {
     /** The Diagnostics caption: which Hopi runs and what selected it. */
     internal val caption: String
         get() = when (androidCaptureStarted) {
-            true -> "Hopi: runtimes (debug build: the dev.koga.hopi plugin adds them)"
+            true -> "Hopi: runtimes (debug build: the io.github.felipekoga.hopi plugin adds them)"
             false -> "Hopi: no runtime (release build, or -Psample.hopiCapture=false)"
-            null -> if (HOPI_ENABLED) "Hopi: runtimes (Debug build: the dev.koga.hopi plugin adds them)" else "Hopi: no runtime (Release build, or -Phopi.enabled=false)"
+            null -> if (HOPI_ENABLED) "Hopi: runtimes (Debug build: the io.github.felipekoga.hopi plugin adds them)" else "Hopi: no runtime (Release build, or -Phopi.enabled=false)"
         }
 }
 

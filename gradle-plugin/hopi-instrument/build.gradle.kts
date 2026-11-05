@@ -8,13 +8,17 @@ plugins {
 }
 
 // The coordinates hopi-network's host tests name; Gradle substitutes this project for them.
-group = "dev.koga.hopi"
+group = "io.github.felipekoga.hopi"
+description = "The bytecode rewriter of the Gradle plugin io.github.felipekoga.hopi (OkHttp's RealCall and the " +
+    "java.net.URL connection call sites of an Android app's debug builds), with its dex reader."
 version = providers.fileContents(layout.projectDirectory.file("../../gradle.properties")).asText
     .map { text -> text.lineSequence().first { it.startsWith("hopi.version=") }.substringAfter('=').trim() }.get()
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    // Maven Central's sources jar (the Kotlin sources); gradle/maven-central.gradle.kts adds the rest.
+    withSourcesJar()
 }
 
 kotlin {
@@ -61,7 +65,11 @@ tasks.test {
 }
 
 publishing {
-    // The TestKit tests' plugin repository (hopi-gradle-plugin's functionalTest), nothing else.
+    // The TestKit tests' plugin repository (hopi-gradle-plugin's functionalTest), which the release
+    // bundle takes it from too (scripts/central-release.sh).
     repositories { maven { name = "functional"; url = uri(rootProject.layout.buildDirectory.dir("functional-repo")) } }
     publications { create<MavenPublication>("maven") { from(components["java"]) } }
 }
+// What Maven Central requires: the POM's project information, the javadoc jar, and signatures when
+// a signing key is set (docs/RELEASING.md).
+apply(from = rootProject.file("../gradle/maven-central.gradle.kts"))

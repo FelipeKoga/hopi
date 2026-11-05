@@ -8,7 +8,7 @@ import org.gradle.api.tasks.Nested
 
 /**
  * The optional `hopi { }` block of an Android application module or a Kotlin Multiplatform module.
- * Every value has a default, so `plugins { id("dev.koga.hopi") }` alone is the whole setup. The
+ * Every value has a default, so `plugins { id("io.github.felipekoga.hopi") }` alone is the whole setup. The
  * store, redaction, log and bridge settings at the top are the start's, shared by every tool, and
  * mean what they mean for `Hopi.start` on iOS and the JVM and for the Ktor plugin, whose every
  * client's installation makes the start's first; capture's own settings are in [network], the

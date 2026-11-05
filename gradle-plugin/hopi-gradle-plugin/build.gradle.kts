@@ -8,7 +8,9 @@ plugins {
     `maven-publish`
 }
 
-group = "dev.koga.hopi"
+group = "io.github.felipekoga.hopi"
+description = "The Gradle plugin io.github.felipekoga.hopi: Hopi's runtimes in the debug builds of an Android app or a Kotlin " +
+    "Multiplatform module's iOS framework, and the release guards that keep them out of release builds."
 val hopiVersion: String = providers.fileContents(layout.projectDirectory.file("../../gradle.properties")).asText
     .map { text -> text.lineSequence().first { it.startsWith("hopi.version=") }.substringAfter('=').trim() }.get()
 version = hopiVersion
@@ -16,6 +18,8 @@ version = hopiVersion
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    // Maven Central's sources jar (the Kotlin sources); gradle/maven-central.gradle.kts adds the rest.
+    withSourcesJar()
 }
 
 kotlin {
@@ -43,7 +47,7 @@ tasks.named<KotlinCompile>("compileKotlin") {
 gradlePlugin {
     plugins {
         create("hopi") {
-            id = "dev.koga.hopi"
+            id = "io.github.felipekoga.hopi"
             implementationClass = "dev.koga.hopi.gradle.HopiPlugin"
             displayName = "Hopi"
             description = "Hopi's runtimes in the debuggable variants of an Android app (OkHttp and HttpURLConnection capture, " +
@@ -129,9 +133,13 @@ tasks.test {
 }
 
 publishing {
-    // The TestKit tests' plugin repository, nothing else: the fixture resolves dev.koga.hopi from it.
+    // The TestKit tests' plugin repository, which the release bundle also takes the plugin, its marker
+    // and hopi-instrument from (scripts/central-release.sh): the fixture resolves the plugin from it.
     repositories { maven { name = "functional"; url = uri(rootProject.layout.buildDirectory.dir("functional-repo")) } }
 }
+// What Maven Central requires of the plugin's and its marker's publications: the POM's project
+// information, the javadoc jar, and signatures when a signing key is set (docs/RELEASING.md).
+apply(from = rootProject.file("../gradle/maven-central.gradle.kts"))
 
 /** One fixture build at a time, the floor's or the catalog's: both run on the developer's machine. */
 abstract class FixtureBuilds : BuildService<BuildServiceParameters.None>

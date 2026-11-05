@@ -20,7 +20,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 import org.jetbrains.kotlin.konan.target.Family
 
 /**
- * `dev.koga.hopi` in a Kotlin Multiplatform module whose iOS framework an app links; every Kotlin
+ * `io.github.felipekoga.hopi` in a Kotlin Multiplatform module whose iOS framework an app links; every Kotlin
  * Gradle plugin type the plugin names is here, loaded only once `org.jetbrains.kotlin.multiplatform`
  * is applied. A KMP module has no build types, and an iOS target's Debug and Release binaries link
  * one compilation with one dependency set, so the choice is the Gradle invocation's ([IosBuild]: a
@@ -131,7 +131,7 @@ internal object HopiKmp {
  * The Kotlin Gradle plugin a KMP module needs: [FLOOR], because Hopi's iOS libraries are built by
  * Kotlin 2.2.21 at klib ABI 2.2.0, and Kotlin/Native skips a library whose ABI is newer than its
  * own. [HopiPlugin] checks it before [HopiKmp] loads any other type of the Kotlin plugin. First,
- * that this plugin's classes see the applied Kotlin plugin's: they do not when `dev.koga.hopi` is
+ * that this plugin's classes see the applied Kotlin plugin's: they do not when `io.github.felipekoga.hopi` is
  * declared in a parent scope (the root's `plugins { }`, buildSrc) and the Kotlin plugin in the
  * module's, and every call into it would fail ([scopeMessage]). Then the version, from
  * `Project.getKotlinPluginVersion()`, which the Kotlin plugin has had since 1.x (1.8.22 and 1.9.24
@@ -171,9 +171,9 @@ internal object KotlinPluginFloor {
     }
 
     fun scopeMessage(path: String): String =
-        "dev.koga.hopi cannot see the classes of the Kotlin Gradle plugin that $path applies, which it runs on: declare " +
-            "org.jetbrains.kotlin.multiplatform and dev.koga.hopi in the same plugins { } block, the root build script's " +
-            "(with apply false) or $path's (dev.koga.hopi in a parent build script or in buildSrc does not see a Kotlin " +
+        "io.github.felipekoga.hopi cannot see the classes of the Kotlin Gradle plugin that $path applies, which it runs on: declare " +
+            "org.jetbrains.kotlin.multiplatform and io.github.felipekoga.hopi in the same plugins { } block, the root build script's " +
+            "(with apply false) or $path's (io.github.felipekoga.hopi in a parent build script or in buildSrc does not see a Kotlin " +
             "plugin declared below it)."
 
     /** Compares major, minor and patch only, so 2.2.0's own pre-releases and 2.2.20-Beta1 pass. */
@@ -186,7 +186,7 @@ internal object KotlinPluginFloor {
     }
 
     fun message(path: String, found: String?): String =
-        "dev.koga.hopi needs the Kotlin Gradle plugin $FLOOR or newer in a Kotlin Multiplatform module, and $path applies " +
+        "io.github.felipekoga.hopi needs the Kotlin Gradle plugin $FLOOR or newer in a Kotlin Multiplatform module, and $path applies " +
             "org.jetbrains.kotlin.multiplatform ${found ?: "of a version too old to report itself"}: Hopi's iOS libraries are built by " +
             "Kotlin 2.2.21, and Kotlin/Native skips a library built for a newer Kotlin than its own. Use Kotlin $FLOOR or newer."
 }

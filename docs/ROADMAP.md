@@ -182,7 +182,7 @@ so the app pays no extra cost.
   recorded on iOS. Tested on iOS 18.2 and 27.0 simulators; per-hook cost
   and a per-request A/B measured on the simulator only. Open: a physical device run, background
   sessions beyond metadata, WebSocket tasks.
-- **Android, OkHttp and `HttpURLConnection` (built).** The `dev.koga.hopi` Gradle plugin
+- **Android, OkHttp and `HttpURLConnection` (built).** The `io.github.felipekoga.hopi` Gradle plugin
   (`gradle-plugin/`) and `hopi-network` (since the runtime-split plan's stage 9; the plugin's
   release guard fails a release variant that resolves a runtime): one plugin line records
   every OkHttp call and every `HttpURLConnection` of the app and its dependencies, observe only,
@@ -287,7 +287,7 @@ so the app pays no extra cost.
     stacking rules (a `continue` flag), mid-body faults and throttling. No separate mock server.
 
 ### Gradle plugin on KMP modules
-Done (the runtime-split plan's O8, 2026-11-03): `dev.koga.hopi` in a KMP shared module adds
+Done (the runtime-split plan's O8, 2026-11-03): `io.github.felipekoga.hopi` in a KMP shared module adds
 `hopi-api` to every build and `hopi-start` to a Debug one (`-Phopi.enabled`, else Xcode's
 `CONFIGURATION` as the Kotlin plugin reads it), generates `HopiSetup` for Swift's one call and
 applies the iOS release guard itself. Left: CocoaPods' configuration property
@@ -307,6 +307,20 @@ kotlinx-serialization 1.10 are built by 2.3). Left:
 - An Xcode older than 27.1 (Kotlin 2.2.21 lists 26.0), which needs a CI Mac.
 - The fixtures' APKs and frameworks at work on a device or simulator, and a KMP module with an
   Android target on the floor.
+
+### License, Maven Central and CI
+Done (Release R1, 2026-11-04): Hopi is Apache-2.0 (`LICENSE`; `hopi-ui`'s Open Runde fonts keep
+the SIL OFL 1.1). Every artifact and the Gradle plugin go to Maven Central, from the first tagged
+release on, under `io.github.felipekoga.hopi`, now the group and the plugin id (the Kotlin packages
+stay `dev.koga.hopi`): each POM carries the project's information, every publication a sources and
+an empty javadoc jar, and the release build signs every file; `:checkPublication` checks Maven
+Central's rules, and `scripts/central-release.sh` uploads a tag's bundle through the Central
+Portal, for the owner to press Publish (`docs/RELEASING.md`). GitHub Actions runs the full check on
+macOS on every push and pull request. Left:
+- Real API docs in the javadoc jars (Dokka), which are empty placeholders.
+- The Gradle Plugin Portal, for apps that resolve plugins from it alone.
+- A `CHANGELOG.md` and a `SECURITY.md`.
+- The CLI and the desktop viewer as downloads (a CLI archive, a signed DMG).
 
 ### Replay (no priority)
 Backlog, no priority. Re-sending a recorded request (optionally edited) through the app's own

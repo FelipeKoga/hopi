@@ -17,7 +17,7 @@ import org.gradle.api.tasks.TaskProvider
 import org.gradle.language.base.plugins.LifecycleBasePlugin
 
 /**
- * `dev.koga.hopi` in an Android application module (docs/design/android-capture.md); every AGP
+ * `io.github.felipekoga.hopi` in an Android application module (docs/design/android-capture.md); every AGP
  * type the plugin names is here, loaded only once `com.android.application` is applied:
  *
  * - each debuggable build type gets `hopi-core` and, with `network { enabled }` (the default), the
@@ -36,8 +36,8 @@ import org.gradle.language.base.plugins.LifecycleBasePlugin
  *   ([HopiReleaseGuard]), whatever `enabled` says: before the variant's build it fails when the
  *   runtime classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, which only a
  *   module naming them can bring there;
- * - each debuggable build type holds `dev.koga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
- *   app's modules name in every build type) and, with `network { enabled }`, `dev.koga.hopi:hopi-ktor`
+ * - each debuggable build type holds `io.github.felipekoga.hopi:hopi-api` (`HopiRules` and `HopiPerf`, which the
+ *   app's modules name in every build type) and, with `network { enabled }`, `io.github.felipekoga.hopi:hopi-ktor`
  *   (the Ktor plugin, which the app's modules may name in every build type) at this plugin's
  *   version, the version of the `hopi-core`, `hopi-network` and `hopi-perf` it adds: core's rules
  *   runtime and hopi-perf's runtime implement internal interfaces of `hopi-api`, the network tool
@@ -69,7 +69,7 @@ internal object HopiAndroid {
         val agp = components.pluginVersion
         if (agp < FLOOR) {
             throw GradleException(
-                "dev.koga.hopi needs the Android Gradle plugin 8.0 or newer, and ${project.path} applies " +
+                "io.github.felipekoga.hopi needs the Android Gradle plugin 8.0 or newer, and ${project.path} applies " +
                     "${agp.major}.${agp.minor}.${agp.micro}: update com.android.application",
             )
         }
@@ -104,7 +104,7 @@ internal object HopiAndroid {
             if (expected != null && expected != real) {
                 throw GradleException(
                     "variant ${variant.name} is ${if (debuggable) "" else "not "}debuggable, unlike its build type " +
-                        "${variant.buildType}; dev.koga.hopi gave it ${if (expected) "Hopi's runtimes" else "no runtime"}",
+                        "${variant.buildType}; io.github.felipekoga.hopi gave it ${if (expected) "Hopi's runtimes" else "no runtime"}",
                 )
             }
             if (real && extension.network.enabled.get()) instrument(extension.network, variant)
@@ -214,13 +214,13 @@ internal object HopiAndroid {
         if (!HopiModules.isProject(project, API)) {
             project.dependencies.constraints.add(configuration, "$GROUP:$API") { constraint ->
                 constraint.version { it.strictly(HOPI_VERSION) }
-                constraint.because("dev.koga.hopi: hopi-core $HOPI_VERSION implements hopi-api $HOPI_VERSION's internal interfaces")
+                constraint.because("io.github.felipekoga.hopi: hopi-core $HOPI_VERSION implements hopi-api $HOPI_VERSION's internal interfaces")
             }
         }
         if (network && !HopiModules.isProject(project, KTOR)) {
             project.dependencies.constraints.add(configuration, "$GROUP:$KTOR") { constraint ->
                 constraint.version { it.strictly(HOPI_VERSION) }
-                constraint.because("dev.koga.hopi: hopi-network $HOPI_VERSION implements hopi-ktor $HOPI_VERSION's internal hooks interface")
+                constraint.because("io.github.felipekoga.hopi: hopi-network $HOPI_VERSION implements hopi-ktor $HOPI_VERSION's internal hooks interface")
             }
         }
     }

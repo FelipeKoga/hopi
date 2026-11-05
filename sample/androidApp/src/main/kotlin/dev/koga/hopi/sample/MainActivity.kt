@@ -147,7 +147,7 @@ class MainActivity : ComponentActivity() {
 /**
  * Requests Hopi records with no Ktor and no setup: the fake third-party SDK's OkHttp client and
  * HttpURLConnection calls (`sample/fakesdk`, which knows nothing of Hopi) and Kotlin's
- * `URL.readText()`. The debug build records each of them once, through the dev.koga.hopi plugin's
+ * `URL.readText()`. The debug build records each of them once, through the io.github.felipekoga.hopi plugin's
  * instrumentation; the release build sends the same requests and records nothing. Logged under
  * `HopiSample`, one line per request, then the capture status.
  */

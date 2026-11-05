@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Merged into debuggable variants only: the dev.koga.hopi plugin adds hopi-core with the runtimes to
+<!-- Merged into debuggable variants only: the io.github.felipekoga.hopi plugin adds hopi-core with the runtimes to
      debuggable build types (the others get no runtime, so no manifest entry). A non-debuggable app
      that links hopi-core anyway gets one notice line and nothing started. The highest initOrder
      runs it before other SDKs' providers, which may already make requests. -->

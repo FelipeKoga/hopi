@@ -34,26 +34,18 @@ contract is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Install
 
-Hopi is published to Maven Local only: no remote repository, nothing downloaded from anywhere but
-the repositories your build already uses. Every artifact has the group `dev.koga.hopi` and the
-version of `hopi.version` in this repository's `gradle.properties` (`0.1.0`, the version the
-Gradle plugin adds the runtimes at); use one version for every Hopi artifact. From a clone of this
-repository:
-
-```bash
-./gradlew publishToMavenLocal   # every artifact below and the dev.koga.hopi plugin
-```
-
-Republishing the same version after a change is enough: Gradle does not cache `mavenLocal()`, so
-the next build of your app picks it up. Then, in your app's `settings.gradle.kts`, add
-`mavenLocal()` to both repository lists, limited to the `dev.koga.hopi` group (the libraries, the
-plugin and its marker), so nothing else is looked up in `~/.m2`, whose entries Maven or another
-build may have left incomplete:
+Hopi is published to Maven Central, the Gradle plugin included (it is not on the Gradle Plugin
+Portal), from its first tagged release on ([`docs/RELEASING.md`](docs/RELEASING.md); until that
+release is out, publish it from source, below). Every artifact has the group
+`io.github.felipekoga.hopi` and the version of `hopi.version` in this repository's
+`gradle.properties` (`0.1.0`, the version the Gradle plugin adds the runtimes at); use one version
+for every Hopi artifact. In your app's `settings.gradle.kts`, `mavenCentral()` goes in both
+repository lists, the plugins' (for the plugin and its marker) and the dependencies' (for the
+libraries the plugin adds and those you name):
 
 ```kotlin
 pluginManagement {
     repositories {
-        mavenLocal { content { includeGroup("dev.koga.hopi") } }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -62,7 +54,49 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
-        mavenLocal { content { includeGroup("dev.koga.hopi") } }
+        google()
+        mavenCentral()
+    }
+}
+```
+
+Then the plugin, in the module the platform sections below name:
+
+```kotlin
+plugins {
+    id("io.github.felipekoga.hopi") version "0.1.0"
+}
+```
+
+and, where your code calls them, the libraries by their coordinates,
+`io.github.felipekoga.hopi:<artifact>:0.1.0` (`hopi-api`, `hopi-ktor`, `hopi-start`; the table
+below says which an app names).
+
+From source instead, a clone of this repository publishes the same artifacts and the plugin to
+Maven Local:
+
+```bash
+./gradlew publishToMavenLocal   # every artifact below and the io.github.felipekoga.hopi plugin
+```
+
+Republishing the same version after a change is enough: Gradle does not cache `mavenLocal()`, so
+the next build of your app picks it up. Add `mavenLocal()` first to both repository lists, limited
+to the `io.github.felipekoga.hopi` group (the libraries, the plugin and its marker), so nothing else
+is looked up in `~/.m2`, whose entries Maven or another build may have left incomplete:
+
+```kotlin
+pluginManagement {
+    repositories {
+        mavenLocal { content { includeGroup("io.github.felipekoga.hopi") } }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal { content { includeGroup("io.github.felipekoga.hopi") } }
         google()
         mavenCentral()
     }
@@ -93,7 +127,7 @@ KMP app on the oldest versions below and on the newest it names (see
   published artifacts.
 - **Ktor 3.3.3** or newer for `hopi-ktor` (tested up to 3.5.2).
 - **Xcode**: the one your app's Kotlin requires (tested only with Xcode 27.1).
-- **The Kotlin plugin and `dev.koga.hopi` in one build-script scope**: declare them, and AGP, in
+- **The Kotlin plugin and `io.github.felipekoga.hopi` in one build-script scope**: declare them, and AGP, in
   the same `plugins { }`, the root's (with `apply false`) or the module's, since the plugin runs on
   their classes. In a KMP module the plugin stops the build with this rule when it cannot see the
   Kotlin plugin's classes.
@@ -106,8 +140,8 @@ What you add depends on the app; a KMP app with both platforms does the first tw
 
 | App | What it names | See |
 | --- | --- | --- |
-| Android (the application module, with or without KMP) | the `dev.koga.hopi` Gradle plugin, and nothing else unless its code calls `HopiRules` or `HopiPerf` (`hopi-api`) | [Android](#android-every-okhttp-and-httpurlconnection-request-automatically) |
-| iOS (the framework of a KMP shared module) | the `dev.koga.hopi` Gradle plugin in the shared module, and `HopiSetup.shared.start()` in Swift, the same in every configuration | [iOS](#ios-every-urlsession-request-automatically) |
+| Android (the application module, with or without KMP) | the `io.github.felipekoga.hopi` Gradle plugin, and nothing else unless its code calls `HopiRules` or `HopiPerf` (`hopi-api`) | [Android](#android-every-okhttp-and-httpurlconnection-request-automatically) |
+| iOS (the framework of a KMP shared module) | the `io.github.felipekoga.hopi` Gradle plugin in the shared module, and `HopiSetup.shared.start()` in Swift, the same in every configuration | [iOS](#ios-every-urlsession-request-automatically) |
 | JVM (Compose Desktop) | `hopi-ktor`, and `hopi-start` where recording is wanted | [JVM](#jvm-compose-desktop-the-ktor-plugins-requests) |
 
 The Ktor client plugin, `hopi-ktor`, is optional on Android and iOS, where the platform capture
@@ -116,7 +150,7 @@ records Ktor's engines without it, and it is what records on the JVM (see
 
 | Artifact | What it is |
 | --- | --- |
-| `dev.koga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android: adds `hopi-core` and `hopi-network` to debug builds, `hopi-perf` with `perf { enabled = true }`, and nothing to release builds, and fails a release (non-debuggable) variant that resolves a runtime |
+| `io.github.felipekoga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android: adds `hopi-core` and `hopi-network` to debug builds, `hopi-perf` with `perf { enabled = true }`, and nothing to release builds, and fails a release (non-debuggable) variant that resolves a runtime |
 | `hopi-api` | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS, and on the JVM through `hopi-start`), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. It comes with `hopi-ktor` too. The CLI and the desktop viewer need no dependency for rules or perf |
 | `hopi-start` | `Hopi.start { }`, the iOS and JVM start: URLSession capture on iOS, the Ktor plugin's recorder on the JVM, and the performance monitors, from one call; Debug frameworks and JVM apps that record only |
 | `hopi-ktor` | The Ktor client plugin, the same thin artifact in every build: it installs the recorder a debug build's network runtime registered (Android with the Gradle plugin, the JVM after `Hopi.start`) and nothing elsewhere (a release build, iOS); no `hopi-core`. It brings `hopi-api` |
@@ -130,7 +164,7 @@ not belong, whoever named it (your module or a library): the plugin fails an And
 variant whose runtime classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, and
 the iOS release guard a Release framework link whose classpath does. Each KMP artifact has its
 Android, JVM, `iosArm64` and `iosSimulatorArm64` publications with sources and Gradle module
-metadata (`hopi-start` has the JVM and the two iOS ones), so `dev.koga.hopi:hopi-ktor:0.1.0` in
+metadata (`hopi-start` has the JVM and the two iOS ones), so `io.github.felipekoga.hopi:hopi-ktor:0.1.0` in
 `commonMain` resolves the right one per target.
 
 The `hopi` CLI, which reads a running app's records (headers, bodies) and drives its rules, is
@@ -144,12 +178,12 @@ One line in the app module's `build.gradle.kts`:
 ```kotlin
 plugins {
     id("com.android.application")
-    id("dev.koga.hopi") version "0.1.0"
+    id("io.github.felipekoga.hopi") version "0.1.0"
 }
 ```
 
-(or `id("dev.koga.hopi") version "0.1.0" apply false` in the root `build.gradle.kts` and
-`id("dev.koga.hopi")` here.) That is the whole setup. In debuggable variants the plugin rewrites, at build time, OkHttp's call
+(or `id("io.github.felipekoga.hopi") version "0.1.0" apply false` in the root `build.gradle.kts` and
+`id("io.github.felipekoga.hopi")` here.) That is the whole setup. In debuggable variants the plugin rewrites, at build time, OkHttp's call
 class and every `java.net.URL` connection call site of your app **and of every library it
 depends on**, so every OkHttp client (yours, Retrofit's, an analytics or ads SDK's, Ktor's OkHttp
 engine) and every `HttpURLConnection` (Ktor's Android engine among them) is recorded, with no
@@ -174,7 +208,7 @@ runtimes.
 Every release variant also gets the release guard, `hopiReleaseGuard<Variant>`, which runs before
 the variant's build (before any compile or dex task of the variant) and fails it when its runtime
 classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, as a project or by its
-coordinates, naming each with what brings it (`dev.koga.hopi:hopi-network:0.1.0 (via project ':sdk')`)
+coordinates, naming each with what brings it (`io.github.felipekoga.hopi:hopi-network:0.1.0 (via project ':sdk')`)
 and saying which to remove (those something other than a runtime brings, not the `hopi-core` a
 runtime brings with it): a module, yours or a library's, that names a runtime other than as
 `debugImplementation`. There is no opt-out. A runtime that reaches a non-debuggable app all the
@@ -217,7 +251,7 @@ Two steps, the same in Debug and Release. In the KMP shared module whose framewo
 // shared/build.gradle.kts
 plugins {
     kotlin("multiplatform")
-    id("dev.koga.hopi")
+    id("io.github.felipekoga.hopi")
 }
 ```
 
@@ -330,8 +364,8 @@ be compiled either, so it sits in a source folder of its own, which a stand-in r
 val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
 val v = "0.1.0"
 dependencies {
-    implementation("dev.koga.hopi:hopi-ktor:$v")
-    if (hopiEnabled) implementation("dev.koga.hopi:hopi-start:$v")
+    implementation("io.github.felipekoga.hopi:hopi-ktor:$v")
+    if (hopiEnabled) implementation("io.github.felipekoga.hopi:hopi-start:$v")
 }
 kotlin {
     // the start's call with the flag, its stand-in without (a KMP module: sourceSets["jvmMain"])
@@ -377,7 +411,7 @@ install it, in `commonMain` for shared code:
 
 ```kotlin
 commonMain.dependencies {
-    implementation("dev.koga.hopi:hopi-ktor:$v")   // the thin plugin, in every build; it brings hopi-api
+    implementation("io.github.felipekoga.hopi:hopi-ktor:$v")   // the thin plugin, in every build; it brings hopi-api
 }
 ```
 
@@ -529,6 +563,11 @@ scripts. What changed, by the plan's stage:
   your app's own HTTP cache there (see [Rules](#rules-mock-fail-delay-edit)).
 - Stage 11 (2026-10-30): `hopi { selectTwins }` is gone from the Gradle plugin: a build script that
   still sets it no longer compiles, so delete the line (it did nothing since stage 10).
+- Release R1 (2026-11-04): the group and the plugin id are `io.github.felipekoga.hopi`, Maven
+  Central's namespace for this repository's GitHub account, where they were `dev.koga.hopi`.
+  Replace `id("dev.koga.hopi")`, every `dev.koga.hopi:<artifact>` coordinate and
+  `includeGroup("dev.koga.hopi")`; the Kotlin packages and imports (`dev.koga.hopi.…`) stay, and so
+  does the iOS log subsystem, `dev.koga.hopi`.
 
 ## For AI agents
 
@@ -739,7 +778,7 @@ write); one that is on states its cost in
 measured so far under "As built"). Nothing is persisted or sent anywhere: the data lives in
 bounded rings in memory.
 
-Android, with the `dev.koga.hopi` plugin: `perf { enabled = true }` adds `hopi-perf` to debug
+Android, with the `io.github.felipekoga.hopi` plugin: `perf { enabled = true }` adds `hopi-perf` to debug
 builds only and registers it, so the CLI, the desktop viewer and `HopiPerf` can start monitors
 with no other code; without it `HopiPerf` does nothing in any build, since only perf's tool
 registers its runtime and only this block lists that tool. `autoStart` starts some at launch; its
@@ -879,7 +918,7 @@ diagnostics tab that fires one request of every kind the inspector handles) for 
 ```bash
 python3 sample/devserver/devserver.py           # dev server on 127.0.0.1:8765
 
-# Android (emulator): the dev.koga.hopi plugin adds the runtimes to every debug build
+# Android (emulator): the io.github.felipekoga.hopi plugin adds the runtimes to every debug build
 ./gradlew :sample:androidApp:installDebug
 adb reverse tcp:8765 tcp:8765
 # the rules self-test on the Ktor plugin, Ktor's OkHttp engine, and the fake SDK's OkHttp and
@@ -897,7 +936,7 @@ python3 benchmark/perf/verify.py build/evidence/perf
 python3 benchmark/perf/bench.py build/evidence/perf --arms off=none,hangs=hangs,all=all
 python3 benchmark/perf/idle.py --arms off=none,all=all
 
-# iOS simulator: Xcode's Debug configuration is the Debug build (the dev.koga.hopi plugin reads it);
+# iOS simulator: Xcode's Debug configuration is the Debug build (the io.github.felipekoga.hopi plugin reads it);
 # a Debug app with no runtime, the benchmarks' nohopi arm: add SAMPLE_GRADLE_ARGS=-Phopi.enabled=false
 open sample/iosApp/iosApp.xcodeproj             # or:
 xcodebuild -project sample/iosApp/iosApp.xcodeproj -scheme iosApp -configuration Debug \
@@ -947,17 +986,27 @@ the publication check. The base check, one Gradle invocation:
   :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
 ```
 
+GitHub Actions runs it on macOS for every push and pull request (`.github/workflows/`), and a
+`v<version>` tag runs the Maven Central release ([`docs/RELEASING.md`](docs/RELEASING.md)).
+
 `:checkPublication` publishes every artifact into `build/publication-check` (the plugin, its marker
 and `hopi-instrument` into `gradle-plugin/build/functional-repo`), never `~/.m2`, and fails unless
 every expected coordinate is there (each KMP module's root, Android, JVM and iOS publications,
-sources jars, the cinterop klibs of `hopi-core`, `hopi-network` and `hopi-perf`), every Gradle module file and
-POM of `hopi.version` points only at files and `dev.koga.hopi` artifacts that are published at it,
-and no archive holds this repository's absolute path (the klibs store source paths relative to it).
+sources and javadoc jars, the cinterop klibs of `hopi-core`, `hopi-network` and `hopi-perf`), every
+Gradle module file and POM of `hopi.version` points only at files and `io.github.felipekoga.hopi`
+artifacts that are published at it, no archive holds this repository's absolute path (the klibs
+store source paths relative to it), and every directory meets Maven Central's rules (each POM's
+name, description, URL, license, developer and SCM; a sources and a javadoc jar beside each
+artifact; `.md5` and `.sha1` checksums). The release build,
+`./gradlew --no-configuration-cache checkPublication -Phopi.release=true`, also signs every file and
+requires each one's `.asc` ([`docs/RELEASING.md`](docs/RELEASING.md)).
 `hopi.version` is set in `gradle.properties` only: the plugin's build reads that file, so the root
 build refuses a `-Phopi.version` that differs from it. The
-artifacts and the plugin are published by `gradle/publishing.gradle.kts`, which each published
-module applies; `hopi-connect`, the CLI, the desktop viewer with its screens (`hopi-ui`) and the
-sample are not published. The consumer floors under [Install](#install) are checked after
+artifacts are published by `gradle/publishing.gradle.kts`, which each published module applies,
+and what Maven Central requires of them and of the plugin comes from
+`gradle/maven-central.gradle.kts`; `hopi-connect`, the CLI, the desktop viewer with its screens
+(`hopi-ui`) and the sample are not published. The consumer floors under [Install](#install) are
+checked after
 `:checkPublication` by `compat/run.sh`, which builds the apps in `compat/` on the oldest and the
 newest toolchains it names (Gradle 8.0.2 from `compat/floor-gradle`, in `build/compat-home`, a
 Gradle user home of its own; see [`compat/README.md`](compat/README.md)), and by
@@ -968,3 +1017,9 @@ The giant-body benchmarks are opt-in and slow (minutes): run one module at a tim
 `:hopi-ui:`), `./gradlew :hopi-cli:testGiantBodyBenchmark` or
 `./gradlew :hopi-network:androidHostGiantBodyBenchmark` (automatic Android capture, OkHttp and
 `HttpURLConnection`); tables land in `<module>/build/giant-body/`.
+
+## License
+
+Hopi is licensed under the Apache License, Version 2.0: see [`LICENSE`](LICENSE).
+`hopi-ui`'s Open Runde fonts are under the SIL Open Font License 1.1, with
+`OPEN_RUNDE_LICENSE.txt` beside them in `hopi-ui/src/jvmMain/resources/dev/koga/hopi/ui/font/`.

@@ -1,4 +1,4 @@
-// An Android app as an app gets Hopi: the dev.koga.hopi plugin, hopi-api and hopi-ktor, resolved
+// An Android app as an app gets Hopi: the io.github.felipekoga.hopi plugin, hopi-api and hopi-ktor, resolved
 // from the repositories :checkPublication fills (run it first), never Maven Local. AGP is -Pagp's
 // (default 8.0.2, Hopi's floor), the Kotlin Gradle plugin -Pkgp's (default 2.2.0, the floor). It
 // builds with the floor's Gradle 8.0.2 (compat/floor-gradle) or the repository's wrapper, with
@@ -16,7 +16,7 @@ pluginManagement {
     val agp = providers.gradleProperty("agp").getOrElse("8.0.2")
     val kgp = providers.gradleProperty("kgp").getOrElse("2.2.0")
     repositories {
-        // The dev.koga.hopi plugin, its marker and hopi-instrument (the plugin's functional-test
+        // The io.github.felipekoga.hopi plugin, its marker and hopi-instrument (the plugin's functional-test
         // repository, which :checkPublication publishes them into).
         maven(repository.resolve("gradle-plugin/build/functional-repo"))
         google()
@@ -26,7 +26,7 @@ pluginManagement {
     plugins {
         id("com.android.application") version agp
         id("org.jetbrains.kotlin.android") version kgp
-        id("dev.koga.hopi") version "0.1.0"
+        id("io.github.felipekoga.hopi") version "0.1.0"
     }
 }
 

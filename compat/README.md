@@ -1,7 +1,7 @@
 # compat: Hopi's consumer fixtures
 
 Three small apps that consume Hopi the way an app does: the published artifacts and the
-`dev.koga.hopi` plugin, from the repositories `./gradlew checkPublication` fills
+`io.github.felipekoga.hopi` plugin, from the repositories `./gradlew checkPublication` fills
 (`build/publication-check`, and `gradle-plugin/build/functional-repo` for the plugin), never Maven
 Local. `compat/run.sh` builds them on Hopi's floor, the oldest toolchain README's requirements
 name, and on the current one. They are not part of the repository's build or of `./gradlew check`.
@@ -24,7 +24,10 @@ The floor's runs use Gradle 8.0.2 from `compat/floor-gradle`, a wrapper with no 
 home of their own, `build/compat-home`, which the plugin's `functionalTestFloor` shares. It can be
 deleted whole; a full floor run fills it to about 2.3 GB, half of it a copy of Kotlin/Native
 2.2.21's distribution that the Kotlin Gradle plugin downloads and unpacks into its caches, next to
-`~/.konan`'s. The current runs use the repository's wrapper and `~/.gradle`. One fixture by hand,
+`~/.konan`'s. When the plugin's jar changes, the next floor run unpacks another copy into a new
+`build/compat-home/caches/transforms-3/<hash>` directory: the older one (its
+`transformed/extracted/kotlin-native-prebuilt-macos-aarch64-2.2.21`) is then unused and can be
+deleted. The current runs use the repository's wrapper and `~/.gradle`. One fixture by hand,
 from the repository's root (for `android`, with `ANDROID_HOME` set or a
 `compat/android/local.properties` naming the SDK, which run.sh does not need):
 
@@ -37,9 +40,9 @@ GRADLE_USER_HOME=build/compat-home compat/floor-gradle/gradlew --no-daemon -p co
 
 | Fixture | The app | Properties (default) |
 | --- | --- | --- |
-| `android` | An app module, `floor.app`, with `dev.koga.hopi` and `hopi { network { … }; perf { …; autoStart(HopiMonitor.Frames) } }` in its Kotlin DSL script (`.set()`, for Gradle 8.0), declared in the root with AGP and the Kotlin plugin; AGP 8 compiles its Kotlin with `org.jetbrains.kotlin.android`, AGP 9 with its built-in Kotlin. compileSdk 34, minSdk 24, Java and Kotlin at 17, build tools 34.0.0 on AGP 8; the release build minified by R8 with `kotlin.Metadata` kept. It depends on `hopi-api`, `hopi-ktor`, `ktor-client-okhttp` 3.3.3 and OkHttp 4.12.0 (Ktor's 5.2.1 wins), and its `App` calls `HopiRules.list()`, `HopiPerf.screen` and installs Hopi's Ktor plugin on an OkHttp client. `:app:compatReport` prints the Hopi modules and the kotlin-stdlib of each variant's runtime classpath | `-Pagp` (8.0.2), `-Pkgp` (2.2.0) |
+| `android` | An app module, `floor.app`, with `io.github.felipekoga.hopi` and `hopi { network { … }; perf { …; autoStart(HopiMonitor.Frames) } }` in its Kotlin DSL script (`.set()`, for Gradle 8.0), declared in the root with AGP and the Kotlin plugin; AGP 8 compiles its Kotlin with `org.jetbrains.kotlin.android`, AGP 9 with its built-in Kotlin. compileSdk 34, minSdk 24, Java and Kotlin at 17, build tools 34.0.0 on AGP 8; the release build minified by R8 with `kotlin.Metadata` kept. It depends on `hopi-api`, `hopi-ktor`, `ktor-client-okhttp` 3.3.3 and OkHttp 4.12.0 (Ktor's 5.2.1 wins), and its `App` calls `HopiRules.list()`, `HopiPerf.screen` and installs Hopi's Ktor plugin on an OkHttp client. `:app:compatReport` prints the Hopi modules and the kotlin-stdlib of each variant's runtime classpath | `-Pagp` (8.0.2), `-Pkgp` (2.2.0) |
 | `jvm` | A Kotlin/JVM `application` with `hopi-start`, `hopi-ktor` and `ktor-client-mock` 3.3.3. `main` starts Hopi, checks that no rule exists, adds a mock rule (418), sends one request through Hopi's Ktor plugin to a `MockEngine` that would answer 200, fails unless the rule answered, and exits 0 | `-Pkgp` (2.2.0) |
-| `kmp` | A KMP shared module with `jvm()` and an `iosSimulatorArm64` framework, `dev.koga.hopi` and `hopi-ktor` next to the app's own `ktor-client-core`. The framework links with `-Xpartial-linkage-loglevel=ERROR`, so a symbol of Hopi's klibs that the app's Kotlin/Native, Ktor or stdlib cannot supply fails the link instead of becoming a stub that throws when called | `-Pkgp` (2.4.20), `-Pktor` (3.5.2) |
+| `kmp` | A KMP shared module with `jvm()` and an `iosSimulatorArm64` framework, `io.github.felipekoga.hopi` and `hopi-ktor` next to the app's own `ktor-client-core`. The framework links with `-Xpartial-linkage-loglevel=ERROR`, so a symbol of Hopi's klibs that the app's Kotlin/Native, Ktor or stdlib cannot supply fails the link instead of becoming a stub that throws when called | `-Pkgp` (2.4.20), `-Pktor` (3.5.2) |
 
 ## The runs
 

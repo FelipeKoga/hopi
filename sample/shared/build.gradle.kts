@@ -14,7 +14,7 @@ plugins {
     // only (-Phopi.enabled, else Xcode's configuration), exported; the generated HopiSetup Swift
     // calls in every configuration; the iOS release guard before every Release link. The thin
     // hopi-ktor is in every build and installs nothing in a Release framework.
-    id("dev.koga.hopi")
+    id("io.github.felipekoga.hopi")
 }
 
 // The start's settings, which HopiSetup passes to Hopi.start in a Debug build: the Android app's
@@ -49,7 +49,7 @@ abstract class GenerateSampleBuildInfo : DefaultTask() {
             """
             |package dev.koga.hopi.sample
             |
-            |/** Generated from the dev.koga.hopi plugin's choice (`hopi.iosRuntime`): true when an iOS build links Hopi's runtimes (hopi-start). */
+            |/** Generated from the io.github.felipekoga.hopi plugin's choice (`hopi.iosRuntime`): true when an iOS build links Hopi's runtimes (hopi-start). */
             |internal const val HOPI_ENABLED: Boolean = ${realHopi.get()}
             |
             """.trimMargin(),
@@ -150,7 +150,7 @@ kotlin {
  * and `@protocol` lists), never as text: the exported KDoc names types in prose.
  *
  * Run it both ways, each requested by its own name: with the flag the Release link it consumes
- * holds every runtime, which the iOS release guard (the dev.koga.hopi plugin's) lets through
+ * holds every runtime, which the iOS release guard (the io.github.felipekoga.hopi plugin's) lets through
  * only for that link and only while this task is requested by name, so
  * `./gradlew check -Phopi.enabled=true`, like any invocation that links a Release framework with
  * the flag, fails in the guard.
@@ -255,7 +255,7 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
     }
 }
 
-// The iOS release guard (the dev.koga.hopi plugin's): every Release link of this module first fails
+// The iOS release guard (the io.github.felipekoga.hopi plugin's): every Release link of this module first fails
 // on a Hopi runtime, except the link the release check below consumes, and that one only while the
 // check is requested by name (its positive control links every runtime with -Phopi.enabled=true).
 val releaseCheckLink = "linkReleaseFrameworkIosSimulatorArm64"

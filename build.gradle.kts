@@ -22,18 +22,18 @@ subprojects {
 }
 
 tasks.named("check") {
-    // The included build of the dev.koga.hopi plugin: the rewriter's tests, the plugin's unit tests
-    // and its TestKit tests against a fixture Android app.
+    // The included build of the io.github.felipekoga.hopi plugin: the rewriter's tests, the plugin's
+    // unit tests and its TestKit tests against a fixture Android app.
     dependsOn(gradle.includedBuild("gradle-plugin").task(":hopi-instrument:check"))
     dependsOn(gradle.includedBuild("gradle-plugin").task(":hopi-gradle-plugin:check"))
 }
 
 /**
  * Fails unless [repositories] hold every file of [expectedFiles] and every published Gradle module
- * file and POM under `dev/koga/hopi` points only at files and Hopi artifacts that are there, at
- * [hopiVersion]: what a consumer outside this repository resolves from Maven Local. A `project()`
- * dependency that leaked would name the group `hopi` or the version `unspecified`. No published
- * archive may contain [buildMachinePath].
+ * file and POM under `io/github/felipekoga/hopi` points only at files and Hopi artifacts that are
+ * there, at [hopiVersion]: what a consumer outside this repository resolves from Maven Local or
+ * Maven Central. A `project()` dependency that leaked would name the group `hopi` or the version
+ * `unspecified`. No published archive may contain [buildMachinePath].
  *
  * It also holds the published libraries to the oldest build a consumer may have: every kotlin-stdlib
  * dependency at [kotlinStdlibVersion], no io.ktor above [maxKtorVersion] and no kotlinx-coroutines
@@ -41,8 +41,15 @@ tasks.named("check") {
  * [maxKotlinMetadataVersion] in a JVM jar or in an AAR's jars; no AAR asking for a compileSdk above
  * [maxMinCompileSdk]; and every klib, the cinterop ones and the metadata jars' included, at
  * [klibAbiVersion], since Kotlin/Native skips a klib whose ABI version is newer than its own. The
- * dev.koga.hopi plugin and hopi-instrument, which the app's Gradle loads, hold a `.kotlin_module`
- * no newer than [maxPluginKotlinMetadataVersion].
+ * io.github.felipekoga.hopi plugin and hopi-instrument, which the app's Gradle loads, hold a
+ * `.kotlin_module` no newer than [maxPluginKotlinMetadataVersion].
+ *
+ * And it holds every directory of this version to Maven Central's requirements
+ * (central.sonatype.org/publish/requirements): a POM with the project's name, description and URL,
+ * a license, a developer and the SCM, in the group [GROUP]; a `-sources.jar` and a `-javadoc.jar`
+ * unless the POM's packaging is `pom` (the plugin marker's); an `.md5` and a `.sha1` of every file;
+ * and, in the release build ([release]), an `.asc` signature of every file but the checksums, and no
+ * `-SNAPSHOT` version.
  */
 abstract class PublicationCheck : DefaultTask() {
     @get:InputFiles
@@ -90,6 +97,10 @@ abstract class PublicationCheck : DefaultTask() {
     @get:Input
     abstract val maxMinCompileSdk: Property<Int>
 
+    /** The release build (`-Phopi.release=true`), whose every file Maven Central requires signed. */
+    @get:Input
+    abstract val release: Property<Boolean>
+
     @TaskAction
     fun check() {
         val roots = repositories.files.toList()
@@ -99,8 +110,8 @@ abstract class PublicationCheck : DefaultTask() {
             depVersion == version && find("$GROUP_PATH/$module/$version/$module-$version.pom") != null
         val problems = mutableListOf<String>()
         expectedFiles.get().filter { find(it) == null }.forEach { problems += "missing $it" }
-        // This version's files only (dev/koga/hopi/<artifact>/<version>/): a repository can still hold
-        // an earlier version's, whose Hopi dependencies are at that version.
+        // This version's files only (io/github/felipekoga/hopi/<artifact>/<version>/): a repository can
+        // still hold an earlier version's, whose Hopi dependencies are at that version.
         val published = roots.flatMap { root ->
             root.resolve(GROUP_PATH).walkTopDown().filter { it.isFile && it.parentFile.name == version }.map { root to it }.toList()
         }
@@ -150,7 +161,52 @@ abstract class PublicationCheck : DefaultTask() {
                 }
             }
         }
-        if (problems.isNotEmpty()) throw GradleException("The published Hopi artifacts are not consumable:\n" + problems.joinToString("\n"))
+        problems += centralProblems(published, version)
+        if (problems.isNotEmpty()) throw GradleException("The published Hopi artifacts are not consumable or not fit for Maven Central:\n" + problems.joinToString("\n"))
+    }
+
+    /**
+     * What Maven Central refuses in each directory of [published] (`<artifact>/<version>/`): a missing
+     * or incomplete POM, a missing `-sources.jar` or `-javadoc.jar` (unless the POM's packaging is
+     * `pom`), a file without its `.md5` or `.sha1`, and in the release build a file without its `.asc`
+     * (checksums need none) or a snapshot [version].
+     */
+    private fun centralProblems(published: List<Pair<File, File>>, version: String): List<String> {
+        val problems = mutableListOf<String>()
+        if (release.get() && version.endsWith("-SNAPSHOT")) problems += "hopi.version $version is a snapshot, which Maven Central refuses"
+        for ((directory, files) in published.groupBy({ it.second.parentFile }, { it })) {
+            val where = directory.relativeTo(files.first().first).invariantSeparatorsPath
+            val artifact = directory.parentFile.name
+            val names = files.map { it.second.name }.toSet()
+            val pom = directory.resolve("$artifact-$version.pom")
+            if (!pom.isFile) {
+                problems += "$where has no POM"
+                continue
+            }
+            val model = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(pom).documentElement
+            problems += POM_FIELDS.filter { text(model, it).isNullOrBlank() }.map { "$where/${pom.name} has no <${it.replace("/", "><")}>" }
+            val groupId = text(model, "groupId")
+            if (groupId != GROUP) problems += "$where/${pom.name} has the groupId $groupId, not $GROUP"
+            if ((text(model, "packaging") ?: "jar") != "pom") {
+                listOf("sources", "javadoc").map { "$artifact-$version-$it.jar" }.filter { it !in names }.forEach { problems += "$where has no $it" }
+            }
+            for (file in names.filterNot { file -> file.endsWith(".asc") || CHECKSUMS.any { file.endsWith(".$it") } }) {
+                listOf("md5", "sha1").filter { "$file.$it" !in names }.forEach { problems += "$where/$file has no .$it checksum" }
+                if (release.get() && "$file.asc" !in names) problems += "$where/$file is not signed: no $file.asc"
+            }
+        }
+        return problems
+    }
+
+    /** The text of the element at [path] (child names separated by `/`) under [element], or null. */
+    private fun text(element: org.w3c.dom.Element, path: String): String? {
+        var current: org.w3c.dom.Element = element
+        for (tag in path.split('/')) {
+            val children = current.childNodes
+            current = (0 until children.length).map { children.item(it) }.filterIsInstance<org.w3c.dom.Element>()
+                .firstOrNull { it.tagName == tag } ?: return null
+        }
+        return current.textContent.trim()
     }
 
     /** Whether an entry of the archive [file] holds [text], in its stored bytes. */
@@ -187,7 +243,8 @@ abstract class PublicationCheck : DefaultTask() {
     private fun archiveFloorProblems(name: String, file: File): List<String> = java.util.zip.ZipFile(file).use { zip ->
         val problems = mutableListOf<String>()
         val jvmJar = file.extension == "jar" && file.parentFile.parentFile.name.endsWith("-jvm")
-        val pluginJar = file.extension == "jar" && file.parentFile.parentFile.name in PLUGIN_ARTIFACTS && !file.name.endsWith("-sources.jar")
+        val pluginJar = file.extension == "jar" && file.parentFile.parentFile.name in PLUGIN_ARTIFACTS &&
+            !file.name.endsWith("-sources.jar") && !file.name.endsWith("-javadoc.jar")
         if (pluginJar && zip.entries().asSequence().none { isKotlinModule(it.name) }) problems += "$name holds no .kotlin_module to check"
         for (entry in zip.entries().asSequence().filterNot { it.isDirectory }) {
             val path = entry.name
@@ -241,22 +298,32 @@ abstract class PublicationCheck : DefaultTask() {
     }
 
     private companion object {
-        const val GROUP = "dev.koga.hopi"
-        const val GROUP_PATH = "dev/koga/hopi"
+        const val GROUP = "io.github.felipekoga.hopi"
+        const val GROUP_PATH = "io/github/felipekoga/hopi"
         const val AAR_METADATA = "META-INF/com/android/build/gradle/aar-metadata.properties"
         val VERSION_KEYS = setOf("requires", "strictly", "prefers")
 
-        /** The artifacts the app's Gradle loads: the dev.koga.hopi plugin and its rewriter. */
+        /** What Maven Central requires of every POM (gradle/maven-central.gradle.kts writes them). */
+        val POM_FIELDS = listOf(
+            "name", "description", "url", "licenses/license/name", "licenses/license/url",
+            "developers/developer/id", "developers/developer/name", "developers/developer/url",
+            "scm/url", "scm/connection", "scm/developerConnection",
+        )
+
+        /** The checksum files Gradle writes beside each file it publishes, which need no signature. */
+        val CHECKSUMS = setOf("md5", "sha1", "sha256", "sha512")
+
+        /** The artifacts the app's Gradle loads: the io.github.felipekoga.hopi plugin and its rewriter. */
         val PLUGIN_ARTIFACTS = setOf("hopi-gradle-plugin", "hopi-instrument")
     }
 }
 
 // Every library a consumer needs (README, "Install"), by its targets and the cinterop klibs of its
 // main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the desktop
-// viewer with its screens (hopi-ui) and the sample are not published. The dev.koga.hopi plugin
-// injects the network runtime (hopi-network), hopi-core and, with `perf { enabled }`, hopi-perf
-// into debuggable build types only and aligns hopi-api (HopiRules, HopiPerf) and hopi-ktor (the
-// thin Ktor plugin) with its own version, all of them listed here.
+// viewer with its screens (hopi-ui) and the sample are not published. The io.github.felipekoga.hopi
+// plugin injects the network runtime (hopi-network), hopi-core and, with `perf { enabled }`,
+// hopi-perf into debuggable build types only and aligns hopi-api (HopiRules, HopiPerf) and hopi-ktor
+// (the thin Ktor plugin) with its own version, all of them listed here.
 // hopi-start, the iOS entry a Debug framework exports and the JVM entry, brings hopi-network and
 // hopi-perf; hopi-network's JVM target holds the Ktor plugin's recorder.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
@@ -288,8 +355,8 @@ publishedModules.keys.forEach { module ->
     }
 }
 
-// One source for the version: this build's gradle.properties, which the dev.koga.hopi plugin's build
-// reads too (its HOPI_VERSION, and hopi-instrument's version). An override with -P or
+// One source for the version: this build's gradle.properties, which the io.github.felipekoga.hopi
+// plugin's build reads too (its HOPI_VERSION, and hopi-instrument's version). An override with -P or
 // ORG_GRADLE_PROJECT_hopi.version would reach the libraries only, and the plugin would add the
 // runtime at another version than the one published: refuse it.
 val publishedVersion: String = providers.fileContents(layout.projectDirectory.file("gradle.properties")).asText
@@ -297,7 +364,7 @@ val publishedVersion: String = providers.fileContents(layout.projectDirectory.fi
 providers.gradleProperty("hopi.version").get().let { requested ->
     if (requested != publishedVersion) {
         throw GradleException(
-            "hopi.version is $requested in this build but $publishedVersion in gradle.properties, which the dev.koga.hopi " +
+            "hopi.version is $requested in this build but $publishedVersion in gradle.properties, which the io.github.felipekoga.hopi " +
                 "plugin reads: set it in gradle.properties, not with -P or ORG_GRADLE_PROJECT_hopi.version",
         )
     }
@@ -306,14 +373,14 @@ val pluginBuild = gradle.includedBuild("gradle-plugin")
 
 fun expectedPublication(module: String, targets: List<String>): List<String> {
     fun files(artifact: String, vararg suffixes: String) =
-        suffixes.map { "dev/koga/hopi/$artifact/$publishedVersion/$artifact-$publishedVersion$it" }
+        (suffixes.toList() + "-javadoc.jar").map { "io/github/felipekoga/hopi/$artifact/$publishedVersion/$artifact-$publishedVersion$it" }
     return files(module, ".module", ".pom", "-sources.jar") + targets.flatMap { target ->
         val artifact = "$module-${target.lowercase()}"
         when (target) {
             "android" -> files(artifact, ".module", ".pom", ".aar", "-sources.jar")
             "jvm" -> files(artifact, ".module", ".pom", ".jar", "-sources.jar")
             else -> files(artifact, ".module", ".pom", ".klib", "-sources.jar", "-metadata.jar") +
-                publishedCinterops[module].orEmpty().flatMap { files(artifact, "-cinterop-$it.klib") }
+                publishedCinterops[module].orEmpty().map { "io/github/felipekoga/hopi/$artifact/$publishedVersion/$artifact-$publishedVersion-cinterop-$it.klib" }
         }
     }
 }
@@ -325,7 +392,8 @@ val cleanPublicationCheck = tasks.register<Delete>("cleanPublicationCheck") {
 
 val checkPublication = tasks.register<PublicationCheck>("checkPublication") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Publishes every Hopi artifact into build/publication-check (the plugin into its functional-test repository) and checks a consumer can resolve them."
+    description = "Publishes every Hopi artifact into build/publication-check (the plugin into its functional-test repository) " +
+        "and checks a consumer can resolve them and Maven Central would take them (with -Phopi.release=true, signed)."
     dependsOn(cleanPublicationCheck)
     dependsOn(publishedModules.keys.map { ":$it:publishAllPublicationsToPublicationCheckRepository" })
     // The plugin, its marker and hopi-instrument, in the TestKit tests' repository.
@@ -346,23 +414,23 @@ val checkPublication = tasks.register<PublicationCheck>("checkPublication") {
     maxKtorVersion.set("3.3.3")
     maxCoroutinesVersion.set("1.11.0")
     maxMinCompileSdk.set(34)
+    // The release build (docs/RELEASING.md) signs every file, which this check then requires;
+    // gradle/maven-central.gradle.kts fails it at once without a signing key.
+    release.set(providers.gradleProperty("hopi.release").map { it.toBoolean() }.orElse(false))
     expectedFiles.set(
         publishedModules.flatMap { (module, targets) -> expectedPublication(module, targets) } +
-            listOf(
-                "hopi-gradle-plugin/$publishedVersion/hopi-gradle-plugin-$publishedVersion.jar",
-                "hopi-gradle-plugin/$publishedVersion/hopi-gradle-plugin-$publishedVersion.pom",
-                "dev.koga.hopi.gradle.plugin/$publishedVersion/dev.koga.hopi.gradle.plugin-$publishedVersion.pom",
-                "hopi-instrument/$publishedVersion/hopi-instrument-$publishedVersion.jar",
-                "hopi-instrument/$publishedVersion/hopi-instrument-$publishedVersion.pom",
-            ).map { "dev/koga/hopi/$it" },
+            listOf("hopi-gradle-plugin", "hopi-instrument").flatMap { artifact ->
+                listOf(".jar", ".pom", "-sources.jar", "-javadoc.jar").map { "$artifact/$publishedVersion/$artifact-$publishedVersion$it" }
+            }.map { "io/github/felipekoga/hopi/$it" } +
+            "io/github/felipekoga/hopi/io.github.felipekoga.hopi.gradle.plugin/$publishedVersion/io.github.felipekoga.hopi.gradle.plugin-$publishedVersion.pom",
     )
 }
 
 // `./gradlew publishToMavenLocal` runs each published module's task of that name; this one adds the
-// dev.koga.hopi plugin, its marker and hopi-instrument (which the plugin depends on).
+// io.github.felipekoga.hopi plugin, its marker and hopi-instrument (which the plugin depends on).
 tasks.register("publishToMavenLocal") {
     group = PublishingPlugin.PUBLISH_TASK_GROUP
-    description = "Publishes every Hopi artifact and the dev.koga.hopi Gradle plugin to Maven Local."
+    description = "Publishes every Hopi artifact and the io.github.felipekoga.hopi Gradle plugin to Maven Local."
     dependsOn(publishedModules.keys.map { ":$it:publishToMavenLocal" })
     dependsOn(pluginBuild.task(":hopi-gradle-plugin:publishToMavenLocal"))
     dependsOn(pluginBuild.task(":hopi-instrument:publishToMavenLocal"))

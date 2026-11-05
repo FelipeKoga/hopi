@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct IOSApp: App {
     init() {
-        // One call, first thing, the same in every configuration (the dev.koga.hopi plugin
+        // One call, first thing, the same in every configuration (the io.github.felipekoga.hopi plugin
         // generates HopiSetup into sample/shared). In a Debug build it starts Hopi with
         // sample/shared's hopi { } block: every URLSession request of the process is recorded from
         // here on, the app's own and those of SDKs it does not own, the bridge is up, and the

@@ -11,7 +11,7 @@ plugins {
 }
 
 description = "The network runtime: automatic OkHttp and HttpURLConnection capture on Android and URLSession capture on iOS, " +
-    "with their rules, and, on Android and the JVM, the Ktor plugin's recorder; the dev.koga.hopi plugin adds it to " +
+    "with their rules, and, on Android and the JVM, the Ktor plugin's recorder; the io.github.felipekoga.hopi plugin adds it to " +
     "debuggable variants, hopi-start to Debug frameworks and JVM apps."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
@@ -19,7 +19,7 @@ apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 // automatic OkHttp and HttpURLConnection capture on Android, automatic URLSession capture on iOS,
 // and the rules each applies, and, on Android and the JVM, the Ktor plugin's recorder, which
 // hopi-ktor's thin plugin installs once the network tool registered it. No app names it: the
-// `dev.koga.hopi` Gradle plugin adds it to the debuggable variants of an Android application, and
+// `io.github.felipekoga.hopi` Gradle plugin adds it to the debuggable variants of an Android application, and
 // hopi-start brings it to Debug iOS frameworks and to JVM apps; every other build gets no runtime.
 // The JVM target holds only the recorder and the JVM network tool.
 kotlin {
@@ -133,7 +133,7 @@ kotlin {
             implementation(libs.okhttp)
             // The plugin's own rewriter, substituted from the included build: the tests load OkHttp
             // and their scenarios through it, so they run the bytecode an instrumented app runs.
-            implementation("dev.koga.hopi:hopi-instrument")
+            implementation("io.github.felipekoga.hopi:hopi-instrument")
             implementation(libs.asm)
             implementation(libs.asm.tree)
             // The Ktor plugin on Ktor's Android engine and with ContentEncoding: one record per request.

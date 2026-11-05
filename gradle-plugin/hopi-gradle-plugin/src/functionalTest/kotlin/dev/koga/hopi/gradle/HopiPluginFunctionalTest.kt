@@ -221,7 +221,7 @@ class HopiPluginFunctionalTest {
 
     /**
      * The published-coordinates path (a consumer of Maven Local): with no `hopi-network` project in
-     * the build, the plugin adds `dev.koga.hopi:hopi-network` at its own version, `hopi-core` and,
+     * the build, the plugin adds `io.github.felipekoga.hopi:hopi-network` at its own version, `hopi-core` and,
      * with `perf { enabled = true }`, `hopi-perf` to debug only, so the release APK gets no runtime
      * at all. `hopi-ktor` (the thin Ktor plugin) and `hopi-api` (`HopiRules`, `HopiPerf`), which
      * the shared module names, reach both APKs as named: the plugin substitutes nothing. The
@@ -244,8 +244,8 @@ class HopiPluginFunctionalTest {
             plugins { `java-library` }
             java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
             dependencies {
-                api("dev.koga.hopi:hopi-ktor:$version")
-                api("dev.koga.hopi:hopi-api:$version")
+                api("io.github.felipekoga.hopi:hopi-ktor:$version")
+                api("io.github.felipekoga.hopi:hopi-api:$version")
             }
             """.trimIndent(),
         )
@@ -311,7 +311,7 @@ class HopiPluginFunctionalTest {
             subprojects {
                 apply(plugin = "java-library")
                 apply(plugin = "maven-publish")
-                group = "dev.koga.hopi"
+                group = "io.github.felipekoga.hopi"
                 version = "$version"
                 configure<JavaPluginExtension> {
                     sourceCompatibility = JavaVersion.VERSION_17
@@ -344,7 +344,7 @@ class HopiPluginFunctionalTest {
 
     /**
      * A consumer of the published coordinates, as of Maven Local, in `<root>/consumer`: the plugin
-     * from the TestKit repository, `dev.koga.hopi` from [repo] only, and [modules] included.
+     * from the TestKit repository, `io.github.felipekoga.hopi` from [repo] only, and [modules] included.
      */
     private fun consumer(root: File, repo: String, vararg modules: String): File {
         val project = root.resolve("consumer")
@@ -363,7 +363,7 @@ class HopiPluginFunctionalTest {
                 repositories {
                     maven {
                         url = uri("$repo")
-                        content { includeGroup("dev.koga.hopi") }
+                        content { includeGroup("io.github.felipekoga.hopi") }
                     }
                     google()
                     mavenCentral()
@@ -376,7 +376,7 @@ class HopiPluginFunctionalTest {
             """
             plugins {
                 id("com.android.application") version "${System.getProperty("hopi.agpVersion")}" apply false
-                id("dev.koga.hopi") version "${System.getProperty("hopi.version")}" apply false
+                id("io.github.felipekoga.hopi") version "${System.getProperty("hopi.version")}" apply false
             }
             """.trimIndent(),
         )
@@ -388,7 +388,7 @@ class HopiPluginFunctionalTest {
      * release runtime classpath fails the build in `hopiReleaseGuardRelease`, before any dex task and
      * with no APK, and the failure names the runtime and what brings it. The runtime is named by
      * project (`releaseImplementation(project(":hopi-network"))`, in the apps fixture), by its
-     * published coordinates (`releaseImplementation("dev.koga.hopi:hopi-network:…")`), or by a
+     * published coordinates (`releaseImplementation("io.github.felipekoga.hopi:hopi-network:…")`), or by a
      * library for every variant (`implementation(project(":sdk"))`, whose own `implementation`
      * names it); `-Phopi.guardCase` picks the case, which each fixture's app script reads. The
      * failure says to remove only the runtime something other than a runtime brings: `hopi-network`,
@@ -412,7 +412,7 @@ class HopiPluginFunctionalTest {
             plugins { `java-library` }
             java { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
             // A library that names the runtime for every variant of an app that depends on it.
-            dependencies { implementation("dev.koga.hopi:hopi-network:$version") }
+            dependencies { implementation("io.github.felipekoga.hopi:hopi-network:$version") }
             """.trimIndent(),
         )
         consumer.write(
@@ -420,13 +420,13 @@ class HopiPluginFunctionalTest {
             androidModule("com.android.application", "com.example.consumer", hopi = true) + "\n" +
                 """
                 val guardCase = providers.gradleProperty("hopi.guardCase").orNull
-                if (guardCase == "coordinates") dependencies { "releaseImplementation"("dev.koga.hopi:hopi-network:$version") }
+                if (guardCase == "coordinates") dependencies { "releaseImplementation"("io.github.felipekoga.hopi:hopi-network:$version") }
                 if (guardCase == "transitive") dependencies { "implementation"(project(":sdk")) }
                 """.trimIndent() + "\n",
         )
         consumer.write("app/src/main/AndroidManifest.xml", MANIFEST)
-        val network = "dev.koga.hopi:hopi-network:$version"
-        val core = "dev.koga.hopi:hopi-core:$version (via $network)"
+        val network = "io.github.felipekoga.hopi:hopi-network:$version"
+        val core = "io.github.felipekoga.hopi:hopi-core:$version (via $network)"
         val byCoordinates = runner(consumer, ":app:assembleRelease", "-Phopi.guardCase=coordinates").buildAndFail()
         assertGuardFailed(consumer, byCoordinates, network, network, core)
         val byLibrary = runner(consumer, ":app:assembleRelease", "-Phopi.guardCase=transitive").buildAndFail()
@@ -452,7 +452,7 @@ class HopiPluginFunctionalTest {
     fun applyingItToALibraryFailsWithTheReason() {
         val project = fixture("library")
         val result = runner(project, ":lib:assembleDebug").buildAndFail()
-        assertTrue("apply dev.koga.hopi to the Android application module" in result.output, result.output)
+        assertTrue("apply io.github.felipekoga.hopi to the Android application module" in result.output, result.output)
     }
 
     /**
@@ -522,7 +522,7 @@ class HopiPluginFunctionalTest {
     }
 
     /**
-     * `dev.koga.hopi` in the root's `plugins { }` (with `apply false`) and the Kotlin plugin in the
+     * `io.github.felipekoga.hopi` in the root's `plugins { }` (with `apply false`) and the Kotlin plugin in the
      * module's: the plugin's classes, in the root's scope, cannot see the module's Kotlin plugin, so
      * applying it fails with the same-scope rule, not by calling that Kotlin plugin too old.
      */
@@ -544,20 +544,20 @@ class HopiPluginFunctionalTest {
             include(":shared")
             """.trimIndent() + "\n",
         )
-        root.write("build.gradle.kts", "plugins {\n    id(\"dev.koga.hopi\") version \"${System.getProperty("hopi.version")}\" apply false\n}\n")
+        root.write("build.gradle.kts", "plugins {\n    id(\"io.github.felipekoga.hopi\") version \"${System.getProperty("hopi.version")}\" apply false\n}\n")
         root.write(
             "shared/build.gradle.kts",
             """
             plugins {
                 kotlin("multiplatform") version "${System.getProperty("hopi.kotlinVersion")}"
-                id("dev.koga.hopi")
+                id("io.github.felipekoga.hopi")
             }
             kotlin { iosSimulatorArm64() }
             """.trimIndent() + "\n",
         )
         val result = kmpRunner(root, emptyMap(), ":shared:help").buildAndFail()
-        val rule = "dev.koga.hopi cannot see the classes of the Kotlin Gradle plugin that :shared applies, which it runs on: " +
-            "declare org.jetbrains.kotlin.multiplatform and dev.koga.hopi in the same plugins { } block"
+        val rule = "io.github.felipekoga.hopi cannot see the classes of the Kotlin Gradle plugin that :shared applies, which it runs on: " +
+            "declare org.jetbrains.kotlin.multiplatform and io.github.felipekoga.hopi in the same plugins { } block"
         assertTrue(rule in result.output, result.output)
         assertFalse("too old to report itself" in result.output, result.output)
     }
@@ -603,7 +603,7 @@ class HopiPluginFunctionalTest {
             """
             plugins {
                 kotlin("multiplatform") version "$kotlin" apply false
-                id("dev.koga.hopi") version "${System.getProperty("hopi.version")}" apply false
+                id("io.github.felipekoga.hopi") version "${System.getProperty("hopi.version")}" apply false
             }
             """.trimIndent() + "\n",
         )
@@ -662,7 +662,7 @@ class HopiPluginFunctionalTest {
             plugins {
                 id("com.android.application") version "$agp" apply false
                 id("com.android.library") version "$agp" apply false
-                id("dev.koga.hopi") version "$version" apply false
+                id("io.github.felipekoga.hopi") version "$version" apply false
             }
             """.trimIndent(),
         )
@@ -899,7 +899,7 @@ class HopiPluginFunctionalTest {
         """
         plugins {
             id("$plugin")
-            ${if (hopi) "id(\"dev.koga.hopi\")" else ""}
+            ${if (hopi) "id(\"io.github.felipekoga.hopi\")" else ""}
         }
         android {
             namespace = "$namespace"
@@ -957,7 +957,7 @@ class HopiPluginFunctionalTest {
 
             plugins {
                 kotlin("multiplatform")
-                id("dev.koga.hopi")
+                id("io.github.felipekoga.hopi")
             }
 
             kotlin {
