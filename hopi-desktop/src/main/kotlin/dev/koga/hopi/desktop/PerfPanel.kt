@@ -102,13 +102,13 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
     val view = perf?.view?.collectAsState()?.value ?: RemotePerfView.NONE
     var threads by remember(perf) { mutableStateOf(false) }
 
-    Column(modifier.fillMaxHeight().background(colors.background).testTag(PerfTags.PANEL)) {
+    Column(modifier.fillMaxHeight().testTag(PerfTags.PANEL)) {
         Row(
-            Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            BasicText("Perf", style = HopiDesktopType.bodyStrong.copy(color = colors.text))
+            BasicText("Perf", style = HopiDesktopType.title.copy(color = colors.text))
             view.status?.let { BasicText(it.platform, style = HopiDesktopType.meta.copy(color = colors.textFaint)) }
             Spacer(Modifier.weight(1f))
             ChromeButton(
@@ -118,7 +118,6 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
             )
             ChromeButton("Close", onClick = { state.open = false }, variant = ButtonVariant.Ghost)
         }
-        Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         view.message?.let {
             // Only failures come here: a red callout.
             BasicText(
@@ -126,9 +125,8 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(colors.error.bg)
-                    .border(1.dp, colors.error.border, RoundedCornerShape(8.dp))
                     .padding(horizontal = 10.dp, vertical = 6.dp)
                     .testTag(PerfTags.MESSAGE),
                 style = HopiDesktopType.meta.copy(color = colors.error.fg),
@@ -216,7 +214,7 @@ private fun Monitors(view: RemotePerfView, onToggle: (String, Boolean) -> Unit) 
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 1.dp)
                     .clip(shape)
-                    .background(colors.surface)
+                    .background(colors.containerHigh)
                     .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -323,7 +321,6 @@ private fun HangRow(hang: RemotePerfEvent) {
                 style = HopiDesktopType.mono.copy(color = colors.textMuted),
             )
         }
-        Spacer(Modifier.fillMaxWidth().padding(start = 12.dp).height(1.dp).background(colors.border))
     }
 }
 

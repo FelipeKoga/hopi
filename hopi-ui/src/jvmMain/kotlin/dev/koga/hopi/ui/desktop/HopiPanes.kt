@@ -1,5 +1,8 @@
 package dev.koga.hopi.ui.desktop
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -156,7 +159,7 @@ public fun HopiPanes(
         // A selection moved from the keyboard stays in view.
         LaunchedEffect(state.selectedId) { scrollIntoView(listState, state.rows, state.selectedId) }
 
-        BoxWithConstraints(modifier.fillMaxSize().background(colors.background)) {
+        BoxWithConstraints(modifier.fillMaxSize()) {
             val wide = maxWidth >= sideBySideMinWidth
             val listPane: @Composable () -> Unit = {
                 TransactionListPane(
@@ -173,10 +176,10 @@ public fun HopiPanes(
             }
             val selected = state.selectedId
             if (wide) {
-                Row(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(LIST_WEIGHT).fillMaxHeight()) { listPane() }
-                    Box(Modifier.fillMaxHeight().width(1.dp).background(colors.border))
-                    Box(Modifier.weight(1f - LIST_WEIGHT).fillMaxHeight()) {
+                // M3 Expressive: panes float on the background, 8 dp apart, with no rule between them.
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(LIST_WEIGHT).fillMaxHeight().clip(PaneShape).background(colors.pane)) { listPane() }
+                    Box(Modifier.weight(1f - LIST_WEIGHT).fillMaxHeight().clip(PaneShape).background(colors.pane)) {
                         if (selected == null) {
                             EmptyState("No request selected", "Select a request to see its headers and bodies.")
                         } else {
@@ -185,7 +188,7 @@ public fun HopiPanes(
                     }
                 }
             } else if (selected == null) {
-                listPane()
+                Box(Modifier.fillMaxSize().clip(PaneShape).background(colors.pane)) { listPane() }
             } else {
                 DetailPane(detail, selected, tab, { tab = it }, onBack = { state.selectedId = null }, actions)
             }
@@ -234,3 +237,7 @@ private suspend fun scrollIntoView(listState: LazyListState, rows: List<Transact
 /** Below this the panes take turns, as on a phone. */
 private val SIDE_BY_SIDE_MIN_WIDTH = 720.dp
 private const val LIST_WEIGHT = 0.42f
+
+/** A floating pane's shape: M3 Expressive's large container corners. */
+@HopiInternalApi
+public val PaneShape: RoundedCornerShape = RoundedCornerShape(24.dp)

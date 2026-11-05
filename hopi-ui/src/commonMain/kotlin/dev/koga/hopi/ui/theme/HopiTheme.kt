@@ -39,6 +39,8 @@ internal class HopiColors(
     val surface: Color,
     /** shadcn's muted: secondary buttons, the tabs' track, a selected picker chip. */
     val muted: Color,
+    /** M3's surfaceContainerLow: a pane floating on the background (list, detail, side panels). */
+    val pane: Color,
     /** M3's surfaceContainerHigh: list cards, text fields, an unselected chip. */
     val containerHigh: Color,
     /** M3's secondaryContainer: a selected row, a tonal button, the navigation indicator. */
@@ -77,7 +79,7 @@ internal class HopiColors(
 // its on-container text, and an outline one step up.
 internal val LightColors = HopiColors(
     background = Color(0xFFF5FBF5), surface = Color(0xFFE9EFEA), muted = Color(0xFFDEE4DE),
-    containerHigh = Color(0xFFE3EAE4), secondaryContainer = Color(0xFFD1E8D8), onSecondaryContainer = Color(0xFF0C1F15),
+    pane = Color(0xFFEFF5EF), containerHigh = Color(0xFFE3EAE4), secondaryContainer = Color(0xFFD1E8D8), onSecondaryContainer = Color(0xFF0C1F15),
     border = Color(0xFFBFC9C1), ring = Color(0xFF2C6A47),
     text = Color(0xFF171D19), textMuted = Color(0xFF404943), textFaint = Color(0xFF59625C),
     primary = Color(0xFF2C6A47), onPrimary = Color(0xFFFFFFFF),
@@ -94,7 +96,7 @@ internal val LightColors = HopiColors(
 
 internal val DarkColors = HopiColors(
     background = Color(0xFF0F1511), surface = Color(0xFF1B211D), muted = Color(0xFF303632),
-    containerHigh = Color(0xFF262B27), secondaryContainer = Color(0xFF334B40), onSecondaryContainer = Color(0xFFCFE9D9),
+    pane = Color(0xFF171D19), containerHigh = Color(0xFF262B27), secondaryContainer = Color(0xFF334B40), onSecondaryContainer = Color(0xFFCFE9D9),
     border = Color(0xFF3F4943), ring = Color(0xFF7FD9A3),
     text = Color(0xFFDEE4DE), textMuted = Color(0xFFBFC9C1), textFaint = Color(0xFF8F9A92),
     primary = Color(0xFF81DFA2), onPrimary = Color(0xFF003920),

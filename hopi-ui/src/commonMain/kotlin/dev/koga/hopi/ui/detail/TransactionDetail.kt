@@ -120,7 +120,7 @@ internal fun TransactionDetailPane(
                     ActionButton(HopiIcons.Copy, DetailTags.COPY_BODY, actions.copyBody, enabled = responseText != null)
                     actions.share?.let { ActionButton(HopiIcons.Share, DetailTags.SHARE, it) }
                     actions.rules?.let { rules ->
-                        rules.mock?.let { ActionButton(HopiIcons.Mock, DetailTags.MOCK, it.run, enabled = it.refusal == null, tone = colors.violet) }
+                        rules.mock?.let { ActionButton(HopiIcons.Mock, DetailTags.MOCK, it.run, enabled = it.refusal == null) }
                     }
                 }
                 // A disabled rule button says why.
@@ -133,7 +133,7 @@ internal fun TransactionDetailPane(
                     )
                 }
                 Tabs(tab, onTab, colors)
-                HairlineDivider()
+                Spacer(Modifier.height(4.dp))
                 // A fresh scroll position per tab and per transaction.
                 val listState = remember(tab, model.transaction.id) { LazyListState() }
                 SelectionContainer(Modifier.fillMaxSize()) {

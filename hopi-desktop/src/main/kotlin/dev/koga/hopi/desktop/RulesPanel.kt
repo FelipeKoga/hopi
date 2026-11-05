@@ -113,13 +113,13 @@ internal fun RulesPanel(
         scope.launchCommand(state, command, done)
     }
 
-    Column(modifier.fillMaxHeight().background(colors.background).testTag(RulesTags.PANEL)) {
+    Column(modifier.fillMaxHeight().testTag(RulesTags.PANEL)) {
         Row(
-            Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            BasicText("Rules", style = HopiDesktopType.bodyStrong.copy(color = colors.text))
+            BasicText("Rules", style = HopiDesktopType.title.copy(color = colors.text))
             if (rules.rules.isNotEmpty()) BasicText(rules.rules.size.toString(), style = HopiDesktopType.meta.copy(color = colors.textFaint))
             Spacer(Modifier.weight(1f))
             // Destructive: it removes every rule in the app.
@@ -131,7 +131,6 @@ internal fun RulesPanel(
             )
             ChromeButton("Close", onClick = { state.open = false }, variant = ButtonVariant.Ghost)
         }
-        Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         state.message?.let {
             // A callout in the outcome's hue (messageTone).
             val tone = messageTone(it, colors)
@@ -140,9 +139,8 @@ internal fun RulesPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(tone.bg)
-                    .border(1.dp, tone.border, RoundedCornerShape(8.dp))
                     .padding(horizontal = 10.dp, vertical = 6.dp)
                     .testTag(RulesTags.MESSAGE),
                 style = HopiDesktopType.meta.copy(color = tone.fg),
@@ -262,7 +260,7 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 3.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(colors.surface)
+            .background(colors.containerHigh)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

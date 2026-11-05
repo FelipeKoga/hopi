@@ -1,5 +1,7 @@
 package dev.koga.hopi.desktop
 
+import androidx.compose.ui.draw.clip
+import dev.koga.hopi.ui.desktop.PaneShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -128,7 +130,8 @@ internal fun ViewerContent(
                 },
         ) {
             TargetBar(viewer, status, onAppFieldFocus = { appFieldFocused = it })
-            Row(Modifier.weight(1f).fillMaxWidth()) {
+            // The panes float on the background, 8 dp apart and from the window's edges.
+            Row(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val current = session
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     if (current == null) {
@@ -148,17 +151,15 @@ internal fun ViewerContent(
                     }
                 }
                 if (rules.open) {
-                    Box(Modifier.fillMaxHeight().width(1.dp).background(colors.border))
                     RulesPanel(
                         current,
                         rules,
                         chooseBodyFile,
-                        modifier = Modifier.width(RULES_PANEL_WIDTH).onFocusChanged { rulesFocused = it.hasFocus },
+                        modifier = Modifier.width(RULES_PANEL_WIDTH).fillMaxHeight().clip(PaneShape).background(colors.pane).onFocusChanged { rulesFocused = it.hasFocus },
                     )
                 }
                 if (perf.open) {
-                    Box(Modifier.fillMaxHeight().width(1.dp).background(colors.border))
-                    PerfPanel(current, perf, modifier = Modifier.width(PERF_PANEL_WIDTH))
+                    PerfPanel(current, perf, modifier = Modifier.width(PERF_PANEL_WIDTH).fillMaxHeight().clip(PaneShape).background(colors.pane))
                 }
             }
             StatusBar(viewer, status)
@@ -192,7 +193,7 @@ private fun TargetBar(viewer: Viewer, status: ViewerStatus, onAppFieldFocus: (Bo
     val appId = app.text.toString().trim().ifEmpty { null }
     val problem = if (selected == null) "no device or bridge found: start an emulator, a simulator or a JVM app" else targetProblem(selected, appId)
 
-    Column(Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BasicText("Device", style = HopiDesktopType.section.copy(color = colors.textFaint))
             LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -238,11 +239,10 @@ private fun TargetBar(viewer: Viewer, status: ViewerStatus, onAppFieldFocus: (Bo
                     }
                 }
                 // What stops a connect (adb missing, a bad app id): the warning amber.
-                hint?.let { BasicText(it, style = HopiDesktopType.meta.copy(color = colors.warning.fg), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                hint?.let { BasicText(it, style = HopiDesktopType.meta.copy(color = colors.textMuted), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }
-    Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
 }
 
 @Composable
@@ -263,9 +263,8 @@ private fun StatusBar(viewer: Viewer, status: ViewerStatus) {
     val colors = hopiDesktopColors
     val session by viewer.session.collectAsState()
     val notice by viewer.notice.collectAsState()
-    Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
     Row(
-        Modifier.fillMaxWidth().background(colors.surface).padding(horizontal = 12.dp, vertical = 5.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // A filled dot only when connected, a ring otherwise; its hue is the connection's state.

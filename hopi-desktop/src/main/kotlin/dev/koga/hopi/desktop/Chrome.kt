@@ -57,9 +57,10 @@ internal fun ChromeButton(text: String, onClick: () -> Unit, modifier: Modifier 
         ButtonVariant.Secondary -> Triple(colors.secondaryContainer, colors.onSecondaryContainer, colors.secondaryContainer)
         ButtonVariant.Outline -> Triple(Color.Transparent, colors.text, colors.border)
         ButtonVariant.Ghost -> Triple(Color.Transparent, colors.text, Color.Transparent)
-        ButtonVariant.Destructive -> Triple(colors.destructive, colors.onDestructive, colors.destructive)
+        // Tonal, in the error container: one strong hue (primary) per screen.
+        ButtonVariant.Destructive -> Triple(colors.error.bg, colors.error.fg, colors.error.bg)
     }
-    val filled = variant == ButtonVariant.Primary || variant == ButtonVariant.Destructive
+    val filled = variant == ButtonVariant.Primary
     Box(
         modifier
             .alpha(if (enabled) 1f else 0.5f)

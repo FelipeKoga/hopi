@@ -217,7 +217,7 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(HopiRadius.lg)
-            .background(if (selected) colors.secondaryContainer else colors.surface)
+            .background(if (selected) colors.secondaryContainer else colors.containerHigh)
             .then(if (selected) Modifier.semantics { this.selected = true } else Modifier)
             .clickable(onClickLabel = "Open details") { onOpen(row.id) }
             .heightIn(min = 60.dp),
@@ -324,8 +324,8 @@ private fun StatusFilter.tone(colors: HopiColors): HopiTone? = when (this) {
 
 /** A rule mark's hue: MOCK violet, EDIT fuchsia, FAIL the error red (it made the ERR), DELAY the warning amber. */
 private fun tagTone(tag: String, colors: HopiColors): HopiTone = when (tag) {
-    "MOCK" -> colors.violet
-    "EDIT" -> colors.fuchsia
+    "MOCK" -> colors.info
+    "EDIT" -> colors.info
     "FAIL" -> colors.error
     "DELAY" -> colors.warning
     else -> colors.neutral
