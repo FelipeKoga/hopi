@@ -12,9 +12,11 @@ viewer and a CLI.
 > Hopi is experimental, and it is developed entirely with AI (Claude Code). Its APIs can change
 > between versions, and it is for debug builds only.
 
-![The desktop viewer connected to an Android app: the request list with mocked requests tagged MOCK, the detail of a mocked GET, and the Rules panel with one mock rule and its hits](docs/images/viewer.png)
+![The desktop viewer: the request list as tonal cards, the selected GET and its detail with the Overview, Request and Response tabs](docs/images/viewer.png)
 
-![The desktop viewer's Perf panel: the frames, hangs, CPU and memory monitors switched on, with charts of frames per second, CPU and memory and the app's memory trim events](docs/images/perf.png)
+| Rules | Performance |
+| --- | --- |
+| ![The Rules panel: two rules with their switches, Update and Remove](docs/images/rules.png) | ![The Perf panel: the monitors' switches and the frames, CPU and memory charts](docs/images/perf.png) |
 
 ## Features
 
