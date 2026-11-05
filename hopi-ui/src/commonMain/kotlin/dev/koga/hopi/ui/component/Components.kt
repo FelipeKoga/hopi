@@ -1,5 +1,15 @@
 package dev.koga.hopi.ui.component
 
+import dev.koga.hopi.ui.theme.HopiMotion
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -113,18 +123,21 @@ internal fun FilterChip(label: String, count: Int, selected: Boolean, onClick: (
             .padding(horizontal = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
+        val fill by animateColorAsState(if (selected) colors.primary else colors.containerHigh, HopiMotion.fastEffects(), label = "chip")
+        val ink by animateColorAsState(if (selected) colors.onPrimary else colors.text, HopiMotion.fastEffects(), label = "chipInk")
         Row(
             modifier = Modifier
+                .pressScale(source)
                 .heightIn(min = 36.dp)
-                .clip(HopiRadius.full)
+                .clip(morphingPill(source, 36.dp, pressedRadius = 10.dp))
                 // M3 Expressive: a tonal pill, filled with primary once selected.
-                .background(if (selected) colors.primary else colors.containerHigh)
+                .background(fill)
                 .indication(source, LocalIndication.current)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            BasicText(label, style = HopiType.label.copy(color = if (selected) colors.onPrimary else colors.text))
+            BasicText(label, style = HopiType.label.copy(color = ink))
             BasicText(
                 count.toString(),
                 style = HopiType.meta.copy(color = if (selected) colors.onPrimary.copy(alpha = 0.7f) else countColor),
@@ -158,8 +171,9 @@ internal fun ActionButton(
     ) {
         Row(
             modifier = Modifier
+                .pressScale(source)
                 .heightIn(min = 40.dp)
-                .clip(HopiRadius.full)
+                .clip(morphingPill(source, 40.dp))
                 // M3's tonal button: secondaryContainer, or the tone's container.
                 .background(tone?.bg ?: colors.secondaryContainer)
                 .then(if (tone != null) Modifier.border(1.dp, tone.border, HopiRadius.full) else Modifier)
@@ -209,4 +223,23 @@ internal fun Tag(text: String, tone: HopiTone, modifier: Modifier = Modifier) {
         maxLines = 1,
         softWrap = false,
     )
+}
+
+/**
+ * M3 Expressive's press: the control shrinks to [pressedScale] on a fast spatial spring while
+ * [source] is pressed, and springs back. A graphics layer, so it recomposes nothing.
+ */
+@Composable
+internal fun Modifier.pressScale(source: InteractionSource, pressedScale: Float = 0.96f): Modifier {
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) pressedScale else 1f, HopiMotion.fastSpatial(), label = "press")
+    return graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
+/** A pill whose corners squeeze to [pressedRadius] while [source] is pressed: M3 Expressive's shape morph. */
+@Composable
+internal fun morphingPill(source: InteractionSource, height: Dp, pressedRadius: Dp = 12.dp): Shape {
+    val pressed by source.collectIsPressedAsState()
+    val radius by animateDpAsState(if (pressed) pressedRadius else height / 2, HopiMotion.fastSpatial(), label = "morph")
+    return RoundedCornerShape(radius)
 }

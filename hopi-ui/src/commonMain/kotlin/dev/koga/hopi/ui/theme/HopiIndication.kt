@@ -1,5 +1,6 @@
 package dev.koga.hopi.ui.theme
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.HoverInteraction
@@ -11,6 +12,7 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.invalidateDraw
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -28,6 +30,10 @@ internal class HopiIndication(private val color: Color) : IndicationNodeFactory 
 }
 
 private class OverlayNode(private val source: InteractionSource, private val color: Color) : Modifier.Node(), DrawModifierNode {
+    // The overlay's level (0 none, 1 hover or focus, 2 pressed), eased by M3's effects spring:
+    // read in draw, so a change redraws without recomposing.
+    private val level = Animatable(0f)
+    private var easing: Job? = null
     private var hovers = 0
     private var presses = 0
     private var focuses = 0
@@ -46,7 +52,13 @@ private class OverlayNode(private val source: InteractionSource, private val col
                     is FocusInteraction.Unfocus -> focuses = (focuses - 1).coerceAtLeast(0)
                     else -> return@collect
                 }
-                invalidateDraw()
+                val target = when {
+                    presses > 0 -> 2f
+                    hovers > 0 || focuses > 0 -> 1f
+                    else -> 0f
+                }
+                easing?.cancel()
+                easing = launch { level.animateTo(target, HopiMotion.fastEffects()) }
             }
         }
     }
@@ -57,15 +69,13 @@ private class OverlayNode(private val source: InteractionSource, private val col
         hovers = 0
         presses = 0
         focuses = 0
+        easing = null
     }
 
     override fun ContentDrawScope.draw() {
         drawContent()
-        val alpha = when {
-            presses > 0 -> color.alpha * 2f
-            hovers > 0 || focuses > 0 -> color.alpha
-            else -> return
-        }
+        val alpha = color.alpha * level.value
+        if (alpha <= 0f) return
         drawRect(color.copy(alpha = alpha.coerceAtMost(1f)))
     }
 }

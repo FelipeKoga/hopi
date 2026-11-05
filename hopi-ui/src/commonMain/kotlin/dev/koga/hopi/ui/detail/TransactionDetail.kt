@@ -1,5 +1,18 @@
 package dev.koga.hopi.ui.detail
 
+import dev.koga.hopi.ui.component.pressScale
+import dev.koga.hopi.ui.theme.HopiMotion
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
@@ -134,16 +147,29 @@ internal fun TransactionDetailPane(
                 }
                 Tabs(tab, onTab, colors)
                 Spacer(Modifier.height(4.dp))
-                // A fresh scroll position per tab and per transaction.
-                val listState = remember(tab, model.transaction.id) { LazyListState() }
-                SelectionContainer(Modifier.fillMaxSize()) {
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                        when (tab) {
-                            DetailTab.Overview -> overview(model, colors)
-                            DetailTab.Request -> exchange(model.request, colors)
-                            DetailTab.Response -> exchange(model.response, colors)
+                // The tab's content slides toward the tab picked, and fades, on M3 Expressive springs.
+                AnimatedContent(
+                    targetState = tab,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        val forward = targetState.ordinal > initialState.ordinal
+                        val shift = { width: Int -> (if (forward) width else -width) / 8 }
+                        (slideInHorizontally(HopiMotion.defaultSpatial(), shift) + fadeIn(HopiMotion.defaultEffects()))
+                            .togetherWith(slideOutHorizontally(HopiMotion.defaultSpatial()) { -shift(it) } + fadeOut(HopiMotion.fastEffects()))
+                    },
+                    label = "tab",
+                ) { shown ->
+                    // A fresh scroll position per tab and per transaction.
+                    val listState = remember(shown, model.transaction.id) { LazyListState() }
+                    SelectionContainer(Modifier.fillMaxSize()) {
+                        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                            when (shown) {
+                                DetailTab.Overview -> overview(model, colors)
+                                DetailTab.Request -> exchange(model.request, colors)
+                                DetailTab.Response -> exchange(model.response, colors)
+                            }
+                            item(key = "end", contentType = "end") { Spacer(Modifier.height(24.dp)) }
                         }
-                        item(key = "end", contentType = "end") { Spacer(Modifier.height(24.dp)) }
                     }
                 }
             }
@@ -164,8 +190,12 @@ private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiCo
     ) {
         for ((index, tab) in tabs.withIndex()) {
             val isSelected = tab == selected
+            val source = remember { MutableInteractionSource() }
             val outer = 20.dp
-            val inner = if (isSelected) 20.dp else 6.dp
+            // The selected segment's inner corners round out as it fills: M3 Expressive's shape morph.
+            val inner by animateDpAsState(if (isSelected) 20.dp else 6.dp, HopiMotion.fastSpatial(), label = "segment")
+            val fill by animateColorAsState(if (isSelected) colors.primary else colors.containerHigh, HopiMotion.fastEffects(), label = "segmentFill")
+            val ink by animateColorAsState(if (isSelected) colors.onPrimary else colors.text, HopiMotion.fastEffects(), label = "segmentInk")
             val shape = RoundedCornerShape(
                 topStart = if (index == 0) outer else inner,
                 bottomStart = if (index == 0) outer else inner,
@@ -175,14 +205,15 @@ private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiCo
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .pressScale(source)
                     .heightIn(min = 44.dp)
                     .clip(shape)
-                    .background(if (isSelected) colors.primary else colors.containerHigh)
+                    .background(fill)
                     .semantics { this.selected = isSelected }
-                    .clickable(role = Role.Tab) { onTab(tab) },
+                    .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.Tab) { onTab(tab) },
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(tab.label, modifier = Modifier.padding(vertical = 12.dp), style = HopiType.label.copy(color = if (isSelected) colors.onPrimary else colors.text))
+                BasicText(tab.label, modifier = Modifier.padding(vertical = 12.dp), style = HopiType.label.copy(color = ink))
             }
         }
     }

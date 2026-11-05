@@ -1,5 +1,11 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.ui.desktop.HopiDesktopMotion
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.draw.clip
 import dev.koga.hopi.ui.desktop.PaneShape
 import androidx.compose.foundation.background
@@ -150,7 +156,12 @@ internal fun ViewerContent(
                         HopiPanes(store, onSelected = viewer::select, onClear = viewer::clear, state = panes, rules = paneRules)
                     }
                 }
-                if (rules.open) {
+                // The side panels slide in from the edge as they grow, and fade: M3 Expressive's springs.
+                AnimatedVisibility(
+                    visible = rules.open,
+                    enter = expandHorizontally(HopiDesktopMotion.defaultSpatial(), expandFrom = Alignment.Start) + fadeIn(HopiDesktopMotion.defaultEffects()),
+                    exit = shrinkHorizontally(HopiDesktopMotion.defaultSpatial(), shrinkTowards = Alignment.Start) + fadeOut(HopiDesktopMotion.fastEffects()),
+                ) {
                     RulesPanel(
                         current,
                         rules,
@@ -158,7 +169,11 @@ internal fun ViewerContent(
                         modifier = Modifier.width(RULES_PANEL_WIDTH).fillMaxHeight().clip(PaneShape).background(colors.pane).onFocusChanged { rulesFocused = it.hasFocus },
                     )
                 }
-                if (perf.open) {
+                AnimatedVisibility(
+                    visible = perf.open,
+                    enter = expandHorizontally(HopiDesktopMotion.defaultSpatial(), expandFrom = Alignment.Start) + fadeIn(HopiDesktopMotion.defaultEffects()),
+                    exit = shrinkHorizontally(HopiDesktopMotion.defaultSpatial(), shrinkTowards = Alignment.Start) + fadeOut(HopiDesktopMotion.fastEffects()),
+                ) {
                     PerfPanel(current, perf, modifier = Modifier.width(PERF_PANEL_WIDTH).fillMaxHeight().clip(PaneShape).background(colors.pane))
                 }
             }

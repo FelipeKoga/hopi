@@ -1,5 +1,9 @@
 package dev.koga.hopi.ui.list
 
+import dev.koga.hopi.ui.component.pressScale
+import dev.koga.hopi.ui.theme.HopiMotion
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -134,7 +138,18 @@ internal fun TransactionListPane(
                 StayOnNewest(listState, newest = model.rows[0].id)
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(model.rows, key = { it.id }, contentType = { "row" }) { row ->
-                        TransactionRowItem(row, colors, onOpen, selected = row.id == selectedId)
+                        // New requests fade and slide in, and the list makes room on a spring.
+                        TransactionRowItem(
+                            row,
+                            colors,
+                            onOpen,
+                            selected = row.id == selectedId,
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = HopiMotion.defaultEffects(),
+                                placementSpec = HopiMotion.defaultSpatial(),
+                                fadeOutSpec = HopiMotion.fastEffects(),
+                            ),
+                        )
                     }
                 }
             }
@@ -209,17 +224,20 @@ private fun SearchField(state: TextFieldState, focus: FocusRequester?) {
 }
 
 @Composable
-private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: (Long) -> Unit, selected: Boolean) {
+private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: (Long) -> Unit, selected: Boolean, modifier: Modifier = Modifier) {
+    val source = remember { MutableInteractionSource() }
+    val fill by animateColorAsState(if (selected) colors.secondaryContainer else colors.containerHigh, HopiMotion.defaultEffects(), label = "row")
     // M3 Expressive's list: each request a tonal card with large corners and a small gap, the
     // selected one in secondaryContainer.
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
+            .pressScale(source, pressedScale = 0.985f)
             .clip(HopiRadius.lg)
-            .background(if (selected) colors.secondaryContainer else colors.containerHigh)
+            .background(fill)
             .then(if (selected) Modifier.semantics { this.selected = true } else Modifier)
-            .clickable(onClickLabel = "Open details") { onOpen(row.id) }
+            .clickable(interactionSource = source, indication = LocalIndication.current, onClickLabel = "Open details") { onOpen(row.id) }
             .heightIn(min = 60.dp),
     ) {
         Row(

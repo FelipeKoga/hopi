@@ -1,5 +1,13 @@
 package dev.koga.hopi.ui.desktop
 
+import dev.koga.hopi.ui.component.morphingPill
+import dev.koga.hopi.ui.component.pressScale
+import dev.koga.hopi.ui.theme.HopiMotion
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.foundation.Indication
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -107,3 +115,22 @@ public fun hopiHoverIndication(color: Color): Indication = HopiIndication(color)
 /** shadcn's focus ring: 3 dp of [color] at 30% just outside the bounds; nothing when null. Apply before any clip. */
 @HopiInternalApi
 public fun Modifier.hopiFocusRing(color: Color?): Modifier = focusRing(color)
+
+/** M3 Expressive's motion springs, for a host viewer's own chrome (see HopiMotion). */
+@HopiInternalApi
+public object HopiDesktopMotion {
+    public fun <T> fastSpatial(): FiniteAnimationSpec<T> = HopiMotion.fastSpatial()
+    public fun <T> defaultSpatial(): FiniteAnimationSpec<T> = HopiMotion.defaultSpatial()
+    public fun <T> fastEffects(): FiniteAnimationSpec<T> = HopiMotion.fastEffects()
+    public fun <T> defaultEffects(): FiniteAnimationSpec<T> = HopiMotion.defaultEffects()
+}
+
+/** M3 Expressive's press: shrink to [pressedScale] while [source] is pressed. */
+@HopiInternalApi
+@Composable
+public fun Modifier.hopiPressScale(source: InteractionSource, pressedScale: Float = 0.96f): Modifier = pressScale(source, pressedScale)
+
+/** A pill of [height] whose corners squeeze to [pressedRadius] while [source] is pressed. */
+@HopiInternalApi
+@Composable
+public fun hopiMorphingPill(source: InteractionSource, height: Dp, pressedRadius: Dp = 12.dp): Shape = morphingPill(source, height, pressedRadius)

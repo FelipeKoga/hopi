@@ -1,7 +1,10 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.ui.desktop.hopiMorphingPill
+import dev.koga.hopi.ui.desktop.hopiPressScale
+import dev.koga.hopi.ui.desktop.HopiDesktopMotion
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.background
@@ -61,14 +64,18 @@ internal fun ChromeButton(text: String, onClick: () -> Unit, modifier: Modifier 
         ButtonVariant.Destructive -> Triple(colors.error.bg, colors.error.fg, colors.error.bg)
     }
     val filled = variant == ButtonVariant.Primary
+    val source = remember { MutableInteractionSource() }
+    val shape = hopiMorphingPill(source, 40.dp)
+    val animatedFill by animateColorAsState(fill, HopiDesktopMotion.fastEffects(), label = "buttonFill")
     Box(
         modifier
             .alpha(if (enabled) 1f else 0.5f)
-            .clip(Pill)
-            .background(fill)
-            .border(1.dp, edge, Pill)
+            .hopiPressScale(source)
+            .clip(shape)
+            .background(animatedFill)
+            .border(1.dp, edge, shape)
             .clickable(
-                interactionSource = null,
+                interactionSource = source,
                 // The theme's overlay does not show on a dark or red fill: the label's color at 12%.
                 indication = if (filled) hopiHoverIndication(label.copy(alpha = 0.12f)) else LocalIndication.current,
                 enabled = enabled,
@@ -90,12 +97,15 @@ internal fun ChromeButton(text: String, onClick: () -> Unit, modifier: Modifier 
 @Composable
 internal fun ChromeChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, detail: String? = null) {
     val colors = hopiDesktopColors
+    val source = remember { MutableInteractionSource() }
+    val fill by animateColorAsState(if (selected) colors.secondaryContainer else colors.containerHigh, HopiDesktopMotion.fastEffects(), label = "chip")
     Box(
         modifier
-            .clip(Pill)
+            .hopiPressScale(source)
+            .clip(hopiMorphingPill(source, 34.dp, pressedRadius = 10.dp))
             // M3 Expressive: a tonal pill, secondaryContainer once selected.
-            .background(if (selected) colors.secondaryContainer else colors.containerHigh)
-            .clickable(role = Role.RadioButton, onClick = onClick)
+            .background(fill)
+            .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
     ) {
         // The same text as "$text · $detail", the state in its hue.
@@ -148,8 +158,8 @@ internal fun ChromeTextField(state: TextFieldState, placeholder: String, modifie
 internal fun ChromeSwitch(checked: Boolean, description: String, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val colors = hopiDesktopColors
     val track = RoundedCornerShape(50)
-    val knob by animateDpAsState(if (checked) 24.dp else 16.dp, spring(dampingRatio = 0.6f, stiffness = 500f))
-    val offset by animateDpAsState(if (checked) 24.dp else 8.dp, spring(dampingRatio = 0.6f, stiffness = 500f))
+    val knob by animateDpAsState(if (checked) 24.dp else 16.dp, HopiDesktopMotion.fastSpatial())
+    val offset by animateDpAsState(if (checked) 24.dp else 8.dp, HopiDesktopMotion.fastSpatial())
     Box(
         modifier
             .semantics { contentDescription = description }
