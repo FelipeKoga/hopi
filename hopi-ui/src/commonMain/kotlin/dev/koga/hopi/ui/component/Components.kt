@@ -158,9 +158,9 @@ internal fun ActionButton(
         Row(
             modifier = Modifier
                 .heightIn(min = 36.dp)
-                .clip(HopiRadius.md)
+                .clip(HopiRadius.full)
                 .background(tone?.bg ?: colors.muted)
-                .then(if (tone != null) Modifier.border(1.dp, tone.border, HopiRadius.md) else Modifier)
+                .then(if (tone != null) Modifier.border(1.dp, tone.border, HopiRadius.full) else Modifier)
                 .indication(source, LocalIndication.current)
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,

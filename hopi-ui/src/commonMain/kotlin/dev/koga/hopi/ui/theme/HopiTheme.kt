@@ -28,9 +28,9 @@ import dev.koga.hopi.ui.platform.hopiSans
 public class HopiTone internal constructor(public val fg: Color, public val bg: Color, public val border: Color)
 
 /**
- * A shadcn/ui palette (shadcn/ui zinc), with hue for status and only for status: the owner's decision
- * of 2026-10-28, which ended the all-grey palette. Every status still reads without hue, through
- * shape, weight and its text.
+ * A Material 3 Expressive tonal scheme after "Greenwave" (the owner's decision of 2026-11-05), with
+ * hue for status in tonal containers. Every status still reads without hue, through shape, weight
+ * and its text.
  */
 @Immutable
 internal class HopiColors(
@@ -65,45 +65,50 @@ internal class HopiColors(
     val fuchsia: HopiTone,
 )
 
+// Material 3 Expressive, after "Greenwave" (https://m3e.c5inco.dev/#greenwave): a tonal scheme from
+// the seed #81DFA2. Dark values sampled from its screenshots (surface #0F1511, containers #171D19 /
+// #1B211D / #262B27 / #303632, primary #7FD9A3 on #003920); the rest, and the light scheme, are the
+// same seed's M3 tonal roles. Status tones are tonal containers of the scheme's own hues: a fill,
+// its on-container text, and an outline one step up.
 internal val LightColors = HopiColors(
-    background = Color(0xFFFFFFFF), surface = Color(0xFFF4F4F5), muted = Color(0xFFF4F4F5),
-    border = Color(0xFFE4E4E7), ring = Color(0xFF71717A),
-    text = Color(0xFF09090B), textMuted = Color(0xFF52525B), textFaint = Color(0xFF67676F),
-    primary = Color(0xFF18181B), onPrimary = Color(0xFFFAFAFA),
-    destructive = Color(0xFFDC2626), onDestructive = Color(0xFFFFFFFF),
-    hover = Color(0x0A09090B), scrim = Color(0x14000000),
-    success = HopiTone(Color(0xFF047857), Color(0xFFECFDF5), Color(0xFFA7F3D0)),
-    warning = HopiTone(Color(0xFFB45309), Color(0xFFFFFBEB), Color(0xFFFDE68A)),
-    error = HopiTone(Color(0xFFB91C1C), Color(0xFFFEF2F2), Color(0xFFFECACA)),
-    info = HopiTone(Color(0xFF1D4ED8), Color(0xFFEFF6FF), Color(0xFFBFDBFE)),
-    neutral = HopiTone(Color(0xFF52525B), Color(0xFFF4F4F5), Color(0xFFE4E4E7)),
-    violet = HopiTone(Color(0xFF6D28D9), Color(0xFFF5F3FF), Color(0xFFDDD6FE)),
-    fuchsia = HopiTone(Color(0xFFA21CAF), Color(0xFFFDF4FF), Color(0xFFF5D0FE)),
+    background = Color(0xFFF5FBF5), surface = Color(0xFFE9EFEA), muted = Color(0xFFDEE4DE),
+    border = Color(0xFFBFC9C1), ring = Color(0xFF2C6A47),
+    text = Color(0xFF171D19), textMuted = Color(0xFF404943), textFaint = Color(0xFF59625C),
+    primary = Color(0xFF2C6A47), onPrimary = Color(0xFFFFFFFF),
+    destructive = Color(0xFFBA1A1A), onDestructive = Color(0xFFFFFFFF),
+    hover = Color(0x0F171D19), scrim = Color(0x1F000000),
+    success = HopiTone(Color(0xFF1F6B40), Color(0xFFD3F5DE), Color(0xFFA8E3BC)),
+    warning = HopiTone(Color(0xFF725300), Color(0xFFFFEFC7), Color(0xFFF0D48A)),
+    error = HopiTone(Color(0xFFBA1A1A), Color(0xFFFFDAD6), Color(0xFFF5B4AC)),
+    info = HopiTone(Color(0xFF2D6475), Color(0xFFD6EEF6), Color(0xFFA9D3E1)),
+    neutral = HopiTone(Color(0xFF404943), Color(0xFFE3EAE4), Color(0xFFC9D2CB)),
+    violet = HopiTone(Color(0xFF5B4F9A), Color(0xFFE8E2FF), Color(0xFFCEC4F5)),
+    fuchsia = HopiTone(Color(0xFF7F3F78), Color(0xFFFADAF2), Color(0xFFEAB6DF)),
 )
 
 internal val DarkColors = HopiColors(
-    background = Color(0xFF09090B), surface = Color(0xFF18181B), muted = Color(0xFF27272A),
-    border = Color(0xFF27272A), ring = Color(0xFF71717A),
-    text = Color(0xFFFAFAFA), textMuted = Color(0xFFA1A1AA), textFaint = Color(0xFF8E8E97),
-    primary = Color(0xFFFAFAFA), onPrimary = Color(0xFF18181B),
-    destructive = Color(0xFFDC2626), onDestructive = Color(0xFFFFFFFF),
-    hover = Color(0x0FFAFAFA), scrim = Color(0x1FFFFFFF),
-    success = HopiTone(Color(0xFF34D399), Color(0xFF0A1E19), Color(0xFF0B3E2E)),
-    warning = HopiTone(Color(0xFFFBBF24), Color(0xFF251B0B), Color(0xFF50360B)),
-    error = HopiTone(Color(0xFFF87171), Color(0xFF251012), Color(0xFF4E1B1C)),
-    info = HopiTone(Color(0xFF60A5FA), Color(0xFF0F1827), Color(0xFF182D52)),
-    neutral = HopiTone(Color(0xFFA1A1AA), Color(0xFF27272A), Color(0xFF3F3F46)),
-    violet = HopiTone(Color(0xFFA78BFA), Color(0xFF191327), Color(0xFF302252)),
-    fuchsia = HopiTone(Color(0xFFE879F9), Color(0xFF221026), Color(0xFF471B4F)),
+    background = Color(0xFF0F1511), surface = Color(0xFF1B211D), muted = Color(0xFF303632),
+    border = Color(0xFF3F4943), ring = Color(0xFF7FD9A3),
+    text = Color(0xFFDEE4DE), textMuted = Color(0xFFBFC9C1), textFaint = Color(0xFF8F9A92),
+    primary = Color(0xFF81DFA2), onPrimary = Color(0xFF003920),
+    destructive = Color(0xFFFFB4AB), onDestructive = Color(0xFF690005),
+    hover = Color(0x14DEE4DE), scrim = Color(0x33000000),
+    success = HopiTone(Color(0xFF9CEDB8), Color(0xFF15351F), Color(0xFF285A3B)),
+    warning = HopiTone(Color(0xFFF2CB78), Color(0xFF382B0E), Color(0xFF5A471F)),
+    error = HopiTone(Color(0xFFFFB4AB), Color(0xFF3D1714), Color(0xFF65302A)),
+    info = HopiTone(Color(0xFFA6D1E0), Color(0xFF16313A), Color(0xFF2A5060)),
+    neutral = HopiTone(Color(0xFFBFC9C1), Color(0xFF262B27), Color(0xFF3F4943)),
+    violet = HopiTone(Color(0xFFCCC1F5), Color(0xFF2A2640), Color(0xFF453F62)),
+    fuchsia = HopiTone(Color(0xFFEBB8E2), Color(0xFF38233A), Color(0xFF583A55)),
 )
 
 internal val LocalHopiColors = staticCompositionLocalOf { LightColors }
 
 /** shadcn's radii: sm badges, md controls and fields, lg the toast, full pills. */
 internal object HopiRadius {
-    val sm = RoundedCornerShape(6.dp)
-    val md = RoundedCornerShape(8.dp)
-    val lg = RoundedCornerShape(12.dp)
+    val sm = RoundedCornerShape(8.dp)
+    val md = RoundedCornerShape(12.dp)
+    val lg = RoundedCornerShape(20.dp)
     val full = RoundedCornerShape(percent = 50)
 }
 

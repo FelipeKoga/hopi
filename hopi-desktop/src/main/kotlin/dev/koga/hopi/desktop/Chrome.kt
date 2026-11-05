@@ -38,7 +38,7 @@ import dev.koga.hopi.ui.desktop.hopiDesktopColors
 import dev.koga.hopi.ui.desktop.hopiFocusRing
 import dev.koga.hopi.ui.desktop.hopiHoverIndication
 
-private val Shape = RoundedCornerShape(8.dp)
+private val Shape = RoundedCornerShape(12.dp)
 private val Pill = RoundedCornerShape(50)
 
 /** shadcn's button variants. */
@@ -59,9 +59,9 @@ internal fun ChromeButton(text: String, onClick: () -> Unit, modifier: Modifier 
     Box(
         modifier
             .alpha(if (enabled) 1f else 0.5f)
-            .clip(Shape)
+            .clip(Pill)
             .background(fill)
-            .border(1.dp, edge, Shape)
+            .border(1.dp, edge, Pill)
             .clickable(
                 interactionSource = null,
                 // The theme's overlay does not show on a dark or red fill: the label's color at 12%.
