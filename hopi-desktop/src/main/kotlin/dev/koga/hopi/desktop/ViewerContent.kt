@@ -91,8 +91,9 @@ internal fun ViewerContent(
     rules: RulesPanelState = remember { RulesPanelState() },
     chooseBodyFile: () -> BodyFile? = { null },
     perf: PerfPanelState = remember { PerfPanelState() },
+    theme: ThemeSettings = remember { ThemeSettings() },
 ) {
-    HopiDesktopTheme {
+    HopiDesktopTheme(theme.choice) {
         val colors = hopiDesktopColors
         val status by viewer.status.collectAsState()
         val session by viewer.session.collectAsState()
@@ -135,7 +136,7 @@ internal fun ViewerContent(
                     true
                 },
         ) {
-            TargetBar(viewer, status, onAppFieldFocus = { appFieldFocused = it })
+            TargetBar(viewer, status, theme, onAppFieldFocus = { appFieldFocused = it })
             // The panes float on the background, 8 dp apart and from the window's edges.
             Row(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val current = session
@@ -187,7 +188,7 @@ internal fun ViewerContent(
 }
 
 @Composable
-private fun TargetBar(viewer: Viewer, status: ViewerStatus, onAppFieldFocus: (Boolean) -> Unit) {
+private fun TargetBar(viewer: Viewer, status: ViewerStatus, theme: ThemeSettings, onAppFieldFocus: (Boolean) -> Unit) {
     val colors = hopiDesktopColors
     val discovery by viewer.discovery.collectAsState()
     var selectedId by remember { mutableStateOf<String?>(null) }
@@ -237,6 +238,7 @@ private fun TargetBar(viewer: Viewer, status: ViewerStatus, onAppFieldFocus: (Bo
                 modifier = Modifier.testTag(ViewerTags.CONNECT),
             )
             ChromeButton("Refresh", onClick = viewer::refresh)
+            ThemeButton(theme)
         }
         val bridges = (selected as? AndroidDevice)?.bridges.orEmpty()
         val hint = when {

@@ -1,5 +1,8 @@
 package dev.koga.hopi.ui.desktop
 
+import dev.koga.hopi.ui.theme.LocalHopiThemeChoice
+import dev.koga.hopi.ui.theme.HopiThemeChoice
+import androidx.compose.runtime.CompositionLocalProvider
 import dev.koga.hopi.ui.component.morphingPill
 import dev.koga.hopi.ui.component.pressScale
 import dev.koga.hopi.ui.theme.HopiMotion
@@ -71,10 +74,11 @@ public object HopiDesktopType {
     public val mono: TextStyle get() = HopiType.mono
 }
 
-/** Light or dark following the system setting, as inside the app; [HopiPanes] applies it too. */
+/** [choice]'s accent and mode (Greenwave following the system by default); [HopiPanes] inside it keeps the choice. */
 @HopiInternalApi
 @Composable
-public fun HopiDesktopTheme(content: @Composable () -> Unit): Unit = HopiTheme(content)
+public fun HopiDesktopTheme(choice: HopiThemeChoice = HopiThemeChoice(), content: @Composable () -> Unit): Unit =
+    CompositionLocalProvider(LocalHopiThemeChoice provides choice) { HopiTheme(content) }
 
 /** The palette of the enclosing [HopiDesktopTheme]. */
 @HopiInternalApi

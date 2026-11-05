@@ -139,7 +139,13 @@ internal object HopiType {
 /** Light or dark following the system setting. */
 @Composable
 internal fun HopiTheme(content: @Composable () -> Unit) {
-    val colors = if (isSystemInDarkTheme()) DarkColors else LightColors
+    val choice = LocalHopiThemeChoice.current
+    val dark = when (choice.mode) {
+        HopiThemeMode.System -> isSystemInDarkTheme()
+        HopiThemeMode.Light -> false
+        HopiThemeMode.Dark -> true
+    }
+    val colors = remember(choice.accent, dark) { schemeOf(choice.accent, dark) }
     val indication = remember(colors) { HopiIndication(colors.hover) }
     CompositionLocalProvider(
         LocalHopiColors provides colors,

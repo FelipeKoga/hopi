@@ -72,7 +72,8 @@ public fun main() {
                     Item("Refresh devices", onClick = viewer::refresh)
                 }
             }
-            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody, perf = perf)
+            val theme = remember { ThemeSettings.stored() }
+            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody, perf = perf, theme = theme)
         }
     }
 }
