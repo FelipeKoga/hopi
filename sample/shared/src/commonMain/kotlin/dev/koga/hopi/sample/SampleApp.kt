@@ -44,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.koga.hopi.ui.HopiLauncher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -53,45 +52,46 @@ public class PlatformAction(public val label: String, public val run: suspend ()
 
 /**
  * Which Hopi this process runs: the Diagnostics caption says it, and the evidence lines carry it
- * (`"build":"real"`, `"real":true`). On iOS the `hopi.enabled` property selects the framework's
- * modules, so the generated [HOPI_ENABLED] says which. On Android the dev.koga.hopi plugin selects
- * them per variant whatever the property says (real in debug, noop in release and with
- * `-Psample.hopiCapture=false`), so the activity reports what runs instead.
+ * (`"build":"real"` or `"nohopi"`, `"real":true` or `false`). On iOS the io.github.felipekoga.hopi plugin's
+ * choice for the build (a Debug build, `-Phopi.enabled=false` excepted) decides whether the
+ * framework links the runtimes, so the generated [HOPI_ENABLED] says which. On
+ * Android the io.github.felipekoga.hopi plugin decides per variant whatever the property says (the runtimes in
+ * debug, none in release and with `-Psample.hopiCapture=false`), so the activity reports what runs
+ * instead.
  */
 public object SampleBuild {
     /**
-     * `HopiAndroid.isStarted`, set by the Android activity before the UI: in this app capture runs
-     * exactly when the plugin gave the variant the real modules. Null on iOS.
+     * The network status of `hopi-api`'s runtime registry (`networkStarted`), set by the Android
+     * activity before the UI: in this app capture runs exactly when the plugin gave the variant
+     * Hopi's runtimes, in debug. Null on iOS.
      */
     public var androidCaptureStarted: Boolean? = null
 
-    /** True for the real modules, false for the noop twins. */
+    /** True when Hopi's runtimes run (Android: capture started; iOS: a Debug build with Hopi). */
     internal val realHopi: Boolean get() = androidCaptureStarted ?: HOPI_ENABLED
 
     /** The Diagnostics caption: which Hopi runs and what selected it. */
     internal val caption: String
         get() = when (androidCaptureStarted) {
-            true -> "Hopi: real modules (debug build: the dev.koga.hopi plugin selects them)"
-            false -> "Hopi: noop twins (release build, or -Psample.hopiCapture=false)"
-            null -> if (HOPI_ENABLED) "Hopi: real modules (built with -Phopi.enabled=true)" else "Hopi: noop twins (built without -Phopi.enabled=true)"
+            true -> "Hopi: runtimes (debug build: the io.github.felipekoga.hopi plugin adds them)"
+            false -> "Hopi: no runtime (release build, or -Psample.hopiCapture=false)"
+            null -> if (HOPI_ENABLED) "Hopi: runtimes (Debug build: the io.github.felipekoga.hopi plugin adds them)" else "Hopi: no runtime (Release build, or -Phopi.enabled=false)"
         }
 }
 
 /**
- * The sample app both platforms host, wrapped in [HopiLauncher]: a small shop (item list,
- * item detail, a form that POSTs a new item) against the dev server, and a diagnostics tab that
- * fires one request of each kind the inspector must handle and opens the perf lab. [platformActions]
- * add buttons to the diagnostics tab; [launchAction] runs once at launch and opens that tab with its
- * result. [perfVerify] (`all` or a comma list of the lab's steps) opens the perf lab at launch and
- * runs those injections once ([PerfLabRun]).
+ * The sample app both platforms host: a small shop (item list, item detail, a form that POSTs a
+ * new item) against the dev server, and a diagnostics tab that fires one request of each kind the
+ * inspector must handle and opens the perf lab. [platformActions] add buttons to the diagnostics
+ * tab; [launchAction] runs once at launch and opens that tab with its result. [perfVerify] (`all`
+ * or a comma list of the lab's steps) opens the perf lab at launch and runs those injections once
+ * ([PerfLabRun]).
  */
 @Composable
 public fun SampleApp(platformActions: List<PlatformAction> = emptyList(), launchAction: PlatformAction? = null, perfVerify: String? = null) {
     SampleTheme {
-        HopiLauncher {
-            Box(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()) {
-                SampleContent(platformActions, launchAction, perfVerify?.let(::parsePerfLabSteps))
-            }
+        Box(Modifier.fillMaxSize().background(colors.background).safeDrawingPadding()) {
+            SampleContent(platformActions, launchAction, perfVerify?.let(::parsePerfLabSteps))
         }
     }
 }
@@ -361,7 +361,8 @@ private fun DiagnosticsScreen(platformActions: List<PlatformAction>, results: Mu
             })
             SampleButton("Create 500 items", primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
                 results.clear()
-                scope.launch { results.add(createItems(SampleHttp.api, count = 500)) }
+                // Logged too: DeviceViewerUiTest reads it, and the screen shows it below the fold.
+                scope.launch { results.add(createItems(SampleHttp.api, count = 500).also(::sampleLog)) }
             })
             SampleButton("Giant JSON (1, 5, 20 MB)", primary = false, modifier = Modifier.fillMaxWidth(), onClick = {
                 results.clear()

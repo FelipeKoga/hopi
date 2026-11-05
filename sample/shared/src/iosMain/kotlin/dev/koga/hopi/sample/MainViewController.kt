@@ -6,10 +6,11 @@ import platform.Foundation.NSProcessInfo
 import platform.UIKit.UIViewController
 
 /**
- * The shared sample UI for the SwiftUI host (`sample/iosApp`). Two launch arguments serve the
- * giant-body measurements: `-maxBodyBytes N` sets Hopi's capture cap (`-maxTotalBytes N` its
- * store byte cap, which must be at least twice the capture cap), and `-giant <spec>`
- * runs [runGiant] at launch (see [GiantSpec]), e.g.
+ * The shared sample UI for the SwiftUI host (`sample/iosApp`). The giant-body measurements set
+ * Hopi's capture cap at build time (`-Psample.maxBodyBytes=N`, and `-Psample.maxTotalBytes=N` its
+ * store byte cap, which must be at least twice the capture cap; the launch arguments
+ * `-maxBodyBytes N`/`-maxTotalBytes N` set only the Ktor plugin's, which installs nothing on iOS),
+ * and `-giant <spec>` runs [runGiant] at launch (see [GiantSpec]), e.g.
  * `xcrun simctl launch --console-pty booted dev.koga.hopi.sample -giant 'mb=1,5;runs=5'`.
  * `-ktorVerify` runs [ktorVerifyAction] at launch instead (the end-to-end capture check),
  * `-verifyRules` the rules self-test through Ktor Darwin (the URLSession shapes run in Swift,
@@ -24,7 +25,8 @@ public fun MainViewController(): UIViewController {
     fun argument(name: String): String? = arguments.indexOf(name).takeIf { it >= 0 }?.let { arguments.getOrNull(it + 1) }
     argument("-maxBodyBytes")?.toLongOrNull()?.let { SampleHttp.maxBodyBytes = it }
     argument("-maxTotalBytes")?.toLongOrNull()?.let { SampleHttp.maxTotalBytes = it }
-    // Created before the first frame, so the agent bridge is up before the first request.
+    // The client, created before the first frame so the first request does not pay for it. The
+    // agent bridge no longer depends on this: HopiSetup.start (iOSApp.swift) starts it first thing.
     SampleHttp.start()
     // Ktor's Darwin engine is recorded and ruled by URLSession capture, never by the Ktor plugin.
     val targets = listOf(ktorRulesTarget("ktor-darwin", HopiSource.UrlSession))

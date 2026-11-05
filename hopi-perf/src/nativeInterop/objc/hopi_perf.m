@@ -395,7 +395,9 @@ int64_t hopi_perf_footprint(void) {
 }
 
 int64_t hopi_perf_available_memory(void) {
-    return (int64_t)os_proc_available_memory();
+    // iOS 13 and later; below it, no figure (0, as where the OS gives no limit).
+    if (@available(iOS 13.0, *)) return (int64_t)os_proc_available_memory();
+    return 0;
 }
 
 int32_t hopi_perf_threads(hopi_perf_thread_info *out, int32_t max) {

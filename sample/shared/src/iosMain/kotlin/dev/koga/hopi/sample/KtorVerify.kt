@@ -31,7 +31,8 @@ import platform.CoreCrypto.CC_SHA256_DIGEST_LENGTH
  * The Ktor (Darwin engine) half of the end-to-end capture check, run at launch with `-ktorVerify`:
  * one request of each shape, each tagged `X-Hopi-Verify: <name>` so the host can match records to
  * requests, logging one `{"verify":…}` line with the status, the bytes the app read and their
- * SHA-256, so a real and a noop build can be compared byte for byte. Ends with `{"verify":"done"}`.
+ * SHA-256, so a build with Hopi's runtimes and one without can be compared byte for byte. Ends with
+ * `{"verify":"done"}`.
  */
 internal fun ktorVerifyAction(): PlatformAction = PlatformAction("Ktor verify") {
     withContext(Dispatchers.Default) { runKtorVerify(SampleHttp.client) }

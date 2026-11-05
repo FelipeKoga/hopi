@@ -188,6 +188,19 @@ class PerfClientTest {
     }
 
     @Test
+    fun framesAreUnattachedOnlyWithNoAttachOnTheWay() {
+        fun frames(details: String): RemotePerfMonitor {
+            val line = """{"type":"perf.status","platform":"android","available":["frames"],"remoteControl":true,"running":{"frames":{"since":1,"owners":["lease"]$details}}}"""
+            return assertNotNull(assertNotNull(RemotePerfStatus.decode(Json.parseToJsonElement(line).jsonObject)).monitor("frames"))
+        }
+        assertTrue(frames(""","attached":false""").unattached, "an older app sends no attaching")
+        assertTrue(frames(""","attached":false,"attaching":false""").unattached)
+        assertFalse(frames(""","attached":false,"attaching":true""").unattached, "the attach is one main-thread message away")
+        assertFalse(frames(""","attached":true,"attaching":false""").unattached)
+        assertFalse(frames("").unattached, "iOS sends no attached")
+    }
+
+    @Test
     fun remotePerfStreamsOnlyWhileWatchedAndHoldsItsMonitors() {
         val app = fake()
         app.sample(1_700_000_000_000, cpu = 10.0, residentMb = 100)

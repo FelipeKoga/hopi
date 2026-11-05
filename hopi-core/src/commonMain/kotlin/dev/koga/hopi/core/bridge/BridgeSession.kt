@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.bridge
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.concurrent.WakeSignal
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.json.TransactionJson
@@ -835,8 +835,10 @@ public class BridgeSession(
         public const val PROTOCOL_VERSION: Int = 1
 
         private val nextPerfSession = AtomicLong(0)
-        private const val NO_PERF = "perf monitors are absent from this app (no hopi-perf, or HopiPerf not installed)"
-        private const val NO_REMOTE_CONTROL = "perf monitors are not remotely controllable in this app (remoteControl = false)"
+        private const val NO_PERF = "perf monitors are absent from this app (no hopi-perf in this build, or perf left out of Hopi's start)"
+        private const val NO_REMOTE_CONTROL =
+            "perf monitors are not remotely controllable in this app: remote control is off in its Hopi configuration " +
+                "(perf remoteControl, or perfRemoteControl on iOS, is false)"
 
         /** Live events a client may lag behind, beyond one store batch, before it is disconnected. */
         public const val DEFAULT_LIVE_LAG: Int = 512

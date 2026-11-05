@@ -4,9 +4,9 @@ import Foundation
 import Shared
 
 /// The end-to-end capture check and its measurements, driven by launch arguments so the host can
-/// run the same code on a real and a noop build and compare them. Plain URLSession, like
-/// `ThirdPartySDK`: nothing here knows about Hopi except the rules self-test, which adds its rules
-/// through `HopiRules.shared`. Every line goes to stdout as
+/// run the same code on a build with Hopi's runtimes and one without and compare them. Plain
+/// URLSession, like `ThirdPartySDK`: nothing here knows about Hopi except the rules self-test, which
+/// adds its rules through `HopiRules.shared`. Every line goes to stdout as
 /// `HopiVerify: {json}` (`xcrun simctl launch --console-pty`).
 ///
 /// - `-verifyCapture`: one request of each URLSession shape, tagged `X-Hopi-Verify: <name>` where the

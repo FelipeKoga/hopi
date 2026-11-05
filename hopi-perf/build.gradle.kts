@@ -6,28 +6,34 @@ plugins {
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
-description = "HopiPerf, the performance monitors (frames, hangs, CPU, memory)."
+description = "The performance monitors (frames, hangs, CPU, memory): the runtime behind hopi-api's HopiPerf."
 apply(from = rootProject.file("gradle/publishing.gradle.kts"))
 
-// HopiPerf: the performance monitors (docs/design/perf-monitors.md): frames, hangs, CPU, memory,
-// each off by default. The model, its JSON and the bridge commands live in hopi-core; this module
-// holds the consumer API and the monitors. Its noop twin, hopi-perf-noop, has the same API and does
-// nothing.
+// The performance monitors (docs/design/perf-monitors.md): frames, hangs, CPU, memory, each off by
+// default. The model, its JSON and the bridge commands live in hopi-core, the consumer API
+// (HopiPerf) in hopi-api; this module holds the monitors and the runtime perf's tool registers
+// behind HopiPerf. No app names it: the Gradle plugin adds it to debuggable build types with
+// `perf { enabled = true }`, and hopi-start brings it to Debug iOS frameworks and to JVM apps.
 kotlin {
     explicitApi()
 
-    // The public API dump that :checkNoopParity compares with hopi-perf-noop's.
+    // The dumps stay empty: this module has no consumer API, and a public declaration outside
+    // dev.koga.hopi.perf.internal shows up there.
     @OptIn(ExperimentalAbiValidation::class)
     abiValidation {
+        enabled.set(true)
         filters {
-            // PerfEntry, which hopi-android's provider loads by name, and the monitors: public in
-            // the binary where the provider needs it, @HopiInternalApi, no consumer API.
-            exclude.byNames.add("dev.koga.hopi.perf.internal.**")
+            excluded {
+                // PerfEntry, the start sequence's perf tool, which the app's generated configuration
+                // names, and the monitors: public in the binary where the app's class needs it,
+                // @HopiInternalApi, no consumer API.
+                byNames.add("dev.koga.hopi.perf.internal.**")
+            }
         }
     }
 
     compilerOptions {
-        optIn.add("dev.koga.hopi.core.HopiInternalApi")
+        optIn.add("dev.koga.hopi.api.HopiInternalApi")
         optIn.add("kotlin.concurrent.atomics.ExperimentalAtomicApi")
         optIn.add("kotlinx.cinterop.ExperimentalForeignApi")
     }
@@ -37,7 +43,12 @@ kotlin {
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
-        // Keeps PerfEntry, which the provider loads reflectively, in a minified debuggable build.
+        // An app needs compileSdk 34, not this module's: AGP would otherwise write compileSdk into
+        // the AAR's minCompileSdk, and an older AGP refuses an AAR that asks for more than it supports.
+        aarMetadata { minCompileSdk = libs.versions.android.minCompileSdk.get().toInt() }
+        // Keeps PerfEntry, the perf tool the generated configuration names, in a minified
+        // debuggable build (kept since the provider loaded it by name; R8 keeps a directly
+        // referenced class anyway).
         optimization {
             consumerKeepRules.publish = true
             consumerKeepRules.file("consumer-rules.pro")
@@ -74,6 +85,9 @@ kotlin {
     }
 }
 
+// KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-perf:updateLegacyAbi`) is not part of `check` by itself.
+tasks.named("check") { dependsOn("checkLegacyAbi") }
+
 /** Compiles and archives the iOS monitors' native library for one target; returns the archive task. */
 fun perfShim(targetName: String): TaskProvider<Exec> {
     val suffix = targetName.replaceFirstChar(Char::uppercase)
@@ -82,8 +96,8 @@ fun perfShim(targetName: String): TaskProvider<Exec> {
     val header = layout.projectDirectory.file("src/nativeInterop/objc/hopi_perf.h")
     val outDir = layout.buildDirectory.dir("perfshim/$targetName")
     val objectFile = outDir.map { it.file("hopi_perf.o") }
-    // Kotlin/Native's minimum iOS, as hopi-core's URLSession library (checkUrlSessionMinIos).
-    val minIos = "15.0"
+    // Kotlin/Native's minimum iOS, as hopi-network's URLSession library (checkUrlSessionMinIos).
+    val minIos = "12.0"
     val compile = tasks.register<Exec>("compilePerfShim$suffix") {
         description = "Compiles the iOS monitors' native library for $targetName."
         inputs.files(source, header).withPathSensitivity(PathSensitivity.RELATIVE)

@@ -1,4 +1,5 @@
 package dev.koga.hopi.core.rules
 
-// URLSession capture, and the Ktor plugin: it rules every engine URLSession capture does not cover.
-internal actual val platformSources: Set<RuleSource> = setOf(RuleSource.KTOR, RuleSource.URL_SESSION)
+// URLSession capture only: the Ktor plugin installs nothing on iOS (its recorder is hopi-network's
+// on Android and the JVM), and URLSession capture records and rules the Darwin engine.
+internal actual val platformSources: Set<RuleSource> = setOf(RuleSource.URL_SESSION)

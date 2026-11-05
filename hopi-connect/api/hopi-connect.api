@@ -9,6 +9,7 @@ public final class dev/koga/hopi/connect/AdbDevice {
 public final class dev/koga/hopi/connect/BridgeClient : java/lang/AutoCloseable {
 	public static final field Companion Ldev/koga/hopi/connect/BridgeClient$Companion;
 	public static final field PROTOCOL J
+	public synthetic fun <init> (Ljava/net/Socket;Ldev/koga/hopi/connect/BridgeEndpoint;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun close ()V
 	public final fun getHello ()Ldev/koga/hopi/connect/Reply;
 	public final fun handshake (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;
@@ -73,16 +74,22 @@ public final class dev/koga/hopi/connect/ExitCode {
 }
 
 public final class dev/koga/hopi/connect/HostEnvironment {
+	public static final field Companion Ldev/koga/hopi/connect/HostEnvironment$Companion;
 	public fun <init> ()V
-	public fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ldev/koga/hopi/connect/StreamStarter;)V
-	public synthetic fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ldev/koga/hopi/connect/StreamStarter;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ldev/koga/hopi/connect/StreamStarter;Ljava/nio/file/Path;)V
+	public synthetic fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ldev/koga/hopi/connect/StreamStarter;Ljava/nio/file/Path;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getEnv ()Ljava/util/Map;
 	public final fun getProcesses ()Ldev/koga/hopi/connect/ProcessRunner;
 	public final fun getShutdownHooks ()Ldev/koga/hopi/connect/ShutdownHooks;
 	public final fun getStreams ()Ldev/koga/hopi/connect/StreamStarter;
+	public final fun getUsbmuxdSocket ()Ljava/nio/file/Path;
 	public final fun getUserHome ()Ljava/lang/String;
 	public final fun isExecutable ()Lkotlin/jvm/functions/Function1;
 	public final fun isMac ()Z
+}
+
+public final class dev/koga/hopi/connect/HostEnvironment$Companion {
+	public final fun getUSBMUXD_SOCKET ()Ljava/nio/file/Path;
 }
 
 public final class dev/koga/hopi/connect/PerfClient {
@@ -507,9 +514,11 @@ public final class dev/koga/hopi/connect/Targets {
 	public final fun androidDevices ()Ljava/util/List;
 	public final fun iosBridgeFile (Ljava/lang/String;Ljava/lang/String;)Ljava/nio/file/Path;
 	public final fun open (Ldev/koga/hopi/connect/Platform;Ljava/lang/String;Ljava/lang/String;Ljava/nio/file/Path;)Ldev/koga/hopi/connect/BridgeEndpoint;
+	public final fun openUsbIphone (Ljava/lang/String;Ljava/lang/String;)Ldev/koga/hopi/connect/BridgeEndpoint;
 	public final fun simulators ()Ljava/util/List;
 	public final fun trackAndroidDevices (Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;)Ljava/lang/AutoCloseable;
 	public final fun trackDebuggableProcesses (Ljava/lang/String;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)Ljava/lang/AutoCloseable;
+	public final fun usbIphones ()Ljava/util/List;
 }
 
 public final class dev/koga/hopi/connect/Targets$Companion {
@@ -517,5 +526,12 @@ public final class dev/koga/hopi/connect/Targets$Companion {
 
 public final class dev/koga/hopi/connect/TargetsKt {
 	public static final fun readBridgeFile (Ljava/nio/file/Path;Ljava/lang/String;)Lkotlin/Pair;
+}
+
+public final class dev/koga/hopi/connect/UsbIphone {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOs ()Ljava/lang/String;
+	public final fun getUdid ()Ljava/lang/String;
 }
 

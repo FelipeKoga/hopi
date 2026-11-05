@@ -163,7 +163,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Debug links the real Hopi modules; any other configuration their noop twins\n# (docs/ARCHITECTURE.md, \"Selecting real vs noop\"). The build setting HOPI_ENABLED=false\n# (`xcodebuild ... HOPI_ENABLED=false`) builds a Debug app with the noop twins, for A/B runs\n# against the same optimisation level.\nset -eu\ncd \"$SRCROOT/../..\"\nif [ \"$CONFIGURATION\" = \"Debug\" ] && [ \"${HOPI_ENABLED:-true}\" != \"false\" ]; then\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode -Phopi.enabled=true\nelse\n  ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode\nfi\n";
+			shellScript = "# Kotlin's standard build phase, nothing of Hopi's: the io.github.felipekoga.hopi plugin reads Xcode's\n# CONFIGURATION, so Debug links Hopi's runtimes and hopi-start (HopiSetup.shared.start()\n# starts Hopi), any other configuration no runtime, only hopi-api and the thin Ktor\n# plugin, and the plugin's iOS release guard fails a Release link that would hold one\n# (docs/ARCHITECTURE.md, \"Selecting the runtimes in a KMP project\"). SAMPLE_GRADLE_ARGS,\n# unset unless the xcodebuild command line sets it, reaches Gradle: the benchmarks'\n# nohopi arm, a Debug app without Hopi at the same optimisation level, is\n# `xcodebuild ... SAMPLE_GRADLE_ARGS=-Phopi.enabled=false`, and the giant-body caps are\n# `SAMPLE_GRADLE_ARGS=\"-Psample.maxBodyBytes=8388608 -Psample.maxTotalBytes=33554432\"`.\nset -eu\ncd \"$SRCROOT/../..\"\n# Word splitting on purpose: one argument per Gradle flag.\n./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode ${SAMPLE_GRADLE_ARGS:-}\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

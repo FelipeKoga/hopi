@@ -47,11 +47,13 @@ public class RulesOutcome(
 /**
  * One way the sample sends a request, named after the Hopi source that records and rules it:
  * [send] makes [RulesCall] and reports what the app read, including the response header
- * [RULES_HEADER].
+ * [RULES_HEADER]. [followsRedirects]: a client above the source follows a mocked 3xx (Ktor's
+ * `HttpRedirect`), which the stacks themselves never do.
  */
 public class RulesTarget(
     public val name: String,
     public val source: HopiSource,
+    public val followsRedirects: Boolean = false,
     public val send: suspend (RulesCall) -> RulesOutcome,
 )
 
@@ -61,12 +63,13 @@ public const val RULES_HEADER: String = "X-Hopi-Edited"
 /**
  * Ktor through the sample's client. On Android its OkHttp engine is recorded (and ruled) by the
  * instrumented OkHttp interceptor, unless the request names its own `Accept-Encoding`: Ktor then
- * decodes the body itself and its plugin keeps the request, so [passThrough] targets the `ktor`
- * source. On iOS the Darwin engine is recorded by URLSession capture, so the source is `urlsession`
- * either way, and no request of an app with URLSession capture is ruled by the Ktor plugin.
+ * decodes the body itself and its plugin's recorder keeps the request, so [passThrough] targets the
+ * `ktor` source. On iOS the plugin installs nothing: the Darwin engine is recorded and ruled by
+ * URLSession capture, so the source is `urlsession` either way. Ktor's `HttpRedirect` follows a
+ * mocked 3xx on every source, so the target follows redirects.
  */
 public fun ktorRulesTarget(name: String, source: HopiSource, passThrough: Boolean = false): RulesTarget =
-    RulesTarget(name, source) { call -> ktorSend(SampleHttp.client, call, passThrough) }
+    RulesTarget(name, source, followsRedirects = true) { call -> ktorSend(SampleHttp.client, call, passThrough) }
 
 private suspend fun ktorSend(client: HttpClient, call: RulesCall, passThrough: Boolean): RulesOutcome = try {
     val response = client.request(call.url) {
@@ -88,13 +91,18 @@ private suspend fun ktorSend(client: HttpClient, call: RulesCall, passThrough: B
 /**
  * The in-process rules self-test (docs/design/rules.md, "Device verification plan"): for each
  * target, every action through [HopiRules] (mock, each fail, a before-request delay, a delayed
- * mock, a request edit of path, header and body, a response edit, `times`), each rule limited to
- * the target's source and to its own `rv` query key, so the rules of one scenario never touch
- * another's requests or a rule the host added. One `{"rules":…}` line per scenario under
- * `HopiSample`, with `ok`, what the app saw, and the time; the dev server's log is the other half
- * of the oracle (a mocked or failed request never reaches it, an edited one arrives edited).
- * The rules it adds are removed again, whatever happens. With the noop twins every rule id is
- * `-1` and nothing applies, so every line says `"ok":false`: the release control.
+ * mock, a request edit of path, header and body, a response edit, `times`, and a mocked 302, which
+ * a target that [RulesTarget.followsRedirects] reads as the real 200 of `/items/1` it redirects to,
+ * judged on that body, and any other as the 302 itself), each rule limited to the target's source
+ * and to its own `rv` query key, so the rules of one scenario never touch another's requests or a
+ * rule the host added. One
+ * `{"rules":…}` line per scenario under `HopiSample`, with `ok`, what the app saw, and the time
+ * (the mocked 302's line notes the status expected); the dev server's log is the other half of
+ * the oracle (a mocked or failed request never reaches it, an edited one arrives edited, a
+ * followed redirect arrives as `GET /items/1`).
+ * The rules it adds are removed again, whatever happens. With no rules runtime registered (a
+ * release build, or one built without the flag) every rule id is `-1` and nothing applies, so
+ * every line says `"ok":false`: the control.
  */
 public suspend fun runRulesVerify(targets: List<RulesTarget>): String {
     var failed = 0
@@ -288,5 +296,28 @@ private val SCENARIOS: List<Scenario> = listOf(
         val first = target.send(get("/json", key))
         val second = target.send(get("/json", key))
         Triple(first.status == 418 && second.status == 200, second, "first ${first.status}, then ${second.status}")
+    },
+    Scenario("mock-302") { target, key, added ->
+        // A mocked redirect is the final response on OkHttp, HttpURLConnection and URLSession (their
+        // follow-up logic is below Hopi); Ktor's HttpRedirect, above every source, follows it to
+        // /items/1, a real request no rule of this scenario matches.
+        added(
+            HopiRules.mock("GET */json?rv=$key") {
+                status = 302
+                header("Location", "/items/1")
+                sources(target.source)
+            },
+        )
+        val expected = if (target.followsRedirects) 200 else 302
+        val outcome = target.send(get("/json", key))
+        // A follower is judged on /items/1's body too: an unruled GET of /json is a 200 as well, so
+        // the status alone would pass with no rule applied (the no-runtime control). Both bodies
+        // carry "id": 1; only the item has a "title", only /json names Ada Lovelace.
+        val ok = if (target.followsRedirects) {
+            outcome.status == 200 && "\"title\"" in outcome.body && "Ada Lovelace" !in outcome.body
+        } else {
+            outcome.status == 302
+        }
+        Triple(ok, outcome, "expected $expected (${if (target.followsRedirects) "the client follows redirects, to /items/1" else "not followed"})")
     },
 )

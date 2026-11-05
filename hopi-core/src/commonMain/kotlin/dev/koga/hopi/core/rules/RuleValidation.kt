@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /** The limits of docs/design/rules.md, "Limits". */
 @HopiInternalApi

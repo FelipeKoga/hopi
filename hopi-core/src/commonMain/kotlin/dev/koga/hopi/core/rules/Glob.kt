@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * A compiled glob (docs/design/rules.md, "Match"). [Mode.HOST] and [Mode.TEXT]: `*` matches any

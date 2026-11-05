@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.perf
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import kotlin.concurrent.atomics.AtomicReference
 
 /** Who holds a running monitor (docs/design/perf-monitors.md, "Owners"). */
@@ -169,11 +169,11 @@ public interface PerfController {
 
     /**
      * Calls [listener] with the monitors running, at once and then each time that set changes (a
-     * start, a stop, a lease's expiry, a tail session's end), so a viewer of their figures (the
-     * HUD) drops a stopped monitor's. It runs on the changing thread under the controller's lock,
-     * before a started monitor writes and after a stopped one was told to stop, so it must only
-     * hand the set off and never call the controller. Returns the function that removes it. A
-     * controller that does not report the set never calls it.
+     * start, a stop, a lease's expiry, a tail session's end), so a viewer of their figures drops a
+     * stopped monitor's. It runs on the changing thread under the controller's lock, before a
+     * started monitor writes and after a stopped one was told to stop, so it must only hand the set
+     * off and never call the controller. Returns the function that removes it. A controller that
+     * does not report the set never calls it.
      */
     public fun addRunningListener(listener: (Set<PerfMonitor>) -> Unit): () -> Unit = {}
 
@@ -188,19 +188,21 @@ public interface PerfController {
     public fun measurePss(): PerfPss
 
     /**
-     * iOS frames tier 2: a viewer (a `perf.tail` with `"fps":true`, the HUD's cadence toggle)
-     * asks for the display-link cadence while frames runs. Counted: each true is matched by one
-     * false, and the display link exists only while the count is above 0. Nothing elsewhere
-     * (Android's FrameMetrics already gives every frame).
+     * iOS frames tier 2: a viewer (a `perf.tail` with `"fps":true`) asks for the display-link
+     * cadence while frames runs. Counted: each true is matched by one false, and the display link
+     * exists only while the count is above 0. Nothing elsewhere (Android's FrameMetrics already
+     * gives every frame).
      */
     public fun watchCadence(watching: Boolean) {}
 }
 
 /**
  * The single point where `hopi-perf` plugs into core: at most one [PerfController], registered by
- * `HopiPerf.install`/`start` or, on Android, by `hopi-android`'s provider when the Gradle plugin put
- * `hopi-perf` in the variant. Holds nothing else, starts nothing: an app without `hopi-perf` only
- * ever loads this object (the bridge's `hello` reads it).
+ * `hopi-perf`'s tool in the start sequence only (on Android when the Gradle plugin put `hopi-perf`
+ * in the variant, on iOS unless `hopi-start`'s `perf` is false). `hopi-api`'s `HopiPerf` reaches the
+ * same controller through the runtime the tool registers in `HopiRuntimes`. Holds nothing else,
+ * starts nothing: an app without `hopi-perf` only ever loads this object (the bridge's `hello`
+ * reads it).
  */
 @HopiInternalApi
 public object PerfHook {

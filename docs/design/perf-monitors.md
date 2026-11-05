@@ -4,10 +4,11 @@ Status: design (2026-10-25, revised the same day after an adversarial review: in
 hangs, printer ownership, stack-capture races, FrameMetrics window pitfalls, false hangs, lease
 owners). Stage 1 of 4 (core and Android) built 2026-10-25; stage 2 (iOS monitors) built
 2026-10-25, tested on the simulator; stage 3 (surfaces: CLI, `hopi-connect`, desktop panel,
-in-app HUD and Perf tab) built 2026-10-25, host-tested; stage 4 (the sample's perf lab and bench,
-device verification on the Android emulator and the iOS simulator, the overhead A/B) done
-2026-10-25: see "As built". The printer's 3 µs gate was not met (stage 4); the printer stays the
-default, for reasons stated there. The roadmap item "Performance monitors". Four monitors,
+in-app HUD and Perf tab, the last two removed with the in-app UI in stage 5 of
+docs/design/api-runtime-split-plan.md) built 2026-10-25, host-tested; stage 4 (the sample's perf
+lab and bench, device verification on the Android emulator and the iOS simulator, the overhead
+A/B) done 2026-10-25: see "As built". The printer's 3 µs gate was not met (stage 4); the printer
+stays the default, for reasons stated there. The roadmap item "Performance monitors". Four monitors,
 each off by default and opt-in on its own: **frames** (FPS and jank), **hangs** (main-thread
 stalls with the main thread's stack), **CPU** (process and per-thread), **memory** (heaps,
 footprint, OS memory warnings). This is where Hopi must differ most from DebugSwift, which runs
@@ -15,10 +16,21 @@ every monitor at once and slows the app: a monitor that is off has no thread, no
 timer and no loaded class of its own; a monitor that is on states its cost below, and the cost is
 measured on the sample before it ships.
 
+**Since stage 8 of docs/design/api-runtime-split-plan.md (2026-10-29)** the consumer API
+(`HopiPerf`, `HopiMonitor`, `HopiPerfConfig`) lives in `hopi-api`, the same artifact in every
+build, and `hopi-perf` is a runtime no app names: perf's tool registers it at start, the Gradle
+plugin adds it to debuggable build types only, `hopi-start` to Debug iOS frameworks, and
+its noop twin is deleted. `HopiPerf.start` applies only what its block sets; `agentBridge` and
+`summaryLog` moved to the start's configuration, `remoteControl` to perf's part of it. The
+sections below describe that. History note (2026-10-30): the plan's stage 11 then removed the
+parity check `:checkNoopParity` and the plugin's twin substitution; the performance plan, the
+implementation order and "As built" keep each stage's record as it was, noop builds, twins and
+parity included.
+
 This design builds on the architecture's store and bridge contracts (`docs/ARCHITECTURE.md`,
 "Store", "Agent access") and on the patterns of `docs/design/rules.md`: a model in core that the
-bridge serves, a thin consumer API in its own module, a noop twin with no dependency, write
-commands only after a verified `hello`.
+bridge serves, a thin consumer API in `hopi-api` (a noop twin with no dependency until stage 8
+of the runtime-split plan), write commands only after a verified `hello`.
 
 ## Goals and non-goals
 
@@ -34,18 +46,22 @@ Goals:
   about 100 ms; an injected 600 ms hang shows once, with a stack that names the method that hung,
   whether it runs in a posted message or synchronously inside a Compose click handler (input
   dispatch, see "Hangs"). No false hang from a debugger pause or a frozen/suspended process.
-- **Zero production impact.** Monitors and model exist only in debug artifacts; `hopi-perf-noop`
-  has the same API and does nothing; release checks extended (below).
+- **Zero production impact.** Monitors and model exist only in debug artifacts; a release build
+  holds `hopi-api`'s `HopiPerf`, which does nothing without a runtime; release checks extended
+  (below).
 - **Offline, in memory.** Bounded rings, never persisted, never sent anywhere; no new transport.
-- **Every surface.** In-app HUD and Perf tab, realtime log lines, bridge/CLI for agents, desktop
-  viewer charts.
+- **Every surface.** Realtime log lines, bridge/CLI for agents, desktop viewer charts (the in-app
+  HUD and Perf tab were removed with the in-app UI; see "In-app (removed)").
 
 Non-goals (v1):
 
 - Leak detection, allocation tracking, heap dumps, method tracing, energy, network throughput,
   disk I/O, startup time. Each would be its own tool under the roadmap rule.
-- Physical iOS devices over the bridge (none in v1); the os_log lines work there.
-- Hang detection on the JVM target (no main looper; the JVM gets CPU and memory only, for tests).
+- Physical iOS devices over the bridge (none in v1); the os_log lines work there. (Since the
+  runtime-split plan's stage 12, 2026-10-30, the CLI and the desktop viewer reach an iPhone over
+  USB, `hopi perf` included; tested against a stand-in usbmuxd only, with no phone attached.)
+- Hang detection on the JVM target (no main looper; the JVM gets CPU and memory only, for tests
+  and, since the runtime-split plan's stage 10, for JVM apps through `hopi-start`'s `Hopi.start`).
 - Symbolicating native (C/C++) frames on Android; release-build symbolication on iOS.
 
 ## What the existing tools do, and what we take
@@ -64,27 +80,25 @@ Non-goals (v1):
 | Module | Content |
 | --- | --- |
 | `hopi-core`, package `dev.koga.hopi.core.perf` (all `@HopiInternalApi`) | The model (rings, events, histograms, summaries), its JSON (bridge replies, log lines), the `perf.*` bridge commands, the rate-limited log sink, and `PerfHook`: a registry holding at most one `PerfController` (start, stop, status) that `hopi-perf` registers. Nothing here starts a thread. |
-| `hopi-perf` (new) | `HopiPerf`, its config and enums (consumer API); the monitors in `dev.koga.hopi.perf.internal`; the iOS native library (`src/nativeInterop/objc`, as built: run-loop observers, main-thread stack walk, `task_info`/`thread_info` reads, the display link); depends on core; targets android, iosArm64, iosSimulatorArm64, jvm |
-| `hopi-perf-noop` (new) | The same public API, no dependency at all; every call does nothing, `running` is empty |
-| `hopi-ui` | The HUD inside `HopiLauncher` and a Perf tab in `HopiScreen`, both reading core's model only; no public API change, so `hopi-ui-noop` is unchanged |
+| `hopi-api` | `HopiPerf`, its config and enum (the consumer API, since the runtime-split plan's stage 8), over the perf runtime registered in `HopiRuntimes`, the registry's perf slot with the starts dropped before it and the last `screen` label, and the runtime's interface `HopiPerfRuntime` (`@HopiInternalApi`) |
+| `hopi-perf` | The runtime: the monitors in `dev.koga.hopi.perf.internal`, with the start sequence's perf tool `PerfEntry` (Android, iOS since the runtime-split plan's stage 6, the JVM since stage 8, which `hopi-start`'s `Hopi.start` lists there since stage 10, CPU and memory only) and `ApiPerf`, the runtime behind `HopiPerf`; the iOS native library (`src/nativeInterop/objc`, as built: run-loop observers, main-thread stack walk, `task_info`/`thread_info` reads, the display link); depends on core; targets android, iosArm64, iosSimulatorArm64, jvm; no consumer API (its ABI dumps are empty) |
+| `hopi-ui` | Nothing since the runtime-split plan's stage 5: its HUD and Perf tab went with the in-app UI (see "In-app (removed)") |
 | `hopi-connect`, `hopi-cli`, `hopi-desktop` | `PerfClient` and decoders, `hopi perf …` / `hopi hangs`, the Perf panel |
-| `gradle-plugin` | `hopi { perf { … } }`, the twin substitution for the new pair |
+| `gradle-plugin` | `hopi { perf { … } }`: `hopi-perf` in debuggable build types and its tool in the tool list |
 
-Why the model lives in core: the bridge, the log sink and `hopi-ui` are core consumers and must
-show perf data without depending on `hopi-perf` (the UI would otherwise pull every monitor into
-every app that has the inspector). This is `RuleEngine`'s split. Why one module and not one per
-monitor: zero cost when off comes from lazy loading, not from absent bytes; four pairs would
-double the twin and parity machinery for no runtime gain. Core's `perf` package is a few small
-classes, loaded only when something touches `PerfHook` with a controller registered (the
-launcher's activity reference, under Frames, is written only when a controller is registered, so
-an app without `hopi-perf` never loads it).
+Why the model lives in core: the bridge and the log sink are core consumers and must show perf
+data without depending on `hopi-perf`. This is `RuleEngine`'s split. Why one module and not one per
+monitor: zero cost when off comes from lazy loading, not from absent bytes; four runtimes would
+add four tools and four registrations for no runtime gain. Core's `perf` package is a few small
+classes, loaded only when something touches `PerfHook` with a controller registered, except the
+resumed activity's reference on Android (`CurrentActivity`, under Frames), which core's start
+writes whatever tools are listed.
 
-## Consumer API (what the noop mirrors)
+## Consumer API
 
 ```kotlin
-public object HopiPerf {
-    public fun install(block: HopiPerfConfig.() -> Unit = {})   // registers for remote control, starts nothing
-    public fun start(block: HopiPerfConfig.() -> Unit)          // install, then start the monitors set true
+public object HopiPerf {                                         // hopi-api, package dev.koga.hopi.perf
+    public fun start(block: HopiPerfConfig.() -> Unit)          // start the monitors set true; apply the settings set
     public fun stop(vararg monitors: HopiMonitor)                // none named: stop all
     public val running: Set<HopiMonitor>
     public fun screen(name: String?)                             // label for "what was on screen"
@@ -98,49 +112,83 @@ public class HopiPerfConfig internal constructor() {
     public var cpu: Boolean = false
     public var memory: Boolean = false
     public var sampleIntervalMs: Long = 1_000                    // CPU and memory, 250..10_000
-    public var remoteControl: Boolean = true                     // perf.start/stop over the bridge
-    public var agentBridge: Boolean = false                      // start the bridge, as the recorders do
-    public var summaryLog: Boolean = true                        // perf log lines (rate-limited)
 }
-// androidMain only: when hopi-android's provider is absent (an app without the Gradle plugin)
-public fun HopiPerf.install(application: android.app.Application, block: HopiPerfConfig.() -> Unit = {})
 ```
 
-Swift: `HopiPerf.shared.start { $0.frames = true; $0.hangs = true }`. Invalid values write a
-notice line and start nothing, as `HopiUrlSession.start` does (Swift cannot catch). No `inline`,
-no `const` (the parity ban). `DefaultsParityTest` gains `HopiPerfConfig`.
+Swift: `HopiPerf.shared.start { $0.frames = true; $0.hangs = true }`, where the framework exports
+`hopi-api` (in every configuration, as for `HopiRules`). A monitor set true starts as owner
+`code`; false leaves it as it is, never a stop. The builder records which of the three settings
+the block set, and the runtime applies only those, merged under its lock: a setting left unset
+keeps the value in force (the plugin's `perf { }`, a remote `perf.start`'s), where before stage 8
+of the runtime-split plan every call reset all of them to their defaults. Invalid values write a
+notice line and start nothing (Swift cannot catch); `hopi-api` validates nothing. Its defaults are
+literals, since `hopi-api` depends on nothing: `PerfDefaultsTest` (`hopi-perf`'s JVM tests)
+compares them with `PerfLimits`, and `HopiMonitor`'s entries with `PerfMonitor`'s, in order. The
+runtime behind the API is `hopi-perf`'s `ApiPerf`, which implements `hopi-api`'s
+`@HopiInternalApi` `HopiPerfRuntime` and only forwards, to `ApiPerfCalls` (see "How the monitors
+find the app"); nothing throws to the caller. The start's configuration holds what is not a
+monitor's: `agentBridge` and `summaryLog` are global (`hopi { }`, `Hopi.start { }`), so
+`summaryLog = false` also silences perf's rate-limited lines (its notices are written whatever it
+says), and `remoteControl` is perf's own part of it (`perf { remoteControl }` on Android,
+`perfRemoteControl` on iOS), set at start only.
 
-**How the monitors find the app.** `install` registers a `PerfController` in core's `PerfHook`
-(one object, no thread). On Android, `hopi-android`'s existing `HopiInitProvider` also registers
-it when the plugin put `hopi-perf` in the variant: the plugin writes `perf.present=true` into the
-provider's generated resources, and only then does the provider call
-`Class.forName("dev.koga.hopi.perf.internal.PerfEntry", false, loader)` and one static call. It
-never probes for an absent class (a `ClassNotFoundException` on ART fills a stack trace and costs
-far more than a hit). So a debug app with the plugin is remotely controllable without code, and no
-monitor class is loaded until a monitor starts. `hopi-perf` ships a consumer R8 keep rule for
-`PerfEntry` (a minified debuggable variant would otherwise drop the reflectively loaded class).
-The provider passes the `Application` (frames and the hang monitor's input bracket need each
-activity's `Window`, memory events need `registerComponentCallbacks`). Without the provider and
-without the Android `install(application)`, `start` on Android starts hangs (printer only, no input
-bracket), CPU and memory samples, and reports frames and memory events as unavailable with a
-notice; never `ActivityThread` reflection. The androidMain-only `install(application)` is mirrored
-in `hopi-perf-noop`'s androidMain and in both Android ABI dumps, as `hopi-android-noop` does for its
-platform API. On iOS nothing runs until Swift or Kotlin calls `install` or `start` (from any thread;
-the few UIKit reads hop to the main queue once); a launch argument `-hopiPerf frames,hangs` is read
-by `install` (one `NSProcessInfo` lookup) so an agent can measure a cold start:
-`xcrun simctl launch <udid> <id> -hopiPerf hangs`. Work before `install` runs (pre-main, `+load`,
-static initializers, the start of `didFinishLaunching`) is not covered.
+**Calls before the runtime registers.** There is no queue (the runtime-split plan's E4.4). A
+`start` runs its block, is counted by `hopi-api`'s registry and returns; perf's tool, when its
+start registers the runtime, writes one notice line with the count in perf's channel (logcat tag
+`HopiPerf`, os_log category `perf`), whatever `summaryLog` says: `HopiPerf: <n> starts made before
+Hopi started were dropped`. An iOS Debug binary also writes one line to the system log at the
+first dropped start (`NSLog`), since there the start is a call the app makes and may be missing.
+`stop` does nothing, `running` is empty, and `screen` keeps one label, the last, which the
+registration applies (re-read until two reads agree, so a label set meanwhile is not lost). A
+start with invalid caps registers nothing, so `HopiPerf` stays inert until a valid start runs the
+tools.
 
-**Gradle DSL** (Android, generated into the provider's resources like the other settings; all
-false by default):
+**How the monitors find the app.** Through perf's tool only: no `HopiPerf` call creates or
+registers the runtime. The tool registers a `PerfController` in core's `PerfHook` (one object, no
+thread) and `ApiPerf` in `hopi-api`'s registry. On Android, perf's tool `PerfEntry` does it when
+the plugin put `hopi-perf` in the variant: the plugin's generated configuration, a Java class (not
+resources; see android-capture.md, "Auto-start"), lists `new PerfEntry(autoStart,
+hangThresholdMs, hangHeartbeat, remoteControl)` in its tool list, and the provider's start
+sequence starts it like any tool, through a direct reference (since the runtime-split plan's
+stage 4, 2026-10-28; before, the provider loaded it with one `Class.forName` when the generated
+class said `perfPresent`). Without the perf block the list does not name it, so no perf class is
+looked up or loaded, and `HopiPerf` does nothing. So a debug app with the plugin is remotely
+controllable without code, and no monitor class is loaded until a monitor starts: the tool runs on
+the main thread, and a debug build runs from its APK, where ART loads every class a method names
+when it verifies the class, so the backend the tool creates (`AndroidBackend`) names no monitor
+class and forwards to the monitors' holder (`AndroidMonitors`), created at the first start, as
+`ApiPerf` forwards to `ApiPerfCalls`. `hopi-perf` still ships a consumer R8 keep rule for
+`PerfEntry` (harmless: R8 keeps a directly referenced class anyway). The start passes the
+`Application` (frames and the hang monitor's input bracket need each activity's `Window`, memory
+events need `registerComponentCallbacks`), and core's start keeps the resumed activity in
+`CurrentActivity` through one `ActivityLifecycleCallbacks` the provider registers whatever tools
+are listed (no thread, no timer), so a frames or hangs start attaches to it at once. Without the
+`Application` hangs run with the printer only (no input bracket), CPU and memory samples run, and
+frames and memory events report themselves unavailable with a notice; never `ActivityThread`
+reflection. On iOS nothing runs until `hopi-start`'s `Hopi.start` starts perf's iOS tool
+`PerfEntry` (listed unless its `perf` is false, with its `perfRemoteControl`), which creates the
+controller with the default settings and no bridge of its own (the start's `agentBridge` starts
+it); a launch argument `-hopiPerf frames,hangs` is read by the tool's first start (one
+`NSProcessInfo` lookup) so an agent can measure a cold start: `xcrun simctl launch <udid> <id>
+-hopiPerf hangs`. Work before the start runs (pre-main, `+load`, static initializers, the start of
+`didFinishLaunching`) is not covered. On the JVM a tool of the same shape, CPU and memory only,
+is listed by `hopi-start`'s `Hopi.start` unless its `perf` is false (since stage 10 of the
+runtime-split plan; `hopi-perf`'s own tests start it directly), with its log lines on stderr; a JVM
+process that does not call `Hopi.start` registers no runtime, so there `HopiPerf` does nothing.
+
+**Gradle DSL** (Android, generated into the app's configuration class like the other settings, as
+the perf tool's constructor arguments; off by default):
 
 ```kotlin
+import dev.koga.hopi.gradle.HopiMonitor   // the plugin's type, not a default import of a build script
+
 hopi {
     perf {
-        enabled = false          // true: hopi-perf in debuggable variants (noop elsewhere), provider registers it
-        autoStart(HopiMonitor.Hangs, HopiMonitor.Frames)   // started by the provider; default none
+        enabled = false          // true: hopi-perf in debuggable variants only, its tool in the tool list
+        autoStart(HopiMonitor.Hangs, HopiMonitor.Frames)   // started by the perf tool at start; default none
         hangThresholdMs = 250
         hangHeartbeat = false    // true: keep another tool's Looper printer, pay the heartbeat's wakes
+        remoteControl = true     // false: the bridge's perf.start, perf.stop and a tail's start are refused
     }
 }
 ```
@@ -174,17 +222,21 @@ Window pitfalls, each handled, none silent:
   frames figure then reads "idle", and `perf.status` says `"windows":"activities only"`. A
   `SurfaceView`/`TextureView` producer (video, maps, camera, GL) is outside HWUI's frames as well.
 
-Attaching: there is no public API for the activity already started, and Hopi keeps no lifecycle
-listener while off (the purer reading of "off is free"). So a remote `perf.start` attaches frames
-at the next activity start; `perf.status` says `"frames":{"attached":false}` until then. Most CMP
-apps have a single activity, where "the next start" means the next return from the background, so
-the CLI says so plainly: "frames attach when an activity next starts (single-activity app: send it
-to the background and back, or open the Hopi launcher)". The way around it costs nothing while
-off: `HopiLauncher`, when composed and only when a perf controller is registered, stores a
-`WeakReference` to its own activity in `PerfHook` (one
-field write on first composition, cleared on dispose; no listener, no thread), and a start attaches
-to that activity at once. The provider's `autoStart` (it runs before any activity) and a start from
-the in-app Perf tab attach at once too.
+Attaching: there is no public API for the activity already started, and the perf monitors keep no
+lifecycle listener while off (the purer reading of "off is free"). The way around it is core's:
+its start keeps a `WeakReference` to the resumed activity in `CurrentActivity` (one
+`ActivityLifecycleCallbacks` for the process, a field write on each resume and pause; no thread, no
+timer), and a start attaches to that activity at once, with one main-thread message (a start may
+come from any thread). Until that message ran, `perf.status` says `"attaching":true` beside
+`"attached":false`, and the CLI and the desktop viewer show no hint: the attach is on its way. It
+is a count of the messages in flight, not a flag, since a frames stopped and started again has
+two, and the first one's end must not clear the second's; it is reported only while frames runs.
+With no resumed activity (the app in the background) a remote `perf.start` attaches frames at the
+next activity start, `perf.status` says `"frames":{"attached":false,"attaching":false}` until
+then, and the CLI says so plainly: "frames attach when an activity next starts" (an older app
+sends no `attaching`, read as false). The provider's `autoStart` (it runs before any activity)
+attaches at the first start. Until the runtime-split plan's stage 5 the in-app launcher wrote the
+same reference; core's start is its only writer since.
 
 The framework copies each frame's metrics on the RenderThread and posts one message per rendered
 frame to Hopi's handler, so the thread wakes once per frame the app draws and **never while the app
@@ -219,8 +271,8 @@ a long one as a hang. Below API 26 (no vsync metrics) the frame is its `TOTAL_DU
 
 **Per-second buckets, no timer.** Frames are summed into the current second's bucket. Only a
 second strictly in the past is ever closed and written as a point: by the first frame of a later
-second, by the sampler's tick when CPU or memory is on, or when a reader (`perf.snapshot`, the
-HUD, a tail) asks. The current second is shown to a reader provisionally and never written, so a
+second, by the sampler's tick when CPU or memory is on, or when a reader (`perf.snapshot`, a tail)
+asks. The current second is shown to a reader provisionally and never written, so a
 frame later in the same second can never open a second point for it. Never by a timer of the
 frames monitor. A second in which nothing drew therefore has no point unless the sampler or a
 reader wrote a zero one once it was past, and consumers treat a missing second as "nothing
@@ -239,9 +291,9 @@ drawn".
    callbacks per run-loop iteration (below), nothing while the main thread sleeps; the C callback
    enters Kotlin only for a unit over the stall threshold, to record it.
 2. **Display-link cadence (only on explicit request).** A `CADisplayLink` on the main run loop,
-   created only while a viewer explicitly asks for it: the HUD's or Perf tab's "cadence" toggle
-   (off by default; showing the HUD does not turn it on), or a bridge session tailing perf with
-   `"fps":true`. It measures the display link's callback cadence, not frames the app drew: it fires
+   created only while a viewer explicitly asks for it: a bridge session tailing perf with
+   `"fps":true` (the in-app HUD's and Perf tab's "cadence" toggle did too, until the runtime-split
+   plan's stage 5). It measures the display link's callback cadence, not frames the app drew: it fires
    every vsync whether the app draws or not, so it only adds "missed vsyncs" (timestamp gaps over
    `1.5 x (targetTimestamp - timestamp)`), which tier 1 already sees as stalls. Cost: one
    main-thread callback per vsync (60 or 120 per second) of a few µs (to verify), **including while
@@ -259,8 +311,8 @@ encoding moves off the main thread and tier 1 sees only the main-thread part (co
 recording). A spike checks one CMP-specific alternative:
 the presented-time handler of each `MTLDrawable` (`addPresentedHandler`) on CMP's layer, which
 would give true presentation intervals with no idle wake; adopted only if it needs no swizzling of
-system classes. The HUD and the Perf tab are Compose content in the app's window: their own
-frames are app frames (below, "Not measuring itself").
+system classes. Nothing of Hopi draws in the app's window since the in-app HUD and Perf tab went
+(below, "Not measuring itself").
 
 **"What was on screen."** Each janky frame and stall records a screen label: `HopiPerf.screen(…)`
 if the app set one, else the resumed activity's class name (Android) or nothing (iOS). The label
@@ -353,7 +405,7 @@ removed only if it is still the window's callback (AppCompat or another SDK may 
 since); otherwise it stays as a pass-through behind a volatile flag, and a later start walks
 the chain through Hopi's own wrapper class only, finds it and re-enables it instead of wrapping
 twice. Without the `Application`
-(no provider, no `install(application)`), the gap stands and `perf.status` says
+(a start that passed none), the gap stands and `perf.status` says
 `"input":false`. **Other windows stay a gap**: a Compose `Dialog`, `ModalBottomSheet` or `Popup`
 (and any other `Dialog` or `PopupWindow`) has its own window whose touches go through its own
 callback, which no public API lets Hopi find and wrap, so an `onClick` that blocks inside a dialog
@@ -455,8 +507,8 @@ CPU or memory is on.
   `hopi-bridge*` are not in it; the per-thread list shows them.
 - **Per-thread top N, only while watched.** Opening every `/proc/self/task/<tid>/stat` costs one
   open and read per thread (an app has 50 to 150 threads; milliseconds per scan, to verify), so it
-  runs only while the Perf tab's thread list is shown, a bridge session tails perf with
-  `"threads":true`, or a `perf.snapshot` asks for `threads`. Names from the same `stat` line
+  runs only while a bridge session tails perf with `"threads":true` (the desktop Perf panel's
+  thread list) or a `perf.snapshot` asks for `threads`. Names from the same `stat` line
   (`comm`, which the kernel cuts at 15 bytes: the list shows them so, and Hopi's own are
   recognised by the `hopi-` prefix). The scan's own CPU lands on the sampler and is labelled. iOS: `task_threads`, then per thread `thread_info(THREAD_BASIC_INFO)` (the kernel's
   own decayed `cpu_usage`, plus user and system time) and `THREAD_EXTENDED_INFO` for the name;
@@ -484,16 +536,15 @@ Never periodic: PSS. `Debug.getPss()` reads `smaps_rollup` where present (API 29
 `Debug.getMemoryInfo()` walks the full `smaps` (it needs per-mapping categories): milliseconds to
 hundreds of milliseconds on a large app, to verify. Both hold the kernel's mm lock of the process
 while they read, so app threads that page-fault or `mmap` meanwhile stall: a PSS measurement is
-self-interference by nature. They run only on `perf.snapshot --pss` or the Perf tab's "Measure
-PSS", on the sampler thread, at most once per 10 s, and frames and stalls during it are flagged
-`hopiPause`. `ActivityManager.getProcessMemoryInfo` is not used (rate-limited by the system on API
+self-interference by nature. They run only on `perf.snapshot --pss`, on the sampler thread, at
+most once per 10 s, and frames and stalls during it are flagged `hopiPause`. `ActivityManager.getProcessMemoryInfo` is not used (rate-limited by the system on API
 29+: repeated calls within a few minutes return the cached first result).
 
 Events, OS-provided and free, registered only while on and only when the `Application` is known
 (Android): `ComponentCallbacks2.onTrimMemory` (level) and `onLowMemory`. On API 34+ the system no
 longer sends the `TRIM_MEMORY_RUNNING_*` levels (only `UI_HIDDEN` and `BACKGROUND`), so in the
-foreground an Android 14+ app gets no pressure event at all, and the Perf tab says so instead of
-implying "no pressure". iOS: `UIApplicationDidReceiveMemoryWarningNotification` and a
+foreground an Android 14+ app gets no pressure event at all, and `perf.status`'s notice says so
+instead of implying "no pressure". iOS: `UIApplicationDidReceiveMemoryWarningNotification` and a
 `DISPATCH_SOURCE_TYPE_MEMORYPRESSURE` source (warn, critical) on a utility queue, cancelled at
 stop.
 
@@ -517,19 +568,19 @@ stop.
   to 1 s, one overflow) for p50/p90/p99/max, counts and percentages; hang count, total and worst;
   CPU average and max; memory min, max, last. Computed when asked.
 - Written straight from the monitor's thread (no hop); a write wakes nothing unless a listener is
-  registered (a bridge `perf.tail`, the HUD or Perf tab while composed), which gets the event
-  synchronously and must only `trySend`, as the store's listeners do. Listeners subscribe by
-  grain: the HUD and the Perf tab take closed per-second buckets and events only, never per-frame
-  writes, so a viewer adds at most one main-thread wake per second, and none when the computed text
-  did not change (the comparison runs on the writer's thread before any `trySend`).
-- Frames recorded while `HopiScreen` is open are flagged `inspector`, and frames overlapping a
-  stack capture or a PSS measurement are flagged `hopiPause`; both are left out of summaries and
-  the HUD (and counted apart, so the exclusion is visible).
+  registered (a bridge `perf.tail`), which gets the event synchronously and must only `trySend`,
+  as the store's listeners do. Listeners subscribe by grain: a tail takes closed per-second
+  buckets and events only, never per-frame writes (the in-app HUD and Perf tab did the same, until
+  the runtime-split plan's stage 5).
+- Frames overlapping a stack capture or a PSS measurement are flagged `hopiPause` and left out of
+  summaries (and counted apart, so the exclusion is visible). The `inspector` flag, set while the
+  in-app inspector was open, went with it (the runtime-split plan's stages 5 and 8); the bridge's
+  `excluded` count, unchanged in shape, counts only frames that overlapped a Hopi pause.
 - Strings from the app are bounded: screen labels 64 chars, thread names 64 chars, stack frames
   512 chars each, inside the per-hang 16 KB.
 
 Bounded total: about 120 KB of series plus at most 1.6 MB of hang stacks, allocated only as the
-monitors write (with every monitor off: none).
+monitors write (with every monitor off: none, the controller's start included).
 
 ## Surfaces
 
@@ -627,36 +678,21 @@ A Perf panel (⌘P) over `PerfClient`: monitor toggles (with the lease shown), t
 with Compose `Canvas` and no chart library (frames per second with janky bars, CPU %, memory
 lines), the hang list with stacks (copy as text), memory events as markers on the memory chart.
 
-### In-app (`hopi-ui`)
+### In-app (removed)
 
-- **HUD**: a small text box over the app ("58 fps · 4 jank · CPU 12% · 142 MB"), toggled from the
-  Perf tab or a long press on the launcher button. It recomposes only when a closed second of data
-  lands and the shown text changed, so an idle app makes it stop drawing (a second with 2 frames
-  or fewer reads "idle" and does not change the text). With frames alone on, nothing closes a
-  second in which nothing drew, so the figure is labelled "fps while drawing" and keeps the last
-  drawing second's value; with CPU or memory on, the sampler's tick closes the empty second and
-  the HUD reads "idle". On iOS it shows tier 1 ("worst stall 84 ms · 3 stalls/10 s") by default;
-  tier 2 runs only after the HUD's own "cadence" toggle, labelled "cadence" (display-link
-  callbacks per second, 60 or 120 even while the app is idle), never "fps". A stop hands out no
-  item, so the controller tells the HUD which monitors run (`PerfController.addRunningListener`:
-  at once, then at every start, stop, lease expiry and tail end): a stopped monitor's figures go
-  at once, what it still hands out (a frames second a later tick closes, a sample under way) is
-  ignored, and with none running the HUD reads "perf: off".
-- **Perf tab**: a "Perf" button in the top bar, shown only when a controller is registered:
-  monitor switches, summaries, sparklines, the thread list (gates the per-thread scan), "Measure
-  PSS", hangs with stack detail. A rebuild (per closed second, sample or event, and when the
-  running set changes) formats no stack:
-  a hang's stacks (up to 16 KB of text) are formatted when its row is opened, and a hang whose
-  event did not change keeps its row instance, so the open tab costs what changed, not the 100
-  retained hangs.
+The in-app HUD (one line over the app, toggled by a long press on the launcher button) and the
+in-app screen's Perf tab (monitor switches, summaries, sparklines, the thread list, "Measure PSS",
+hangs with stacks) were built in this design's stage 3 (see "As built") and removed with the whole
+in-app UI in stage 5 of docs/design/api-runtime-split-plan.md (D7'). The desktop viewer's Perf
+panel and the CLI are the surfaces.
 
 ## Not measuring itself
 
 - Hopi's threads are named `hopi-perf-*` (and `hopi-store`, `hopi-bridge*`); the per-thread list
   labels them, and the CPU series carries Hopi's own share separately.
-- Frames while `HopiScreen` is open are flagged and left out; the HUD's own redraws are bounded
-  (at most one per second and one when a monitor starts or stops, zero when the app is idle) and
-  stated in the HUD's tooltip; the desktop and CLI are the surfaces for clean measurements.
+- Hopi draws nothing in the app's window: the desktop viewer and the CLI are the surfaces (until
+  the runtime-split plan's stage 5, frames drawn while the in-app inspector was open were flagged
+  and left out, and the HUD's own redraws were bounded).
 - No monitor posts work of its own to the main thread while it runs: the main-thread costs are
   the ones the platform calls Hopi for (Android lifecycle callbacks and the input bracket, the iOS
   run-loop observers, iOS tier 2's display link) plus one message at the hang monitor's start and
@@ -673,36 +709,50 @@ lines), the hang list with stacks (copy as text), memory events as markers on th
 
 | Monitor | Off | On: threads | On: wakes | On: cost |
 | --- | --- | --- | --- | --- |
-| any, module present | 0 threads, 0 listeners, 0 wakes; Android startup: the provider reads one generated setting, and only with `perf.present` one `Class.forName` hit ≤ 0.1 ms (never a miss) | | | |
+| any, module present | 0 threads, 0 listeners, 0 wakes; Android startup: with `perf { enabled = true }` the generated tool list constructs `PerfEntry` (a direct reference, no lookup, never a miss) | | | |
 | `autoStart` (Android) | | | | thread creation at provider init (≤ 0.5 ms per thread, on the main thread at startup, measured) |
 | frames, Android | 0 | `hopi-perf-frame` | 1 per rendered frame, 0 while nothing draws | ≤ 5 µs on Hopi's thread per frame, 0 allocation; ≤ 1 µs RenderThread copy; lifecycle callbacks on the main thread per activity transition only |
 | frames, iOS tier 1 | 0 | none | 0 extra (main run-loop iterations only) | 3 C callbacks per iteration, ≤ 0.5 µs together; a Kotlin call per stall only |
 | frames, iOS tier 2 (explicit toggle only) | 0 | none | 60 or 120 main-thread callbacks per second, idle included; keeps a ProMotion panel off its idle rate | ≤ 3 µs per callback; power cost device-only, open |
 | hangs, Android | 0 | `hopi-perf-hang` (default priority) | 0 while the main thread sleeps; ≤ 1 per threshold while busy, plus 1 per idle-to-busy (a lone short unit: 2, its begin's and its deadline's); a remote lease bounds the idle sleep, never blinds it | framework printer strings per message, mix-dependent (gate: 3 µs median over the realistic mix; coroutine resumes may cost more), ~300 B garbage per message; Hopi ≤ 0.2 µs per message; input bracket 2 atomic writes per input event; stack ≤ 2 ms pause per capture |
 | hangs, Android heartbeat (gate or `hangHeartbeat`) | 0 | `hopi-perf-hang` | 2 per `threshold / 2` (watchdog and main), idle included: 8 per second on each at 250 ms, 16 in all | one empty main-thread message per tick |
-| hangs, iOS | 0 | `hopi-perf-hang` | same as Android's printer path: every main run-loop wake is an idle-to-busy transition, so ≤ 1 per main-thread wake (the simulator's main run loop wakes about 6 times a second with nothing to do, in the noop build too) | ≤ 0.5 µs per run-loop iteration (shared with tier 1); stack ≤ 100 µs suspension |
+| hangs, iOS | 0 | `hopi-perf-hang` | same as Android's printer path: every main run-loop wake is an idle-to-busy transition, so ≤ 1 per main-thread wake (the simulator's main run loop wakes about 6 times a second with nothing to do, in a build without the monitors too) | ≤ 0.5 µs per run-loop iteration (shared with tier 1); stack ≤ 100 µs suspension |
 | CPU | 0 | `hopi-perf-samp` (shared) | 1 per interval (1 s) | process total ≤ 5 µs per sample; Hopi's share: one thread-CPU call per Hopi thread park; thread scan only while watched, ≤ 5 ms Android (100 threads), ≤ 0.5 ms iOS |
 | memory | 0 | same sampler | same wake | ≤ 50 µs per sample Android (`mallinfo` included), ≤ 5 µs iOS, two small strings; PSS on demand only, stalls faulting app threads while it reads |
 | remote lease | 0 | none of its own | 1 at expiry | rides an existing perf thread's timed wait |
 | summary log | 0 | none of its own | none of its own | one log call per 10 s while CPU or memory is on; jank and hang lines as events occur, ≤ 5 per second |
 | all on, app idle | | 3 Android, 2 iOS | ≤ 1 per second (sampler), Android and iOS (tier 2 off), plus on iOS the hang watchdog's ≤ 1 per main-thread wake | ≤ 0.1% of one core |
 
-## Release exclusion and noop parity
+## Release exclusion
 
-- `:checkNoopParity` gains `hopi-perf`/`hopi-perf-noop` with ABI dumps on both;
-  `hopi-perf-noop`'s JVM tests assert no `hopi-core` on its classpath; `DefaultsParityTest` covers
-  `HopiPerfConfig` and `HopiMonitor`'s entries.
-- The Gradle plugin substitutes `hopi-perf` → `hopi-perf-noop` in non-debuggable variants
-  (TestKit-checked) and generates the `perf { }` resources.
-- `:sample:androidApp:verifyReleaseUsesNoop` (and `verifyHopiSelection`): the release classpath
-  holds `:hopi-perf-noop` too and its Hopi classes are the noop jar's; no type of
-  `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core.perf` is defined or referenced; no Hopi class
-  references `addOnFrameMetricsAvailableListener` or `setMessageLogging`; the release provider's
-  generated resources hold no `perf.present=true`. `verifyDebugCapture` adds the positive control
+Since the runtime-split plan's stage 8 (2026-10-29) a release build holds `hopi-api`'s `HopiPerf`,
+which does nothing without a runtime, and never `hopi-perf`.
+
+- `hopi-api`'s ABI dumps hold the consumer API (`HopiPerf`, `HopiMonitor`, `HopiPerfConfig`);
+  `hopi-perf`'s are empty, so a public declaration outside `dev.koga.hopi.perf.internal` shows
+  there. `hopi-api`'s JVM tests assert no `hopi-core` and no `hopi-perf` on their classpath, and
+  `PerfDefaultsTest` (`hopi-perf`) compares `hopi-api`'s literal defaults and `HopiMonitor`'s
+  entries with the runtime's.
+- The Gradle plugin adds `hopi-perf` to debuggable build types only, with `perf { enabled = true }`
+  (TestKit-checked: the debug APK has it, the release APK none), and lists `PerfEntry` in the
+  generated tool list (a Java class, not resources). Since the runtime-split plan's stage 9
+  (2026-10-29) a module that names `hopi-perf` itself fails its release build in the plugin's
+  release guard, and an iOS Release framework whose classpath holds it fails in the iOS one
+  (ARCHITECTURE, "Release guards"); nothing swaps it.
+- `:sample:androidApp:verifyReleaseHasNoRuntime` (since stage 9; the two release checks before it):
+  the release classpath holds no `hopi-perf` and its Hopi classes are the jars' of `hopi-api` and
+  the thin `hopi-ktor`; no type of
+  `dev.koga.hopi.perf.internal` or `dev.koga.hopi.core` is defined or referenced; no Hopi
+  class references `addOnFrameMetricsAvailableListener` or `setMessageLogging`; the release APK has
+  no generated configuration and no provider. `verifyDebugCapture` adds the positive control
   (`PerfEntry`, its keep rule and the listener reference present).
 - `:sample:shared:verifyIosReleaseExcludesCapture`: without the flag, no `_hopi_perf_` symbol, no
-  `kfun:dev.koga.hopi.perf` or `kfun:dev.koga.hopi.core.perf` symbol, no `hopi-perf-hang`
-  string; with it, all present.
+  `kfun:dev.koga.hopi.perf.internal` or `kfun:dev.koga.hopi.core.perf` symbol, no
+  `HopiPerfCadence` class, no `hopi-perf-hang` string; with it, all present. Since stage 9 the
+  Kotlin family covers every symbol kind of every runtime package (`_k…:dev.koga.hopi.perf.internal`
+  and `.core` among them) and the sampler's thread name `hopi-perf-samp` joins the strings. `hopi-api`'s
+  `dev.koga.hopi.perf` symbols (`HopiPerf`, `HopiMonitor`, `HopiPerfConfig`) are expected either
+  way: every framework exports `hopi-api`.
 
 ## Security and privacy
 
@@ -713,7 +763,7 @@ read from user content by Hopi). Nothing is persisted (the previous ANR is read 
 written, and only its main-thread section is kept); nothing leaves the device except over the
 existing authenticated bridge. Stack capture reads only the app's own main thread, in its own
 process, and keeps only return addresses, never the stack's contents. The `-hopiPerf` launch
-argument and the Gradle `autoStart` exist only in debug builds (release is the noop).
+argument and the Gradle `autoStart` exist only in debug builds (a release build has no runtime).
 
 ## Architecture contract changes
 
@@ -739,12 +789,25 @@ wakes while the app is idle"), the release checks.
 - **Idle**: module present and nothing started: no `hopi-perf-*` thread, no listener, 0 wakes;
   after `stop`: threads gone, listeners removed, window callbacks removed when on top and
   otherwise disabled (a restart re-enables, never stacks, them), the printer cleared only when
-  it was Hopi's (a printer set by "another tool" after Hopi's survives the stop).
+  it was Hopi's (a printer set by "another tool" after Hopi's survives the stop). No monitor class
+  is loaded once perf's tool started (`NoMonitorClassTest`, a child-first classloader on the JVM;
+  HotSpot evidence only: on Android a debug build runs from its APK and ART loads every class a
+  method names when it verifies the class, so the Android backend names none, checked with `javap`
+  and an emulator probe).
+- **API** (`hopi-api`'s JVM and iOS tests, `hopi-perf`'s JVM tests): with no runtime every call is
+  inert, the block runs, only `start` is counted and `screen` keeps its label; over a fake runtime
+  each call hands over what it should (the monitors set true, each setting set and null when not);
+  over the real one a block applies only what it sets, the start's `summaryLog` decides perf's lines
+  and `remoteControl` comes from the tool, two dropped starts give one notice, and a label set
+  before the registration reaches the controller; an iOS Debug binary writes its line once, at the
+  first dropped start.
 - **hopi-connect, hopi-cli, hopi-desktop**: decoders, argument parsing, rendering, exit 4, the
   panel composed against a fake session.
 - **Android host tests**: provider registration with and without `hopi-perf` (without: no
   `Class.forName` call at all), resources parsed; `Window.Callback` wrapper delegates every method
-  and is removed only when on top.
+  and is removed only when on top; perf's tool takes the four `perf { }` values and the start's
+  `summaryLog`; a frames start with a resumed activity says `attaching` while frames runs (the
+  posted block's end is checked on a device, since a host `Handler` runs nothing).
 - **iOS simulator tests** (`:hopi-perf:iosSimulatorArm64Test`): a 600 ms block on the main thread
   is one hang whose stack contains the test's function; a 150 ms one is none; a main thread that
   loops without sleeping through 1 s of 5 ms sources is no hang; the frame walk survives a corrupt
@@ -857,7 +920,9 @@ Deviations from the design, and why:
   `HopiGeneratedConfig` class (android-capture.md, "Auto-start"), so the perf block is four more
   constructor arguments of it (`perfPresent`, `perfAutoStart` as a bit set, `perfHangThresholdMs`,
   `perfHangHeartbeat`). The provider loads `PerfEntry` only when `perfPresent` and calls it through
-  core's `PerfBootstrap` interface (one `Class.forName` hit, one constructor, one call).
+  core's `PerfBootstrap` interface (one `Class.forName` hit, one constructor, one call). (History:
+  since the runtime-split plan's stage 4, `PerfEntry` is a tool the generated tool list constructs,
+  and `PerfBootstrap` is gone; see "How the monitors find the app".)
 - **The plugin's `HopiMonitor`.** `autoStart(HopiMonitor.Hangs, …)` takes the plugin's own enum
   `dev.koga.hopi.gradle.HopiMonitor` (same entries, same order): the build script cannot see
   `hopi-perf`'s.
@@ -885,7 +950,8 @@ unmeasured; the previous-ANR read on a device that has one.
 
 Built: the native library `hopi-perf/src/nativeInterop/objc/hopi_perf.{h,m}` (compiled per iOS
 target and embedded in the `perf` cinterop klib, package `dev.koga.hopi.perf.internal.native`,
-like core's URLSession library), and `IosBackend`, `IosHangMonitor`, `IosSampler` in iosMain:
+like `hopi-network`'s URLSession library, core's when this was built), and `IosBackend`,
+`IosHangMonitor`, `IosSampler` in iosMain:
 
 - **Observers and busy state (C).** Two `CFRunLoopObserver`s on the main run loop for the common
   modes: begin (order `LONG_MIN`) on `AfterWaiting | BeforeTimers | Exit`, end (order `LONG_MAX`) on
@@ -1140,8 +1206,17 @@ beat's end wakes nothing). Fixed after stage 5 (`HangDetectorTest`): until a uni
 watchdog looks again within `threshold / 2` (the end of a beat, or of a tap's dispatch, wakes
 nothing), so it beats every `threshold / 2` (8 wakes per second on each thread at 250 ms, 16 in
 all), a hang reads at most 125 ms short, and only one shorter than 1.5 thresholds can be missed
-(2 before). Re-measure pending on the emulator. The click burn stayed exact (the input bracket
-does not depend on the printer).
+(2 before). Re-measured on the emulator on 2026-10-27 (`benchmark/perf/2026-10-27/`, verdicts
+written before the data in `session-verdicts.md`): idle, the watchdog woke 470 to 471 times and
+the main thread 475 to 477 times in 60 s (7.8 to 7.9 per second each, 3 runs), with 110 to 160 ms
+of watchdog CPU per minute. In two lab runs the 1 s hang read 917 and 938 ms against 1003 and
+1001 ms measured in the unit, the 3 s hang 2950 and 2949 ms against 3002 and 3004, and the 600 ms
+burn 556 and 561 ms against 601, each within 125 ms; the 300 ms hang (1.2 thresholds) was missed
+both times, which the bound allows (22 and 21 of 26: `verify.py`'s ±20 ms duration checks are the
+printer's bound, and the 20 ms jank step read 4 janky frames in one run, as on 2026-10-25). The
+click burn stayed exact, 605 and 604 ms (the input bracket does not depend on the printer). The
+printer run of the same session: 28 of 28 (hangs 311, 1004, 3001 and 602 ms, the click burn
+603 ms).
 
 **Verdict: the printer stays the default** and the heartbeat stays the opt-in
 (`hangHeartbeat`) for an app that needs another tool's printer. The printer is exact (0 to 5 ms),
@@ -1161,6 +1236,7 @@ offers none; `Looper.setObserver` is hidden API).
 | hangs (printer) | 0 CPU, 0 wakes (the watchdog sleeps untimed) | 0 wakes |
 | frames | 0 CPU, 0 wakes (nothing draws) | 0 wakes |
 | hangs (heartbeat, before its cadence fix) | `hopi-perf-hang` 239 wakes, 90 ms | 245 wakes, 10 ms |
+| hangs (heartbeat, after it: 2026-10-27, 3 runs, `benchmark/perf/2026-10-27/`) | `hopi-perf-hang` 470 to 471 wakes, 110 to 160 ms | 475 to 477 wakes, 10 to 20 ms |
 | CPU and memory | `hopi-perf-samp` 60 wakes, 70 ms | 0 wakes |
 | all four | `hopi-perf-samp` 60 wakes, 70 ms | 0 wakes |
 | CPU alone, memory alone (120 s each) | `hopi-perf-samp` 119 wakes, 100 ms each | 0 wakes |

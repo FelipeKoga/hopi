@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.DetailState
@@ -114,10 +114,8 @@ public class HopiPanesRules(
  * The inspector's list and detail for a host viewer (the desktop app), over any [store]: side by
  * side when at least [sideBySideMinWidth] wide, else one at a time as on a phone. [onSelected] is
  * called with every selection (null included), so the caller can fetch that transaction's body;
- * [onClear] is the trash button (the caller clears the app's store as well as [store]). Unlike
- * [dev.koga.hopi.ui.HopiScreen] it has no close button, back handler or system bar
- * handling: the window owns those. Desktop only (`jvm`), and outside the consumer API, so the
- * noop twin has no counterpart (see the ABI filters in both modules' build files).
+ * [onClear] is the trash button (the caller clears the app's store as well as [store]). It has no
+ * close button and no back handler: the window owns those. Hopi-internal, never consumer API.
  */
 @HopiInternalApi
 @Composable
@@ -169,7 +167,6 @@ public fun HopiPanes(
                     listState = listState,
                     onOpen = { state.selectedId = it },
                     onClear = onClear,
-                    onClose = null,
                     selectedId = if (wide) state.selectedId else null,
                     searchFocus = state.searchFocus,
                 )

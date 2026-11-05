@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drives the inspector on the emulator and times each step from gfxinfo framestats.
+"""Drives the sample on the emulator and times each step from gfxinfo framestats.
 
 Each step resets gfxinfo, taps a node found by text or content description in a uiautomator dump
 (taken before the reset, so it costs the step nothing), waits until no frame has been drawn for
@@ -22,7 +22,7 @@ usage:
   ui.py scroll <label> <batches>              swipes up on the body, frames.py-style summary
   ui.py type <label> <text>                   types into the focused field, one key per char
   ui.py dump                                  prints the nodes with text or a description
-  ui.py back <label>                          presses back (closes a share sheet), timed like tap
+  ui.py back <label>                          presses back, timed like tap
 """
 import json, os, re, subprocess, sys, time
 import xml.etree.ElementTree as ET

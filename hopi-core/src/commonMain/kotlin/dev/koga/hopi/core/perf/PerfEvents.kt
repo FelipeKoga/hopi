@@ -1,8 +1,8 @@
 package dev.koga.hopi.core.perf
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
-/** What the perf model hands its listeners (a bridge `perf.tail`, the HUD): events, closed seconds, samples. */
+/** What the perf model hands its listeners (a bridge `perf.tail`): events, closed seconds, samples. */
 @HopiInternalApi
 public sealed interface PerfItem
 
@@ -117,7 +117,7 @@ public class FrameSecond(
     public val metricsLost: Int,
     /** First frames of a window, counted apart. */
     public val firstFrames: Int,
-    /** Frames left out because the inspector was open or a Hopi capture paused the main thread. */
+    /** Frames left out because a Hopi capture paused the main thread ([PerfData.markPause]). */
     public val excluded: Int,
     public val screen: String?,
 ) : PerfItem

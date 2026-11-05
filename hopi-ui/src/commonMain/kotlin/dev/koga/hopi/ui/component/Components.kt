@@ -1,10 +1,12 @@
 package dev.koga.hopi.ui.component
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -15,16 +17,20 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.semantics.Role
@@ -35,11 +41,26 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.koga.hopi.ui.theme.HopiRadius
+import dev.koga.hopi.ui.theme.HopiTone
 import dev.koga.hopi.ui.theme.HopiType
 import dev.koga.hopi.ui.theme.LocalHopiColors
 
 /** Minimum touch target for every control. */
 internal val TouchTarget: Dp = 48.dp
+
+/** shadcn's focus ring: 3 dp of [color] at 30% just outside the bounds; nothing when null. Apply before any clip. */
+internal fun Modifier.focusRing(color: Color?, radius: Dp = 8.dp): Modifier =
+    if (color == null) this else drawBehind {
+        val w = 3.dp.toPx()
+        drawRoundRect(
+            color = color.copy(alpha = 0.3f),
+            topLeft = Offset(-w / 2, -w / 2),
+            size = Size(size.width + w, size.height + w),
+            cornerRadius = CornerRadius(radius.toPx() + w / 2),
+            style = Stroke(w),
+        )
+    }
 
 @Composable
 internal fun Icon(vector: ImageVector, tint: Color, modifier: Modifier = Modifier, size: Dp = 20.dp) {
@@ -51,7 +72,7 @@ internal fun Icon(vector: ImageVector, tint: Color, modifier: Modifier = Modifie
     )
 }
 
-/** An icon-only control: 48 dp target, [description] read by screen readers. */
+/** An icon-only control (shadcn's: no fill, a square under the pointer): 48 dp target, [description] read by screen readers. */
 @Composable
 internal fun IconButton(
     vector: ImageVector,
@@ -61,51 +82,60 @@ internal fun IconButton(
     enabled: Boolean = true,
 ) {
     val colors = LocalHopiColors.current
+    val source = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .size(TouchTarget)
-            .clip(CircleShape)
             .semantics { contentDescription = description }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .alpha(if (enabled) 1f else 0.35f),
+            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.38f),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(vector, colors.text)
+        Box(Modifier.size(32.dp).clip(HopiRadius.md).indication(source, LocalIndication.current), contentAlignment = Alignment.Center) {
+            Icon(vector, colors.text, size = 18.dp)
+        }
     }
 }
 
-/** A selectable filter pill; the 48 dp touch target is taller than the pill it draws. */
+/**
+ * A selectable filter pill (shadcn's chip), its count in [countColor]; the 48 dp touch target is
+ * taller than the pill it draws.
+ */
 @Composable
-internal fun FilterChip(label: String, count: Int, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun FilterChip(label: String, count: Int, selected: Boolean, onClick: () -> Unit, countColor: Color, modifier: Modifier = Modifier) {
     val colors = LocalHopiColors.current
-    val shape = RoundedCornerShape(50)
+    val source = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .heightIn(min = TouchTarget)
             .semantics { this.selected = selected }
-            .clickable(role = Role.Tab, onClick = onClick)
+            .clickable(interactionSource = source, indication = null, role = Role.Tab, onClick = onClick)
             .padding(horizontal = 3.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
                 .heightIn(min = 32.dp)
-                .clip(shape)
-                .then(if (selected) Modifier.background(colors.text) else Modifier.border(1.dp, colors.border, shape))
+                .clip(HopiRadius.full)
+                .then(if (selected) Modifier.background(colors.primary) else Modifier.background(colors.background).border(1.dp, colors.border, HopiRadius.full))
+                .indication(source, LocalIndication.current)
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            BasicText(label, style = HopiType.label.copy(color = if (selected) colors.onText else colors.text))
+            BasicText(label, style = HopiType.label.copy(color = if (selected) colors.onPrimary else colors.text))
             BasicText(
                 count.toString(),
-                style = HopiType.meta.copy(color = if (selected) colors.onText.copy(alpha = 0.7f) else colors.textFaint),
+                style = HopiType.meta.copy(color = if (selected) colors.onPrimary.copy(alpha = 0.7f) else countColor),
             )
         }
     }
 }
 
-/** A labelled action with a leading icon; the label is what screen readers announce. */
+/**
+ * A labelled action with a leading icon (shadcn's secondary button, or tinted in [tone]); the label
+ * is what screen readers announce.
+ */
 @Composable
 internal fun ActionButton(
     vector: ImageVector,
@@ -113,28 +143,31 @@ internal fun ActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    tone: HopiTone? = null,
 ) {
     val colors = LocalHopiColors.current
-    val shape = RoundedCornerShape(10.dp)
+    val source = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .heightIn(min = TouchTarget)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 3.dp)
-            .alpha(if (enabled) 1f else 0.35f),
+            .alpha(if (enabled) 1f else 0.5f),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
                 .heightIn(min = 36.dp)
-                .clip(shape)
-                .background(colors.surface)
+                .clip(HopiRadius.md)
+                .background(tone?.bg ?: colors.muted)
+                .then(if (tone != null) Modifier.border(1.dp, tone.border, HopiRadius.md) else Modifier)
+                .indication(source, LocalIndication.current)
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(vector, colors.text, size = 16.dp)
+            Icon(vector, tone?.fg ?: colors.text, size = 16.dp)
             Spacer(Modifier.width(8.dp))
-            BasicText(label, style = HopiType.label.copy(color = colors.text), maxLines = 1)
+            BasicText(label, style = HopiType.label.copy(color = tone?.fg ?: colors.text), maxLines = 1)
         }
     }
 }
@@ -159,46 +192,18 @@ internal fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing:
     }
 }
 
-/**
- * An on/off switch in monochrome: a filled track with the knob at the end when on, an outlined one
- * at the start when off. [description] names what it switches, for screen readers and tests.
- */
+/** A small tinted pill in capitals (`MOCK`, `EDIT`): what a rule did to a request, in [tone]'s hue. */
 @Composable
-internal fun Switch(checked: Boolean, description: String, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalHopiColors.current
-    val track = RoundedCornerShape(50)
-    Box(
-        modifier = modifier
-            .size(TouchTarget)
-            .semantics { contentDescription = description }
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier
-                .size(width = 36.dp, height = 20.dp)
-                .clip(track)
-                .then(if (checked) Modifier.background(colors.text) else Modifier.border(1.5.dp, colors.textFaint, track))
-                .padding(3.dp),
-            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-        ) {
-            Box(Modifier.size(14.dp).clip(CircleShape).background(if (checked) colors.onText else colors.textFaint))
-        }
-    }
-}
-
-/** A small outlined label in capitals (`MOCK`, `EDIT`): what a rule did to a request. */
-@Composable
-internal fun Tag(text: String, modifier: Modifier = Modifier) {
-    val colors = LocalHopiColors.current
-    val shape = RoundedCornerShape(4.dp)
+internal fun Tag(text: String, tone: HopiTone, modifier: Modifier = Modifier) {
     BasicText(
         text,
+        // A shaped fill, not a clip: a clip is a graphics layer, and every ruled list row has a tag.
         modifier = modifier
-            .border(1.dp, colors.textFaint, shape)
-            .padding(horizontal = 4.dp, vertical = 1.dp)
+            .background(tone.bg, HopiRadius.full)
+            .border(1.dp, tone.border, HopiRadius.full)
+            .padding(horizontal = 6.dp, vertical = 1.dp)
             .clearAndSetSemantics { contentDescription = text.lowercase() },
-        style = HopiType.section.copy(color = colors.textMuted),
+        style = HopiType.section.copy(color = tone.fg),
         maxLines = 1,
         softWrap = false,
     )

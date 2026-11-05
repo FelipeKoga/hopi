@@ -13,11 +13,11 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.streams.asSequence
 
-/** Something the viewer can reach an app on: an adb device, a booted simulator, a JVM process. */
+/** Something the viewer can reach an app on: an adb device, a booted simulator, a USB iPhone, a JVM process. */
 internal sealed interface Device {
     val platform: Platform
 
-    /** What [Targets.open] takes: the adb serial, the simulator UDID, the JVM bridge file. */
+    /** What [Targets.open] takes: the adb serial, the simulator or iPhone UDID, the JVM bridge file. */
     val id: String
     val label: String
     val ready: Boolean
@@ -35,6 +35,14 @@ internal data class SimulatorDevice(val udid: String, val name: String, val os: 
     override val platform: Platform get() = Platform.Ios
     override val id: String get() = udid
     override val label: String get() = if (os != null) "$name, $os" else name
+    override val ready: Boolean get() = true
+}
+
+/** An iPhone attached over USB (usbmuxd); [name] and [os] are devicectl's, when it knows the device. */
+internal data class UsbIphoneDevice(val udid: String, val name: String?, val os: String?) : Device {
+    override val platform: Platform get() = Platform.Ios
+    override val id: String get() = udid
+    override val label: String get() = "${name ?: udid} (USB)" + (os?.let { ", $it" } ?: "")
     override val ready: Boolean get() = true
 }
 
@@ -77,8 +85,8 @@ internal class Discovery(val devices: List<Device>, val notes: List<String>) {
 internal fun defaultJvmBridgeRoot(): Path = Paths.get(System.getProperty("java.io.tmpdir"), "hopi")
 
 /**
- * Lists every target; blocking (adb and simctl subprocesses), so off the UI thread. A platform
- * whose tool fails is left out with a note instead of failing the others.
+ * Lists every target; blocking (adb, simctl and devicectl subprocesses, usbmuxd), so off the UI
+ * thread. A platform whose tool fails is left out with a note instead of failing the others.
  */
 internal fun discover(targets: Targets, jvmRoot: Path?, androids: List<AdbDevice>? = null): Discovery {
     val notes = mutableListOf<String>()
@@ -100,7 +108,13 @@ internal fun discover(targets: Targets, jvmRoot: Path?, androids: List<AdbDevice
         notes += e.message.orEmpty()
         emptyList()
     }
-    return Discovery(android + simulators + jvmBridges(jvmRoot), notes)
+    val iphones = try {
+        targets.usbIphones()?.map { UsbIphoneDevice(it.udid, it.name, it.os) }.orEmpty()
+    } catch (e: CliException) {
+        notes += e.message.orEmpty()
+        emptyList()
+    }
+    return Discovery(android + simulators + iphones + jvmBridges(jvmRoot), notes)
 }
 
 private fun androidBridges(targets: Targets, serial: String): List<String> = try {

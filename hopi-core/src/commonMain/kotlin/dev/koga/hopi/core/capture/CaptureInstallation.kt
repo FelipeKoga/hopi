@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.capture
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.bridge.AgentBridgeHook
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.log.applyBeforeProcessDeath
@@ -11,10 +11,12 @@ import dev.koga.hopi.core.store.HopiStore
 import kotlin.concurrent.atomics.AtomicBoolean
 
 /**
- * What every recorder does once when it is installed (the Ktor plugin per client, URLSession
- * capture per process), so the store semantics are the same whichever installs first: the first
- * installation sets the caps, redaction is the union, the summary log sink and the agent bridge
- * start once per process, for the default store only.
+ * What every recorder does once when it is installed, so the store semantics are the same whichever
+ * installs first: the Ktor plugin's recorder at each client's install (the start's settings first,
+ * then the client's), Android capture at its first recorded request, URLSession capture at start,
+ * and the start sequence itself with `agentBridge`. The first installation sets the caps (unless
+ * the start preset them), redaction is the union, the summary log sink and the agent bridge start
+ * once per process, for the default store only.
  */
 @HopiInternalApi
 public object CaptureInstallation {

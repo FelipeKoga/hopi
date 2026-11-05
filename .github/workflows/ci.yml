@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  # Every branch and every tag.
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Xcode 27.1, the one this repository is built and verified with (README). The repository variables
+  # HOPI_XCODE (an Xcode .app path) and HOPI_RUNNER (a runner label) replace it and the runner without
+  # an edit, for instance /Applications/Xcode_26.6.app on macos-26.
+  DEVELOPER_DIR: ${{ vars.HOPI_XCODE || '/Applications/Xcode_27.1.app' }}/Contents/Developer
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    # xcode-27: macOS 27 with Xcode 27.1 and the iOS 27 simulators, the development Mac's toolchain
+    # (3 M1 cores, 7 GB). A preview image whose label actionlint does not know yet, hence the expression.
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Read the Kotlin version
+        id: kotlin
+        run: |
+          version=$(sed -n 's/^kotlin = "\([^"]*\)".*/\1/p' gradle/libs.versions.toml | head -n 1)
+          [ -n "$version" ] || { echo "::error file=gradle/libs.versions.toml::no kotlin version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Kotlin/Native (~/.konan)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
+      # The Kotlin Gradle plugin 2.2.21 runs the iOS simulator tests on the first device of the newest
+      # iOS runtime that `xcrun simctl list devices available` prints (XcodeDefaultTestDevicesValueSource):
+      # on xcode-27 the iPhone Duo (iOS 27.1), as on the development Mac. This prints it, and fails here
+      # rather than in the tests when there is none.
+      - name: Show the Xcode and the iOS simulator the tests use
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | awk '
+            /-- .* --/ { ios = ($2 == "iOS"); runtime = $2 " " $3; next }
+            ios && / \([0-9A-F]+-[0-9A-F-]+\)/ { device = $0; picked = runtime; ios = 0 }
+            END {
+              if (device == "") { print "::error::no available iOS simulator"; exit 1 }
+              sub(/^ +/, "", device); sub(/ \([0-9A-F]+-[0-9A-F-]+\).*/, "", device)
+              print "iOS simulator tests: " device " (" picked ")"
+            }'
+      # The image has every Android SDK package this needs: platforms;android-37.0 (compileSdk 37),
+      # platforms;android-36 (the plugin's TestKit fixtures) and build-tools;36.0.0 (AGP 9.4.0's).
+      - name: Base check
+        run: |
+          ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-network:jvmTest \
+            :hopi-cli:test :hopi-connect:test :hopi-desktop:test \
+            :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest check \
+            :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseHasNoRuntime :hopi-network:testAndroidHostTest \
+            :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
+      - name: Upload the build reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-reports
+          path: '**/build/reports/'
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
+      # What the compat job consumes, rooted at the workspace (the two paths' common ancestor).
+      # overwrite: a re-run of this job uploads it again under the same name.
+      - name: Upload the publication repositories
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publication-repos
+          path: |
+            build/publication-check/
+            gradle-plugin/build/functional-repo/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  compat:
+    needs: check
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Read the Kotlin version
+        id: kotlin
+        run: |
+          version=$(sed -n 's/^kotlin = "\([^"]*\)".*/\1/p' gradle/libs.versions.toml | head -n 1)
+          [ -n "$version" ] || { echo "::error file=gradle/libs.versions.toml::no kotlin version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Kotlin/Native (~/.konan)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
+      # functionalTestFloor and compat/android build at compileSdk 34, with build tools 34.0.0 on AGP
+      # 8.0.2; the image starts at android-35 and build-tools 35.0.0.
+      - name: Install the floor's Android SDK packages
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$sdkmanager" --licenses > /dev/null
+          "$sdkmanager" --install "platforms;android-34" "build-tools;34.0.0"
+      - name: Download the publication repositories
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: publication-repos
+          path: ${{ github.workspace }}
+      # Then stops the daemon, so that compat/run.sh's builds (--no-daemon) have the memory to themselves.
+      - name: Plugin TestKit tests on the floor
+        run: |
+          ./gradlew :gradle-plugin:hopi-gradle-plugin:functionalTestFloor
+          ./gradlew --stop
+      - name: Consumer matrix
+        run: compat/run.sh
+      - name: Upload the compat logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-logs
+          path: |
+            build/compat/*.log
+            gradle-plugin/hopi-gradle-plugin/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true

@@ -303,6 +303,10 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             listOrNote("simctl") { targets.simulators() }?.forEach {
                 lines += listOf(Platform.Ios.id, it.udid, "booted", it.name, it.os)
             }
+            // After the simulators, so their lines keep their places.
+            listOrNote("usbmuxd") { targets.usbIphones() }?.forEach {
+                lines += listOf(Platform.Ios.id, it.udid, "usb", it.name, it.os)
+            }
         }
         if (args.json) {
             lines.forEach { (platform, id, state, name, os) ->

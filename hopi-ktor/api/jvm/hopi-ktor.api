@@ -1,4 +1,5 @@
 public final class dev/koga/hopi/ktor/HopiConfig {
+	public static final field DEFAULT_MAX_BODY_BYTES J
 	public fun <init> ()V
 	public final fun getAgentBridge ()Z
 	public final fun getEnabled ()Z

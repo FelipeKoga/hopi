@@ -4,16 +4,17 @@ import XCTest
 
 /// Swift concurrency's URLSession APIs, which Kotlin/Native cannot call, recorded by automatic
 /// URLSession capture: each request gives exactly one record, `source = urlsession`. Runs inside
-/// the host app (which called `HopiUrlSession.shared.start()`) against the sample's dev server;
+/// the host app (which called `HopiSetup.shared.start()`) against the sample's dev server;
 /// `sample/iosApp/scripts/capture-swift-test.sh` starts the server and runs this target.
 final class CaptureTests: XCTestCase {
     private let base = URL(string: "http://127.0.0.1:8765")!
 
     override func setUp() {
         super.setUp()
-        // Idempotent: the host app started capture already.
-        HopiUrlSession.shared.start()
-        XCTAssertTrue(HopiUrlSession.shared.isStarted)
+        // Idempotent: the host app started Hopi already. This target builds only against a Debug
+        // framework with Hopi (it names SampleCaptureProbe and hopi-start's Hopi).
+        HopiSetup.shared.start()
+        XCTAssertTrue(Hopi.shared.isStarted)
     }
 
     func testDataForRequest() async throws {

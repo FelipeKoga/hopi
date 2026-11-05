@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * The capability table of docs/design/rules.md ("Capability by source") as data: for each source a
@@ -19,7 +19,8 @@ public object Capabilities {
         "body edits apply to HTTPBody and upload-from-data tasks only on URLSession; file and stream uploads keep their body " +
             "(the rule's other edits still apply)"
     public const val NOT_FOLLOWED: String =
-        "a mocked 3xx, 401 or 407 reaches the app as the final response on this source; the client does not follow it"
+        "a mocked 3xx, 401 or 407 reaches the client as the final response on this source: OkHttp, HttpURLConnection " +
+            "and URLSession do not follow it; a client above them (Ktor's HttpRedirect, Auth) still does"
 
     /**
      * Every entry for [spec] on the sources its match names; when it names none, on the sources that
@@ -67,9 +68,8 @@ public object Capabilities {
     /**
      * True when every source [unsupported] checks [spec] against (the named ones, or
      * [platformSources] when it names none) excludes it, whatever its switch says (a response edit
-     * aimed at URLSession only). False does not mean a source applies it: a named source this
-     * platform lacks excludes nothing yet never reads its array, and on iOS the Ktor plugin defers
-     * to URLSession capture for the Darwin engine.
+     * aimed at URLSession only, or on iOS one that names no sources). False does not mean a source
+     * applies it: a named source this platform lacks excludes nothing yet never reads its array.
      */
     public fun appliesNowhere(spec: RuleSpec): Boolean = sourcesOf(spec).none { applies(it, spec) }
 

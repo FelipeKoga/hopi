@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """Runs one giant-JSON measurement on the emulator: force-stops the sample, launches it with
-`--es giant <spec>` (and `--el maxBodyBytes N`), waits for the run's `done` line, and appends every
-`HopiSample` JSON line to an NDJSON file, with `dumpsys meminfo` read before the first run
-(during the spec's `delay`) and after the last, plus any ANR / OOM / crash lines from logcat.
+`--es giant <spec>`, waits for the run's `done` line, and appends every `HopiSample` JSON line to an
+NDJSON file, with `dumpsys meminfo` read before the first run (during the spec's `delay`) and after
+the last, plus any ANR / OOM / crash lines from logcat.
 
-usage: giant.py <label> <spec> <out.ndjson> [--cap BYTES] [--store BYTES] [--timeout S] [--poll]
---store sets Hopi's store byte cap (`--el maxTotalBytes`); the plugin clamps the cap to half.
+usage: giant.py <label> <spec> <out.ndjson> [--cap BYTES] [--store BYTES] [--build] [--timeout S] [--poll]
+--cap and --store are capture's per-body and store byte caps (the body cap is clamped to half the
+store's). They go to the launch as `--el maxBodyBytes` / `--el maxTotalBytes`, the Ktor plugin's own
+caps, and label the run (`cap`, `store`, and its header line's `capBytes`, `storeBytes`). On Android
+OkHttp capture and the store take the caps the installed APK was built with, so measure one built
+with the same `-Psample.maxBodyBytes` / `-Psample.maxTotalBytes`
+(`./gradlew :sample:androidApp:assembleDebug -Psample.maxBodyBytes=N`), or pass --build.
+--build first builds and installs the working tree's debug sample with those caps (the build's
+defaults without them): one Gradle build that replaces the installed app, so never from a script
+that installed the APK it measures.
 --poll samples dumpsys meminfo every second while it runs (for the peak; it perturbs timing).
 """
 import json, os, re, subprocess, sys, time
 
 ADB = os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
 PKG = "dev.koga.hopi.sample"
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def adb(*a, check=True):
@@ -30,6 +39,16 @@ def meminfo():
     return fields
 
 
+def install_with_caps(cap, store):
+    """Builds and installs the debug sample with these capture caps (one Gradle build)."""
+    command = [os.path.join(REPO, "gradlew"), ":sample:androidApp:installDebug", "--console=plain", "-q"]
+    if cap:
+        command.append("-Psample.maxBodyBytes=" + cap)
+    if store:
+        command.append("-Psample.maxTotalBytes=" + store)
+    subprocess.run(command, cwd=REPO, check=True)
+
+
 def main():
     label, spec, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
     args = sys.argv[4:]
@@ -39,6 +58,8 @@ def main():
     poll = "--poll" in args
     if "delay=" not in spec:
         spec += ";delay=6"
+    if "--build" in args:
+        install_with_caps(cap, store)
     adb("shell", "am", "force-stop", PKG)
     adb("logcat", "-c")
     start = ["shell", "am", "start", "-W", "-n", PKG + "/.MainActivity", "--es", "giant", "'" + spec + "'"]

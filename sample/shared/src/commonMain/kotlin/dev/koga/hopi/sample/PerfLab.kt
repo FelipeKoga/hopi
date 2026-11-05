@@ -154,7 +154,7 @@ internal class PerfLabRun(
         }
         // The frames monitor attaches with one main-thread message, the sampler takes its first point.
         delay(SETTLE_MS)
-        line("{\"perfLab\":\"start\",\"build\":\"${if (SampleBuild.realHopi) "real" else "noop"}\",\"heartbeat\":$heartbeat,\"running\":\"${HopiPerf.running.joinToString(",")}\"}")
+        line("{\"perfLab\":\"start\",\"build\":\"${if (SampleBuild.realHopi) "real" else "nohopi"}\",\"heartbeat\":$heartbeat,\"running\":\"${HopiPerf.running.joinToString(",")}\"}")
         if (wants("jank")) {
             for (ms in listOf(20L, 50L, 100L)) {
                 val from = labWallMs()
@@ -312,7 +312,7 @@ internal fun PerfLabScreen(verify: Set<String>?, onVerifyStarted: () -> Unit, on
             SampleButton("Stop every monitor", primary = false, modifier = Modifier.fillMaxWidth(), onClick = { HopiPerf.stop() })
             Caption(
                 "Each run starts every monitor (frames, hangs, CPU, memory) and leaves them running. " +
-                    "Read the result in Hopi's Perf tab, with `hopi perf snapshot` or `hopi hangs`.",
+                    "Read the result in the desktop viewer's Perf panel, with `hopi perf snapshot` or `hopi hangs`.",
             )
             lines.forEach { Body(it) }
         }

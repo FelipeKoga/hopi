@@ -2,7 +2,7 @@
 
 package dev.koga.hopi.core.bridge
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.store.HopiStore
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlinx.cinterop.ExperimentalForeignApi

@@ -1,0 +1,153 @@
+{
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "list",
+      "devices",
+      "--json-output",
+      "/tmp/hopi-devicectl123/devices.json"
+    ],
+    "commandType" : "devicectl.list.devices",
+    "environment" : {
+      "TERM" : "xterm-256color"
+    },
+    "jsonVersion" : 5,
+    "outcome" : "success",
+    "version" : "651.13.5"
+  },
+  "result" : {
+    "devices" : [
+      {
+        "connectionProperties" : {
+          "authenticationType" : "implicit",
+          "isMobileDeviceOnly" : false,
+          "pairingState" : "paired",
+          "potentialHostnames" : [
+
+          ],
+          "transportType" : "sameMachine",
+          "tunnelState" : "disconnected"
+        },
+        "deviceProperties" : {
+          "bootState" : "shutdown",
+          "name" : "iPhone 16",
+          "osVersionNumber" : "18.2"
+        },
+        "hardwareProperties" : {
+          "deviceType" : "iPhone",
+          "marketingName" : "iPhone 16",
+          "platform" : "iOS",
+          "productType" : "iPhone17,3",
+          "reality" : "simulated",
+          "udid" : "90E767A1-5F25-4E8E-B1B2-D1A8F53295FA"
+        },
+        "identifier" : "90E767A1-5F25-4E8E-B1B2-D1A8F53295FA",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "deviceType" : "iPhone",
+            "marketingName" : "iPhone 16",
+            "platform" : "iOS",
+            "productType" : "iPhone17,3",
+            "reality" : "simulated",
+            "udid" : "90E767A1-5F25-4E8E-B1B2-D1A8F53295FA"
+          },
+          "software" : {
+            "osVersionNumber" : {
+              "components" : [
+                18,
+                2,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "18.2"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "iPhone 16",
+            "visibilityClass" : "simulators"
+          }
+        },
+        "visibilityClass" : "simulators"
+      },
+      {
+        "connectionProperties" : {
+          "pairingState" : "paired",
+          "transportType" : "wired",
+          "tunnelState" : "connected"
+        },
+        "deviceProperties" : {
+          "bootState" : "booted",
+          "name" : "Koga’s iPhone",
+          "osVersionNumber" : "26.0"
+        },
+        "hardwareProperties" : {
+          "deviceType" : "iPhone",
+          "marketingName" : "iPhone 16 Pro",
+          "platform" : "iOS",
+          "productType" : "iPhone17,1",
+          "reality" : "physical",
+          "udid" : "00008140-001A2B3C4D5E801E"
+        },
+        "identifier" : "5B0F1C2D-3E4F-4A5B-8C6D-7E8F9A0B1C2D",
+        "properties" : {
+          "connection" : {
+            "pairingState" : "paired",
+            "state" : "connected",
+            "transportType" : "wired"
+          },
+          "hardware" : {
+            "deviceType" : "iPhone",
+            "marketingName" : "iPhone 16 Pro",
+            "platform" : "iOS",
+            "productType" : "iPhone17,1",
+            "reality" : "physical",
+            "udid" : "00008140-001A2B3C4D5E801E"
+          },
+          "software" : {
+            "osVersionNumber" : {
+              "components" : [
+                26,
+                0,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "26.0"
+            }
+          },
+          "state" : {
+            "bootState" : "booted",
+            "name" : "Koga’s iPhone"
+          }
+        }
+      },
+      {
+        "connectionProperties" : {
+          "pairingState" : "paired",
+          "transportType" : "wired"
+        },
+        "deviceProperties" : {
+          "name" : "Test iPad",
+          "osVersionNumber" : "17.5.1"
+        },
+        "hardwareProperties" : {
+          "deviceType" : "iPad",
+          "platform" : "iOS",
+          "reality" : "physical",
+          "udid" : "00008027-000C1D2E3F40002E"
+        },
+        "identifier" : "0F1E2D3C-4B5A-4968-8776-655443322110"
+      }
+    ]
+  }
+}

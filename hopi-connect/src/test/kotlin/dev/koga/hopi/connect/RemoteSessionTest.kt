@@ -255,7 +255,7 @@ class RemoteSessionTest {
         val session = session().connected()
         app.add { completeTx(it, url = "https://api.example.com/old") }
         session.awaitLocal { it.size == 1 }
-        // The app clears its own store (its in-app screen, say): no event reaches the tail.
+        // The app's store is cleared from elsewhere (another viewer's `hopi clear`, say): no event reaches the tail.
         app.clear()
         session.select(1)
         val gone = session.awaitLocal { list -> list.single().responseBody?.isGone == true }.single()

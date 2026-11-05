@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # The workflows' actions, pinned to commit SHAs: one weekly pull request for all of them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci

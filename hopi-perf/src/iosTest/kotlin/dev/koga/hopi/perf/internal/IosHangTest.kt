@@ -27,7 +27,7 @@ class IosHangTest {
     @BeforeTest
     fun setUp() {
         assertTrue(NSThread.isMainThread, "the tests drive the main run loop from the main thread")
-        HopiPerf.install { summaryLog = false }
+        startPerfTool()
         since = perfData().lastSeq
     }
 

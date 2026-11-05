@@ -5,7 +5,7 @@
 // - Show manifest properties: true
 // - Show declarations: true
 
-// Library unique name: <dev.koga.hopi:hopi-ktor>
+// Library unique name: <io.github.felipekoga.hopi:hopi-ktor>
 final enum class dev.koga.hopi.ktor/HopiLogSink : kotlin/Enum<dev.koga.hopi.ktor/HopiLogSink> { // dev.koga.hopi.ktor/HopiLogSink|null[0]
     enum entry Off // dev.koga.hopi.ktor/HopiLogSink.Off|null[0]
     enum entry Summary // dev.koga.hopi.ktor/HopiLogSink.Summary|null[0]

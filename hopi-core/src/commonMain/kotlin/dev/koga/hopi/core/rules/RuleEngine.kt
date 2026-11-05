@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.AtomicReference
@@ -163,8 +163,12 @@ public object RuleEngine {
         return { updateListeners { current -> current.filterNot { it === listener } } }
     }
 
-    /** Republishes without the rule whose claim reached its `times`; on the claiming thread, once per rule. */
-    internal fun republishAfterExhaustion() {
+    /**
+     * Republishes without the rule whose claim reached its `times`; on the claiming thread, once per
+     * rule. Public for `hopi-network`'s URLSession rule mirror, whose library's hooks claim in native
+     * code and call this back on its capture queue.
+     */
+    public fun republishAfterExhaustion() {
         mutate { current -> Change(current.entries) }
     }
 

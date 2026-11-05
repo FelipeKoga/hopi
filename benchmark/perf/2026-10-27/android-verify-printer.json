@@ -1,0 +1,366 @@
+{
+ "platform": "android",
+ "done": true,
+ "snapshotExit": 0,
+ "snapshotError": "",
+ "hangsExit": 0,
+ "lab": [
+  {
+   "perfLab": "start",
+   "build": "real",
+   "heartbeat": false,
+   "running": "Memory,Hangs,Cpu,Frames"
+  },
+  {
+   "perfLab": "jank",
+   "blockMs": 20,
+   "frames": 30,
+   "from": 1793139831192,
+   "to": 1793139831964
+  },
+  {
+   "perfLab": "jank",
+   "blockMs": 50,
+   "frames": 30,
+   "from": 1793139833468,
+   "to": 1793139835149
+  },
+  {
+   "perfLab": "jank",
+   "blockMs": 100,
+   "frames": 30,
+   "from": 1793139836654,
+   "to": 1793139839860
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 200,
+   "actualMs": 205,
+   "mainBackMs": 207,
+   "from": 1793139841365,
+   "to": 1793139841570
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 300,
+   "actualMs": 310,
+   "mainBackMs": 312,
+   "from": 1793139843078,
+   "to": 1793139843388
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 1000,
+   "actualMs": 1004,
+   "mainBackMs": 1006,
+   "from": 1793139844892,
+   "to": 1793139845896
+  },
+  {
+   "perfLab": "hang",
+   "fn": "hang",
+   "ms": 3000,
+   "actualMs": 3000,
+   "mainBackMs": 3003,
+   "from": 1793139847401,
+   "to": 1793139850401
+  },
+  {
+   "perfLab": "hang",
+   "fn": "burn",
+   "ms": 600,
+   "actualMs": 601,
+   "mainBackMs": 601,
+   "from": 1793139851918,
+   "to": 1793139852519
+  },
+  {
+   "perfLab": "dialog",
+   "ms": 5000,
+   "from": 1793139854022,
+   "to": 1793139859025
+  },
+  {
+   "perfLab": "cpu",
+   "threads": 2,
+   "ms": 5000,
+   "from": 1793139860532,
+   "to": 1793139866035
+  },
+  {
+   "perfLab": "alloc",
+   "kind": "heap",
+   "mb": 64,
+   "held": 67108864,
+   "from": 1793139867538,
+   "to": 1793139871609
+  },
+  {
+   "perfLab": "alloc",
+   "kind": "native",
+   "mb": 64,
+   "from": 1793139873113,
+   "to": 1793139877176
+  },
+  {
+   "perfLab": "memory",
+   "posted": false,
+   "at": 1793139878696
+  },
+  {
+   "perfLab": "done",
+   "running": "Memory,Hangs,Cpu,Frames",
+   "at": 1793139880261
+  },
+  {
+   "perfLab": "hang",
+   "fn": "clickBurn",
+   "ms": 600,
+   "actualMs": 600,
+   "from": 1793139882422,
+   "to": 1793139883022
+  }
+ ],
+ "references": {
+  "framestats-20": {
+   "frames": 30,
+   "over2Deadlines": 30,
+   "worstMs": 72.6
+  },
+  "framestats-50": {
+   "frames": 30,
+   "over2Deadlines": 30,
+   "worstMs": 133.9
+  },
+  "framestats-100": {
+   "frames": 30,
+   "over2Deadlines": 30,
+   "worstMs": 238.6
+  },
+  "meminfo-before": {
+   "javaHeapKb": 14056,
+   "nativeHeapKb": 13488,
+   "totalRssKb": 173512
+  },
+  "cpuProcStatPercent": 199.4,
+  "meminfo-base": {
+   "javaHeapKb": 14876,
+   "nativeHeapKb": 13480,
+   "totalRssKb": 180324
+  },
+  "meminfo-heap": {
+   "growthMb": 63.8,
+   "totalRssMb": 239.9
+  },
+  "meminfo-native": {
+   "growthMb": -2.7,
+   "totalRssMb": 173.2
+  },
+  "trimSent": [
+   "RUNNING_CRITICAL",
+   "BACKGROUND"
+  ]
+ },
+ "checks": [
+  {
+   "check": "jank 20 ms x30: slow, not janky",
+   "ok": true,
+   "seen": "3 janky (gfxinfo, from the intended vsync: 30)",
+   "expected": "<= 3 of 30"
+  },
+  {
+   "check": "jank 50 ms x30: janky frames",
+   "ok": true,
+   "seen": "31 janky, worst 88.8 ms; gfxinfo {'frames': 30, 'over2Deadlines': 30, 'worstMs': 133.9}",
+   "expected": ">= 28 (design) and gfxinfo's count +-3"
+  },
+  {
+   "check": "jank 50 ms x30: the block in the frame",
+   "ok": true,
+   "seen": "animation stage median 52.8 ms, max 58.6 ms (frame up to 88.8 ms, render included)",
+   "expected": "50 ms -2/+10"
+  },
+  {
+   "check": "jank 100 ms x30: janky frames",
+   "ok": true,
+   "seen": "31 janky, worst 144.2 ms; gfxinfo {'frames': 30, 'over2Deadlines': 30, 'worstMs': 238.6}",
+   "expected": ">= 28 (design) and gfxinfo's count +-3"
+  },
+  {
+   "check": "jank 100 ms x30: the block in the frame",
+   "ok": true,
+   "seen": "animation stage median 103.2 ms, max 110 ms (frame up to 144.2 ms, render included)",
+   "expected": "100 ms -2/+10"
+  },
+  {
+   "check": "hang hang 200 ms: none",
+   "ok": true,
+   "seen": "0 hangs",
+   "expected": "0 (under the 250 ms threshold)"
+  },
+  {
+   "check": "hang hang 300 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 311 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang hang 300 ms: duration",
+   "ok": true,
+   "seen": "311 ms",
+   "expected": "310 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang hang 300 ms: stack names PerfLab.hang",
+   "ok": true,
+   "seen": "1 stacks, captureUs [1352]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang hang 1000 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 1004 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang hang 1000 ms: duration",
+   "ok": true,
+   "seen": "1004 ms",
+   "expected": "1004 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang hang 1000 ms: stack names PerfLab.hang",
+   "ok": true,
+   "seen": "2 stacks, captureUs [622, 425, 638]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang hang 3000 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 3001 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang hang 3000 ms: duration",
+   "ok": true,
+   "seen": "3001 ms",
+   "expected": "3000 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang hang 3000 ms: stack names PerfLab.hang",
+   "ok": true,
+   "seen": "3 stacks, captureUs [634, 687, 540]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang burn 600 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 602 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang burn 600 ms: duration",
+   "ok": true,
+   "seen": "602 ms",
+   "expected": "601 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang burn 600 ms: stack names PerfLab.burn",
+   "ok": true,
+   "seen": "2 stacks, captureUs [282, 137]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "hang clickBurn 600 ms: one hang",
+   "ok": true,
+   "seen": "1 hangs, 603 ms",
+   "expected": "1"
+  },
+  {
+   "check": "hang clickBurn 600 ms: duration",
+   "ok": true,
+   "seen": "603 ms",
+   "expected": "600 ms measured in the unit, +-20"
+  },
+  {
+   "check": "hang clickBurn 600 ms: stack names PerfLab.clickBurn",
+   "ok": true,
+   "seen": "2 stacks, captureUs [359, 230]",
+   "expected": "a frame with it"
+  },
+  {
+   "check": "dialog 5 s: no fake jank",
+   "ok": true,
+   "seen": "1 janky frames inside",
+   "expected": "<= 1"
+  },
+  {
+   "check": "cpu 2 threads x 5 s: process %",
+   "ok": true,
+   "seen": "197.8 % over 4 samples; /proc 199.4 % (whole step)",
+   "expected": "200 +-15 %, of one core"
+  },
+  {
+   "check": "alloc heap 64 MB: Java heap",
+   "ok": true,
+   "seen": "+63.9 MB; meminfo {'growthMb': 63.8, 'totalRssMb': 239.9}",
+   "expected": "+64 MB +-5 %"
+  },
+  {
+   "check": "alloc heap 64 MB: resident",
+   "ok": true,
+   "seen": "+63.8 MB",
+   "expected": "+64 MB +-10 %"
+  },
+  {
+   "check": "alloc native 64 MB: native heap",
+   "ok": true,
+   "seen": "+64.0 MB; meminfo {'growthMb': -2.7, 'totalRssMb': 173.2}",
+   "expected": "+64 MB +-10 %"
+  },
+  {
+   "check": "alloc native 64 MB: resident",
+   "ok": true,
+   "seen": "+61.5 MB",
+   "expected": "+64 MB +-10 %"
+  },
+  {
+   "check": "memory events",
+   "ok": true,
+   "seen": "3: [('trim', 15), ('trim', 20), ('trim', 40)]; sent ['RUNNING_CRITICAL', 'BACKGROUND']",
+   "expected": ">= 2"
+  },
+  {
+   "check": "summary: hangs counted",
+   "ok": null,
+   "seen": {
+    "count": 5,
+    "totalMs": 5521,
+    "worstMs": 3001,
+    "debugger": 0
+   },
+   "expected": "for the record"
+  },
+  {
+   "check": "summary: frames",
+   "ok": null,
+   "seen": {
+    "count": 110,
+    "slow": 95,
+    "janky": 71,
+    "frozen": 0,
+    "excluded": 0,
+    "firstFrames": 0,
+    "metricsLost": 0,
+    "p50Ms": 69,
+    "p90Ms": 134,
+    "p99Ms": 140,
+    "maxMs": 144.2
+   },
+   "expected": "for the record"
+  }
+ ]
+}

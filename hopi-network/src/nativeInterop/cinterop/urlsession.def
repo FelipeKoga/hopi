@@ -1,0 +1,6 @@
+language = Objective-C
+package = dev.koga.hopi.network.internal.urlsession
+headers = hopi_urlsession.h
+headerFilter = hopi_urlsession.h
+staticLibraries = libhopi_urlsession.a
+linkerOpts = -framework Foundation

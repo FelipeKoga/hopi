@@ -18,6 +18,7 @@ import kotlinx.cinterop.free
 import kotlinx.cinterop.nativeHeap
 import kotlinx.cinterop.set
 import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -31,6 +32,11 @@ import platform.UIKit.UIApplicationDidReceiveMemoryWarningNotification
  * the simulator.
  */
 class IosSamplingTest {
+    @BeforeTest
+    fun setUp() {
+        startPerfTool()
+    }
+
     @AfterTest
     fun tearDown() {
         stopAll()
@@ -77,7 +83,6 @@ class IosSamplingTest {
             cpu = true
             memory = true
             sampleIntervalMs = 250
-            summaryLog = false
         }
         assertTrue(runMainLoopUntil(1_000) { perfThreads().isNotEmpty() })
         assertEquals(listOf("hopi-perf-samp"), perfThreads())
@@ -96,10 +101,7 @@ class IosSamplingTest {
 
     @Test
     fun memoryWarningsAreEventsOnlyWhileMemoryRuns() {
-        HopiPerf.start {
-            memory = true
-            summaryLog = false
-        }
+        HopiPerf.start { memory = true }
         val data = perfData()
         val since = data.lastSeq
         NSNotificationCenter.defaultCenter.postNotificationName(UIApplicationDidReceiveMemoryWarningNotification, null)
@@ -112,7 +114,7 @@ class IosSamplingTest {
 
     @Test
     fun aFramesOnlyLeaseExpiresWithNoThread() {
-        val controller = assertNotNull(PerfHook.controller ?: run { HopiPerf.install { summaryLog = false }; PerfHook.controller })
+        val controller = assertNotNull(PerfHook.controller)
         controller.start(PerfStartRequest(setOf(PerfMonitor.FRAMES)), PerfOwner.Lease(1))
         assertEquals(setOf(HopiMonitor.Frames), HopiPerf.running)
         assertEquals(emptyList(), perfThreads())

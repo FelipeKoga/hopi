@@ -1,6 +1,7 @@
 package dev.koga.hopi.ui.detail
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
@@ -18,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
@@ -26,6 +26,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -39,9 +44,12 @@ import dev.koga.hopi.ui.component.HairlineDivider
 import dev.koga.hopi.ui.component.IconButton
 import dev.koga.hopi.ui.component.SectionTitle
 import dev.koga.hopi.ui.list.EmptyState
+import dev.koga.hopi.ui.list.statusOf
+import dev.koga.hopi.ui.list.tone
 import dev.koga.hopi.ui.rules.RuleActions
 import dev.koga.hopi.ui.theme.HopiColors
 import dev.koga.hopi.ui.theme.HopiIcons
+import dev.koga.hopi.ui.theme.HopiRadius
 import dev.koga.hopi.ui.theme.HopiType
 import dev.koga.hopi.ui.theme.LocalHopiColors
 
@@ -110,7 +118,7 @@ internal fun TransactionDetailPane(
                     ActionButton(HopiIcons.Copy, DetailTags.COPY_BODY, actions.copyBody, enabled = responseText != null)
                     actions.share?.let { ActionButton(HopiIcons.Share, DetailTags.SHARE, it) }
                     actions.rules?.let { rules ->
-                        rules.mock?.let { ActionButton(HopiIcons.Mock, DetailTags.MOCK, it.run, enabled = it.refusal == null) }
+                        rules.mock?.let { ActionButton(HopiIcons.Mock, DetailTags.MOCK, it.run, enabled = it.refusal == null, tone = colors.violet) }
                     }
                 }
                 // A disabled rule button says why.
@@ -141,9 +149,18 @@ internal fun TransactionDetailPane(
     }
 }
 
+/** shadcn's segmented control at desktop size: a muted track, the selected tab a raised thumb; 48 dp targets. */
 @Composable
 private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiColors) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .drawBehind {
+                val inset = 6.dp.toPx()
+                drawRoundRect(colors.muted, Offset(0f, inset), Size(size.width, size.height - 2 * inset), CornerRadius(8.dp.toPx()))
+            },
+    ) {
         for (tab in DetailTab.entries) {
             val isSelected = tab == selected
             Box(
@@ -151,22 +168,23 @@ private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiCo
                     .weight(1f)
                     .heightIn(min = 48.dp)
                     .semantics { this.selected = isSelected }
-                    .clickable(role = Role.Tab) { onTab(tab) },
+                    .clickable(interactionSource = null, indication = null, role = Role.Tab) { onTab(tab) }
+                    .then(
+                        if (isSelected) {
+                            Modifier.drawBehind {
+                                val topLeft = Offset(3.dp.toPx(), 9.dp.toPx())
+                                val thumb = Size(size.width - 6.dp.toPx(), size.height - 18.dp.toPx())
+                                val corner = CornerRadius(6.dp.toPx())
+                                drawRoundRect(colors.background, topLeft, thumb, corner)
+                                drawRoundRect(colors.border, topLeft, thumb, corner, style = Stroke(1.dp.toPx()))
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(
-                    tab.label,
-                    modifier = Modifier.padding(top = 10.dp, bottom = 12.dp),
-                    style = HopiType.label.copy(color = if (isSelected) colors.text else colors.textFaint),
-                )
-                Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .width(32.dp)
-                        .height(2.dp)
-                        .clip(RoundedCornerShape(1.dp))
-                        .background(if (isSelected) colors.text else colors.background),
-                )
+                BasicText(tab.label, modifier = Modifier.padding(vertical = 14.dp), style = HopiType.label.copy(color = if (isSelected) colors.text else colors.textMuted))
             }
         }
     }
@@ -174,12 +192,23 @@ private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiCo
 
 private fun LazyListScope.overview(model: DetailModel, colors: HopiColors) {
     item(key = "top", contentType = "space") { Spacer(Modifier.height(8.dp)) }
+    // The status in its class's hue (as its badge), the error in red; every other value plain.
+    val statusColor = statusOf(model.transaction).tone(colors).fg
     for (field in model.overview) {
         item(key = "field-${field.label}", contentType = "field") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 BasicText(field.label, style = HopiType.meta.copy(color = colors.textFaint))
                 Spacer(Modifier.height(2.dp))
-                BasicText(field.value, style = HopiType.mono.copy(color = colors.text))
+                BasicText(
+                    field.value,
+                    style = HopiType.mono.copy(
+                        color = when (field.label) {
+                            "Status" -> statusColor
+                            "Error" -> colors.error.fg
+                            else -> colors.text
+                        },
+                    ),
+                )
             }
         }
     }
@@ -209,15 +238,17 @@ private fun LazyListScope.exchange(exchange: ExchangeView, colors: HopiColors) {
     item(key = "body-title", contentType = "title") { SectionTitle("Body", trailing = body.summary) }
     body.notice?.let { notice ->
         item(key = "body-notice", contentType = "notice") {
+            // A warning callout: the body was cut, or not captured at all.
             BasicText(
                 notice,
                 modifier = Modifier
                     .padding(horizontal = 16.dp, vertical = 4.dp)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.surfaceStrong)
+                    .clip(HopiRadius.md)
+                    .background(colors.warning.bg)
+                    .border(1.dp, colors.warning.border, HopiRadius.md)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
-                style = HopiType.meta.copy(color = colors.text),
+                style = HopiType.meta.copy(color = colors.warning.fg),
             )
         }
     }

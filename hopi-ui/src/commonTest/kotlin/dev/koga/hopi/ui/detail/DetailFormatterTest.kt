@@ -5,7 +5,6 @@ import dev.koga.hopi.core.redact.Redactor
 import dev.koga.hopi.ui.complete
 import dev.koga.hopi.ui.pending
 import dev.koga.hopi.ui.platform.MAX_SHARE_CHARS
-import dev.koga.hopi.ui.platform.capForShare
 import dev.koga.hopi.ui.textBody
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -219,7 +218,6 @@ class DetailFormatterTest {
         assertTrue(curl.endsWith("x'"), curl.takeLast(10))
         val share = shareTextOf(model, Redactor.Default)
         assertTrue(share.length <= MAX_SHARE_CHARS, "${share.length}")
-        assertEquals(share, capForShare(share), "the share sheet does not cut it again, inside the quote")
         assertTrue(share.endsWith("x'"))
         assertTrue(!curlBodyWasCut(curlOf(complete(2), Redactor.Default)))
     }

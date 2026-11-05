@@ -1,30 +1,50 @@
 package dev.koga.hopi.ui.desktop
 
+import androidx.compose.foundation.Indication
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.ui.component.focusRing
+import dev.koga.hopi.ui.theme.HopiIndication
 import dev.koga.hopi.ui.theme.HopiTheme
+import dev.koga.hopi.ui.theme.HopiTone
 import dev.koga.hopi.ui.theme.HopiType
 import dev.koga.hopi.ui.theme.LocalHopiColors
 
-/** The inspector's monochrome palette, for a host viewer's own chrome around [HopiPanes]. */
+/** The inspector's palette (shadcn's zinc neutrals and the status tones), for a host viewer's own chrome around [HopiPanes]. */
 @HopiInternalApi
 @Immutable
 public class HopiDesktopColors internal constructor(
     public val background: Color,
+    /** Chrome bands (target bar, status bar, panel headers). */
     public val surface: Color,
-    public val surfaceStrong: Color,
+    /** Secondary buttons, a selected picker chip. */
+    public val muted: Color,
     public val border: Color,
+    /** A focused field's border and its outer ring. */
+    public val ring: Color,
     public val text: Color,
     public val textMuted: Color,
     public val textFaint: Color,
-    /** Text drawn on [text]-colored fills. */
-    public val onText: Color,
+    /** Primary buttons, a switch that is on. */
+    public val primary: Color,
+    public val onPrimary: Color,
+    /** The Destructive button's fill. */
+    public val destructive: Color,
+    public val onDestructive: Color,
+    public val success: HopiTone,
+    public val warning: HopiTone,
+    public val error: HopiTone,
+    public val info: HopiTone,
+    public val neutral: HopiTone,
+    public val violet: HopiTone,
+    public val fuchsia: HopiTone,
 )
 
-/** The inspector's text styles (platform sans and monospace), for the same chrome. */
+/** The inspector's text styles (Open Runde and the platform monospace), for the same chrome. */
 @HopiInternalApi
 public object HopiDesktopType {
     public val title: TextStyle get() = HopiType.title
@@ -49,11 +69,30 @@ public val hopiDesktopColors: HopiDesktopColors
         return HopiDesktopColors(
             background = colors.background,
             surface = colors.surface,
-            surfaceStrong = colors.surfaceStrong,
+            muted = colors.muted,
             border = colors.border,
+            ring = colors.ring,
             text = colors.text,
             textMuted = colors.textMuted,
             textFaint = colors.textFaint,
-            onText = colors.onText,
+            primary = colors.primary,
+            onPrimary = colors.onPrimary,
+            destructive = colors.destructive,
+            onDestructive = colors.onDestructive,
+            success = colors.success,
+            warning = colors.warning,
+            error = colors.error,
+            info = colors.info,
+            neutral = colors.neutral,
+            violet = colors.violet,
+            fuchsia = colors.fuchsia,
         )
     }
+
+/** Hover, press and keyboard-focus feedback in [color], twice its alpha while pressed: a filled button passes its label color at 12%. */
+@HopiInternalApi
+public fun hopiHoverIndication(color: Color): Indication = HopiIndication(color)
+
+/** shadcn's focus ring: 3 dp of [color] at 30% just outside the bounds; nothing when null. Apply before any clip. */
+@HopiInternalApi
+public fun Modifier.hopiFocusRing(color: Color?): Modifier = focusRing(color)

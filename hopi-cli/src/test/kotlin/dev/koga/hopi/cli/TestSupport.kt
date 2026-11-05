@@ -11,10 +11,14 @@ import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.Collections
 
 internal fun fixture(name: String): String =
     checkNotNull(object {}.javaClass.getResource("/fixtures/$name")) { "missing fixture $name" }.readText()
+
+/** No usbmuxd: this Mac's real one at /var/run/usbmuxd must not answer a test. */
+internal val NO_USBMUXD: Path = Paths.get("/hopi-test/no-usbmuxd")
 
 internal class CliRun(val exitCode: Int, val stdout: String, val stderr: String) {
     val lines: List<String> get() = stdout.lines().filter { it.isNotEmpty() }
@@ -31,6 +35,7 @@ internal fun runCapturing(
     userHome: String = "/home/test",
     isMac: Boolean = false,
     executables: Set<Path> = emptySet(),
+    usbmuxdSocket: Path = NO_USBMUXD,
 ): CliRun {
     val stdout = ByteArrayOutputStream()
     val stderr = ByteArrayOutputStream()
@@ -44,6 +49,7 @@ internal fun runCapturing(
         isExecutable = { it in executables },
         shutdownHooks = hooks,
         readTimeoutMs = 10_000,
+        usbmuxdSocket = usbmuxdSocket,
     )
     val code = runCli(argv.toList(), environment)
     return CliRun(code, stdout.toString(Charsets.UTF_8), stderr.toString(Charsets.UTF_8))

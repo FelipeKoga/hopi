@@ -1,7 +1,7 @@
 package dev.koga.hopi.perf.internal
 
-import dev.koga.hopi.core.HopiInternalApi
-import dev.koga.hopi.core.bridge.AgentBridgeHook
+import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.api.HopiRuntimes
 import dev.koga.hopi.core.perf.PerfController
 import dev.koga.hopi.core.perf.PerfData
 import dev.koga.hopi.core.perf.PerfHook
@@ -20,13 +20,15 @@ import dev.koga.hopi.core.perf.PerfThread
 import dev.koga.hopi.core.perf.PerfTimer
 import dev.koga.hopi.core.perf.emitPerfLogLine
 import dev.koga.hopi.core.perf.perfWallClockMs
-import dev.koga.hopi.core.store.HopiStore
-import dev.koga.hopi.perf.HopiMonitor
-import dev.koga.hopi.perf.HopiPerfConfig
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.AtomicReference
 
-/** The settings in force; a `perf.start` with `hangMs` or `intervalMs` changes them. */
+/**
+ * The settings in force, the runtime's whole configuration: perf's tool sets them all at start (its
+ * own settings and the start's `summaryLog`), and a `perf.start` with `hangMs` or `intervalMs` or a
+ * `HopiPerf.start` changes only those it gives. Nothing else builds them: the runtime never sees the
+ * API's `HopiPerfConfig`.
+ */
 @HopiInternalApi
 public class PerfSettings(
     public val hangThresholdMs: Long,
@@ -35,8 +37,9 @@ public class PerfSettings(
     public val remoteControl: Boolean,
     public val summaryLog: Boolean,
 ) {
-    internal fun with(hangThresholdMs: Long? = null, sampleIntervalMs: Long? = null): PerfSettings =
-        PerfSettings(hangThresholdMs ?: this.hangThresholdMs, hangHeartbeat, sampleIntervalMs ?: this.sampleIntervalMs, remoteControl, summaryLog)
+    /** These settings with each value given instead (null: keep this one's). */
+    internal fun with(hangThresholdMs: Long? = null, sampleIntervalMs: Long? = null, hangHeartbeat: Boolean? = null): PerfSettings =
+        PerfSettings(hangThresholdMs ?: this.hangThresholdMs, hangHeartbeat ?: this.hangHeartbeat, sampleIntervalMs ?: this.sampleIntervalMs, remoteControl, summaryLog)
 
     internal companion object {
         val DEFAULT = PerfSettings(PerfLimits.DEFAULT_HANG_THRESHOLD_MS, false, PerfLimits.DEFAULT_SAMPLE_INTERVAL_MS, remoteControl = true, summaryLog = true)
@@ -44,8 +47,10 @@ public class PerfSettings(
 }
 
 /**
- * One platform's monitors. Every call is made under the runtime's lock, so a backend sees starts
- * and stops in order; each returns at once (a stop never waits on a hung main thread).
+ * One platform's monitors. Every call but [threads] and [measurePss] is made under the runtime's
+ * lock, so a backend sees starts and stops in order; those two come from bridge threads without
+ * it (a PSS read and a thread scan are slow, and a stop must never wait on one). Each returns at
+ * once (a stop never waits on a hung main thread).
  */
 @HopiInternalApi
 public interface MonitorBackend {
@@ -82,12 +87,12 @@ public interface MonitorBackend {
     public fun watchCadence(watching: Boolean) {}
 }
 
-/** The platform's backend; created on the first install, never before. */
+/** The platform's backend; created by the first start of perf's tool, never before. */
 internal expect fun createBackend(): MonitorBackend
 
 /**
  * Monitors the process was launched to start (iOS: `-hopiPerf frames,hangs`, so an agent can
- * measure a cold start); read once, by the first install. Empty elsewhere.
+ * measure a cold start); read once, by the first start of perf's tool. Empty elsewhere.
  */
 internal expect fun launchArgumentMonitors(): Set<PerfMonitor>
 
@@ -96,8 +101,9 @@ internal expect fun <T> perfLocked(lock: Any, block: () -> T): T
 
 /**
  * The [PerfController] that `hopi-perf` registers in core's `PerfHook`: owners, leases, settings
- * and status, over the platform's [MonitorBackend]. Created on the first [HopiPerf] call that needs
- * it (install, start, or the Android provider), so an app that never calls it loads nothing more.
+ * and status, over the platform's [MonitorBackend]. Created by perf's tool when a debug build's
+ * start starts it ([PerfRuntime.install]), never by a `HopiPerf` call, which reaches it through
+ * `hopi-api`'s registry ([ApiPerf]); an app whose start lists no perf tool loads nothing more.
  */
 @HopiInternalApi
 public class PerfRuntimeController internal constructor(private val backend: MonitorBackend) : PerfController {
@@ -134,11 +140,29 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
         backend.attach(data, lease)
     }
 
+    /** A tool's start: [next] replaces the settings in force whole, `summaryLog` included. */
     internal fun configure(next: PerfSettings) {
         val previous = settings.exchange(next)
         data.setLogSink(if (next.summaryLog) data.log ?: PerfLogSink() else null)
         if (previous.hangThresholdMs != next.hangThresholdMs || previous.sampleIntervalMs != next.sampleIntervalMs) {
             perfLocked(lock) { backend.apply(next, owners.heldMonitors) }
+        }
+    }
+
+    /**
+     * A `HopiPerf.start`'s settings: each one given (null: keep the value in force) is merged into
+     * the settings in force under the lock, as a remote start's are, so a concurrent change is never
+     * lost. The threshold and the interval apply at once, the heartbeat at the next start of hangs.
+     */
+    internal fun update(hangThresholdMs: Long?, hangHeartbeat: Boolean?, sampleIntervalMs: Long?) {
+        if (hangThresholdMs == null && hangHeartbeat == null && sampleIntervalMs == null) return
+        perfLocked(lock) {
+            val current = settings.load()
+            val next = current.with(hangThresholdMs, sampleIntervalMs, hangHeartbeat)
+            settings.store(next)
+            if (next.hangThresholdMs != current.hangThresholdMs || next.sampleIntervalMs != current.sampleIntervalMs) {
+                backend.apply(next, owners.heldMonitors)
+            }
         }
     }
 
@@ -239,7 +263,7 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
 
     override fun threads(limit: Int): List<PerfThread>? = backend.threads(limit)
 
-    /** Viewers of the per-thread list (tail sessions, the in-app Perf tab): the scan runs while one is left. */
+    /** Viewers of the per-thread list (tail sessions): the scan runs while one is left. */
     private var threadWatchers = 0
 
     override fun watchThreads(watching: Boolean) {
@@ -263,91 +287,87 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
     }
 }
 
-/** What [dev.koga.hopi.perf.HopiPerf] calls. */
+/**
+ * What perf's tool calls ([PerfEntry] on each platform): [install] creates the controller once per
+ * process and applies the tool's settings, [registerApi] registers `HopiPerf`'s runtime. On Android
+ * the tool runs on the main thread before `Application.onCreate`, and a debug build runs from its
+ * APK, so ART loads every class a method names when it verifies its class: nothing here names a
+ * monitor class, a store class or [ApiPerfCalls], and the tool's path adds no lambda and no Kotlin
+ * collection extension.
+ */
 internal object PerfRuntime {
     private val instance = AtomicReference<PerfRuntimeController?>(null)
-
-    /** A label set before install, applied when the runtime exists. */
-    private val pendingScreen = AtomicReference<String?>(null)
 
     private val launchRead = AtomicBoolean(false)
 
     fun controller(): PerfRuntimeController {
-        instance.load()?.let { return it }
+        val existing = instance.load()
+        if (existing != null) return existing
         val created = PerfRuntimeController(createBackend())
-        if (instance.compareAndSet(null, created)) {
-            PerfHook.register(created)
-            pendingScreen.load()?.let { created.data.setScreen(it) }
-        }
+        if (instance.compareAndSet(null, created)) PerfHook.register(created)
         return instance.load() ?: created
     }
 
+    /** The controller, once a tool start created it; null before. */
     fun existing(): PerfRuntimeController? = instance.load()
 
-    fun install(config: HopiPerfConfig): PerfRuntimeController? {
-        invalid(config)?.let {
-            emitPerfLogLine(PerfJson.noticeLine("HopiPerf: $it; nothing started"))
+    /**
+     * A tool's start: an out-of-range [settings] writes a notice line and starts nothing (null);
+     * otherwise it creates the controller or reuses the process's, applies [settings] whole, and the
+     * first time starts the monitors the launch arguments name, as owner `code`.
+     */
+    fun install(settings: PerfSettings): PerfRuntimeController? {
+        val problem = invalid(settings.hangThresholdMs, settings.sampleIntervalMs)
+        if (problem != null) {
+            emitPerfLogLine(PerfJson.noticeLine("HopiPerf: $problem; nothing started"))
             return null
         }
         val controller = controller()
-        controller.configure(
-            PerfSettings(config.hangThresholdMs, config.hangHeartbeat, config.sampleIntervalMs, config.remoteControl, config.summaryLog),
-        )
-        if (config.agentBridge) AgentBridgeHook.requestStart(HopiStore.default)
+        controller.configure(settings)
         if (launchRead.compareAndSet(false, true)) {
-            val launched = launchArgumentMonitors().filterTo(LinkedHashSet()) { it in controller.available }
+            val launched = LinkedHashSet<PerfMonitor>()
+            for (monitor in launchArgumentMonitors()) if (monitor in controller.available) launched.add(monitor)
             if (launched.isNotEmpty()) controller.start(PerfStartRequest(launched), PerfOwner.Code)
         }
         return controller
     }
 
-    fun start(config: HopiPerfConfig) {
-        val controller = install(config) ?: return
-        val monitors = buildSet {
-            if (config.frames) add(PerfMonitor.FRAMES)
-            if (config.hangs) add(PerfMonitor.HANGS)
-            if (config.cpu) add(PerfMonitor.CPU)
-            if (config.memory) add(PerfMonitor.MEMORY)
+    /**
+     * The step every tool takes after [install]: registers `HopiPerf`'s runtime ([ApiPerf]) with
+     * `hopi-api`'s registry and, when that succeeds, applies the last label `HopiPerf.screen` kept
+     * and writes one notice line with the number of `HopiPerf.start` calls dropped before it (the
+     * count only), in perf's channel (logcat tag `HopiPerf`, os_log category `perf`, stderr on the
+     * JVM), whatever `summaryLog` says. A later tool start finds it registered and does neither.
+     */
+    fun registerApi(controller: PerfRuntimeController) {
+        val dropped = ApiPerf.register()
+        if (dropped < 0) return
+        // HopiPerf.screen keeps its label before it reads the slot, which is written now: applied
+        // until two reads agree, so a label set meanwhile is not overwritten by an older one.
+        var label = HopiRuntimes.perfScreen
+        while (true) {
+            controller.data.setScreen(label)
+            val latest = HopiRuntimes.perfScreen
+            if (latest == label) break
+            label = latest
         }
-        if (monitors.isEmpty()) return
-        val available = monitors.filterTo(LinkedHashSet()) { it in controller.available }
-        (monitors - available).forEach { controller.notice("${it.wireName} is not available on ${controller.platform}") }
-        if (available.isNotEmpty()) controller.start(PerfStartRequest(available), PerfOwner.Code)
+        if (dropped > 0) controller.notice(droppedStartsNotice(dropped))
     }
 
-    fun stop(monitors: Set<HopiMonitor>) {
-        val controller = existing() ?: return
-        controller.stop(monitors.map { it.monitor }.toSet())
-    }
-
-    fun running(): Set<HopiMonitor> = existing()?.running?.map { it.consumer }?.toSet() ?: emptySet()
-
-    fun screen(name: String?) {
-        pendingScreen.store(PerfLimits.label(name))
-        existing()?.data?.setScreen(name)
-    }
-
-    private fun invalid(config: HopiPerfConfig): String? = when {
-        config.hangThresholdMs !in PerfLimits.MIN_HANG_THRESHOLD_MS..PerfLimits.MAX_HANG_THRESHOLD_MS ->
+    /** What is out of range among the values given (null: not given), or null when nothing is. */
+    fun invalid(hangThresholdMs: Long?, sampleIntervalMs: Long?): String? = when {
+        hangThresholdMs != null && hangThresholdMs !in PerfLimits.MIN_HANG_THRESHOLD_MS..PerfLimits.MAX_HANG_THRESHOLD_MS ->
             "hangThresholdMs must be in ${PerfLimits.MIN_HANG_THRESHOLD_MS}..${PerfLimits.MAX_HANG_THRESHOLD_MS}"
-        config.sampleIntervalMs !in PerfLimits.MIN_SAMPLE_INTERVAL_MS..PerfLimits.MAX_SAMPLE_INTERVAL_MS ->
+        sampleIntervalMs != null && sampleIntervalMs !in PerfLimits.MIN_SAMPLE_INTERVAL_MS..PerfLimits.MAX_SAMPLE_INTERVAL_MS ->
             "sampleIntervalMs must be in ${PerfLimits.MIN_SAMPLE_INTERVAL_MS}..${PerfLimits.MAX_SAMPLE_INTERVAL_MS}"
         else -> null
     }
 
-    private val HopiMonitor.monitor: PerfMonitor
-        get() = when (this) {
-            HopiMonitor.Frames -> PerfMonitor.FRAMES
-            HopiMonitor.Hangs -> PerfMonitor.HANGS
-            HopiMonitor.Cpu -> PerfMonitor.CPU
-            HopiMonitor.Memory -> PerfMonitor.MEMORY
-        }
-
-    private val PerfMonitor.consumer: HopiMonitor
-        get() = when (this) {
-            PerfMonitor.FRAMES -> HopiMonitor.Frames
-            PerfMonitor.HANGS -> HopiMonitor.Hangs
-            PerfMonitor.CPU -> HopiMonitor.Cpu
-            PerfMonitor.MEMORY -> HopiMonitor.Memory
+    /** The count only, as the rules' notice. */
+    private fun droppedStartsNotice(count: Int): String =
+        if (count == 1) {
+            "HopiPerf: 1 start made before Hopi started was dropped"
+        } else {
+            "HopiPerf: $count starts made before Hopi started were dropped"
         }
 }

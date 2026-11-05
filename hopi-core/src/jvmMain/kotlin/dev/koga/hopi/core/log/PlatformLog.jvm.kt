@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.log
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.json.TransactionJson
 
 @HopiInternalApi

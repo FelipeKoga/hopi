@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.curl
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.body.decodeUtf8Prefix
 import dev.koga.hopi.core.body.textOrNull
 import dev.koga.hopi.core.model.HttpTransaction

@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +23,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -29,6 +30,8 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,18 +55,18 @@ import dev.koga.hopi.ui.component.HairlineDivider
 import dev.koga.hopi.ui.component.Icon
 import dev.koga.hopi.ui.component.IconButton
 import dev.koga.hopi.ui.component.Tag
+import dev.koga.hopi.ui.component.focusRing
 import dev.koga.hopi.ui.theme.HopiColors
 import dev.koga.hopi.ui.theme.HopiIcons
+import dev.koga.hopi.ui.theme.HopiRadius
+import dev.koga.hopi.ui.theme.HopiTone
 import dev.koga.hopi.ui.theme.HopiType
 import dev.koga.hopi.ui.theme.LocalHopiColors
 
 /** Accessibility descriptions of the list's controls; the UI tests find controls by them too. */
 internal object ListTags {
     const val SEARCH = "Search URL"
-    const val CLOSE = "Close Hopi"
     const val CLEAR = "Clear all requests"
-    const val RULES = "Rules"
-    const val PERF = "Performance"
 }
 
 @Composable
@@ -75,15 +78,9 @@ internal fun TransactionListPane(
     listState: LazyListState,
     onOpen: (Long) -> Unit,
     onClear: () -> Unit,
-    /** Null hides the close button (the desktop window closes itself). */
-    onClose: (() -> Unit)?,
-    /** The row shown beside the list (desktop panes); null in the full-screen list. */
+    /** The row shown beside the list; null while the panes take turns. */
     selectedId: Long? = null,
     searchFocus: FocusRequester? = null,
-    /** Opens the rules list (the in-app screen); null hides the button. */
-    onRules: (() -> Unit)? = null,
-    /** Opens the Perf tab (the in-app screen, with a perf controller registered); null hides the button. */
-    onPerf: (() -> Unit)? = null,
 ) {
     val colors = LocalHopiColors.current
     Column(Modifier.fillMaxSize()) {
@@ -99,21 +96,20 @@ internal fun TransactionListPane(
                 BasicText(model.total.toString(), style = HopiType.meta.copy(color = colors.textFaint))
             }
             Spacer(Modifier.weight(1f))
-            if (onPerf != null) IconButton(HopiIcons.Perf, ListTags.PERF, onPerf)
-            if (onRules != null) IconButton(HopiIcons.Rules, ListTags.RULES, onRules)
             IconButton(HopiIcons.Trash, ListTags.CLEAR, onClear, enabled = model != null && model.total > 0)
-            if (onClose != null) IconButton(HopiIcons.Close, ListTags.CLOSE, onClose)
         }
         SearchField(query, searchFocus)
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 13.dp),
         ) {
             for (option in StatusFilter.entries) {
+                val count = model?.counts?.get(option.ordinal) ?: 0
                 FilterChip(
                     label = option.label,
-                    count = model?.counts?.get(option.ordinal) ?: 0,
+                    count = count,
                     selected = option == filter,
                     onClick = { onFilter(option) },
+                    countColor = option.tone(colors)?.takeIf { count > 0 }?.fg ?: colors.textFaint,
                 )
             }
         }
@@ -171,13 +167,17 @@ private fun StayOnNewest(listState: LazyListState, newest: Long) {
 @Composable
 private fun SearchField(state: TextFieldState, focus: FocusRequester?) {
     val colors = LocalHopiColors.current
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
+            .focusRing(if (focused) colors.ring else null)
             .heightIn(min = 44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.surface)
+            .clip(HopiRadius.md)
+            .background(colors.background)
+            .border(1.dp, if (focused) colors.ring else colors.border, HopiRadius.md)
             .padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -196,6 +196,7 @@ private fun SearchField(state: TextFieldState, focus: FocusRequester?) {
                 textStyle = HopiType.body.copy(color = colors.text),
                 cursorBrush = SolidColor(colors.text),
                 lineLimits = TextFieldLineLimits.SingleLine,
+                interactionSource = source,
             )
         }
         if (state.text.isNotEmpty()) {
@@ -211,7 +212,16 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (selected) Modifier.background(colors.surface).semantics { this.selected = true } else Modifier)
+            .then(
+                if (selected) {
+                    Modifier
+                        .background(colors.surface)
+                        .drawBehind { drawRect(colors.primary, size = Size(2.dp.toPx(), size.height)) }
+                        .semantics { this.selected = true }
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClickLabel = "Open details") { onOpen(row.id) }
             .heightIn(min = 60.dp),
     ) {
@@ -226,7 +236,7 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
                     BasicText(row.method, style = HopiType.monoStrong.copy(color = colors.text), maxLines = 1)
                     Spacer(Modifier.width(8.dp))
                     for (tag in row.tags) {
-                        Tag(tag)
+                        Tag(tag, tagTone(tag, colors))
                         Spacer(Modifier.width(6.dp))
                     }
                     BasicText(
@@ -259,22 +269,23 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
 }
 
 /**
- * Status in monochrome, by weight: success is a soft fill, redirects quieter still, client errors
- * outlined, server errors and failures solid, pending a dashed outline.
+ * Status by hue, and by shape and weight for readers who do not see hue: 2xx and 3xx a tinted fill,
+ * 4xx outlined, 5xx and failures solid red, 1xx a neutral fill, pending a dashed outline.
  */
 @Composable
 private fun StatusBadge(row: TransactionRow, colors: HopiColors) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = HopiRadius.sm
     val base = Modifier
         .widthIn(min = 44.dp)
         .heightIn(min = 26.dp)
         .clip(shape)
         .clearAndSetSemantics { contentDescription = row.badgeDescription }
     val (modifier, color) = when (row.status) {
-        StatusClass.Success, StatusClass.Informational -> base.background(colors.surfaceStrong) to colors.text
-        StatusClass.Redirect -> base.background(colors.surface) to colors.textMuted
-        StatusClass.ClientError -> base.border(1.5.dp, colors.text, shape) to colors.text
-        StatusClass.ServerError, StatusClass.Failed -> base.background(colors.text) to colors.onText
+        StatusClass.Success -> base.background(colors.success.bg) to colors.success.fg
+        StatusClass.Redirect -> base.background(colors.info.bg) to colors.info.fg
+        StatusClass.ClientError -> base.background(colors.warning.bg).border(1.5.dp, colors.warning.fg, shape) to colors.warning.fg
+        StatusClass.ServerError, StatusClass.Failed -> base.background(colors.destructive) to colors.onDestructive
+        StatusClass.Informational -> base.background(colors.muted) to colors.text
         StatusClass.Pending -> base.drawBehind {
             val stroke = 1.dp.toPx()
             drawRoundRect(
@@ -295,6 +306,33 @@ private fun StatusBadge(row: TransactionRow, colors: HopiColors) {
             softWrap = false,
         )
     }
+}
+
+/** A status class's hue: 2xx success, 3xx info, 4xx warning, 5xx and failures error, 1xx and pending neutral. */
+internal fun StatusClass.tone(colors: HopiColors): HopiTone = when (this) {
+    StatusClass.Success -> colors.success
+    StatusClass.Redirect -> colors.info
+    StatusClass.ClientError -> colors.warning
+    StatusClass.ServerError, StatusClass.Failed -> colors.error
+    StatusClass.Informational, StatusClass.Pending -> colors.neutral
+}
+
+/** A filter's count hue; null (faint) for All and Pending. */
+private fun StatusFilter.tone(colors: HopiColors): HopiTone? = when (this) {
+    StatusFilter.All, StatusFilter.Pending -> null
+    StatusFilter.Success -> colors.success
+    StatusFilter.Redirect -> colors.info
+    StatusFilter.ClientError -> colors.warning
+    StatusFilter.ServerError, StatusFilter.Failed -> colors.error
+}
+
+/** A rule mark's hue: MOCK violet, EDIT fuchsia, FAIL the error red (it made the ERR), DELAY the warning amber. */
+private fun tagTone(tag: String, colors: HopiColors): HopiTone = when (tag) {
+    "MOCK" -> colors.violet
+    "EDIT" -> colors.fuchsia
+    "FAIL" -> colors.error
+    "DELAY" -> colors.warning
+    else -> colors.neutral
 }
 
 @Composable

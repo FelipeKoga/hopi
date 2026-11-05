@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Checks one Android end-to-end run (see run.sh) and prints one JSON line per check, PASS or FAIL;
-the Android twin of benchmark/urlsession/e2e/check.py.
+the Android counterpart of benchmark/urlsession/e2e/check.py.
 
 For the capture build it matches the CLI's records (`capture-get.ndjson`) to the requests the dev
 server saw in that run (`capture-server.ndjson`): exactly one record per request (a redirect the
@@ -8,7 +8,7 @@ client follows itself is one record carrying `finalUrl`), nothing re-sent, the s
 record the stack that made the request (`ktor` never: the Ktor plugin defers to OkHttp capture).
 Per scenario of the app's `{"verify":…}` lines it checks status or error, headers and bodies
 (captured bytes against the bytes the app read, or the dev server's body for a truncated one). It
-compares the bytes each scenario read on the capture and the noop build, the server's requests from
+compares the bytes each scenario read on the capture and the nohopi build, the server's requests from
 both, the `tail` stream against `list`, and Hopi's summary log lines against the records.
 
 usage: check.py <run dir>
@@ -209,24 +209,24 @@ def main():
     recorded_tags = {header(r["request"]["headers"], "X-Hopi-Verify") for r in records}
     check("capture: every record belongs to a scenario the app ran", recorded_tags <= set(app), f"{sorted(recorded_tags - set(app), key=str)}")
 
-    # Bytes the app read: identical on the capture and the noop build.
-    noop = app_lines(os.path.join(run, "noop-app.log"))
+    # Bytes the app read: identical on the capture and the nohopi build.
+    nohopi = app_lines(os.path.join(run, "nohopi-app.log"))
     fields = ("status", "bytes", "sha256", "error")
-    differ = [n for n in app if n not in noop or any(app[n].get(f) != noop[n].get(f) for f in fields)]
-    check("bytes read identical on capture and noop builds (SHA-256 per scenario)",
-          not differ and set(app) == set(noop) and len(app) > 0, f"{len(app)} scenarios, differing: {differ}")
+    differ = [n for n in app if n not in nohopi or any(app[n].get(f) != nohopi[n].get(f) for f in fields)]
+    check("bytes read identical on capture and nohopi builds (SHA-256 per scenario)",
+          not differ and set(app) == set(nohopi) and len(app) > 0, f"{len(app)} scenarios, differing: {differ}")
     # Nothing re-sent and nothing changed on the wire: the server saw the same requests, with the
     # same headers and bodies, from both builds.
     def wire(path):
         return Counter((s["method"], s["path"], tuple((k.lower(), v) for k, v in s["headers"]), s["body"]) for s in ndjson(path))
-    c_srv, n_srv = wire(os.path.join(run, "capture-server.ndjson")), wire(os.path.join(run, "noop-server.ndjson"))
-    check("the server saw the same requests (method, path, headers, body) from the capture and the noop build",
+    c_srv, n_srv = wire(os.path.join(run, "capture-server.ndjson")), wire(os.path.join(run, "nohopi-server.ndjson"))
+    check("the server saw the same requests (method, path, headers, body) from the capture and the nohopi build",
           c_srv == n_srv and len(c_srv) > 0,
-          f"{sum(c_srv.values())} requests; capture-only {[k[:2] for k in c_srv - n_srv]}, noop-only {[k[:2] for k in n_srv - c_srv]}")
-    noop_records = [l for l in logcat_json(os.path.join(run, "noop-app.log"), "Hopi") if "id" in l]
-    noop_done = [r for r in logcat_json(os.path.join(run, "noop-app.log"), "HopiSample") if r.get("verify") == "done"]
-    check("noop: no Hopi record, capture not started",
-          not noop_records and len(noop_done) == 1 and noop_done[0].get("started") is False, f"{len(noop_records)} records, {noop_done}")
+          f"{sum(c_srv.values())} requests; capture-only {[k[:2] for k in c_srv - n_srv]}, nohopi-only {[k[:2] for k in n_srv - c_srv]}")
+    nohopi_records = [l for l in logcat_json(os.path.join(run, "nohopi-app.log"), "Hopi") if "id" in l]
+    nohopi_done = [r for r in logcat_json(os.path.join(run, "nohopi-app.log"), "HopiSample") if r.get("verify") == "done"]
+    check("nohopi: no Hopi record, capture not started",
+          not nohopi_records and len(nohopi_done) == 1 and nohopi_done[0].get("started") is False, f"{len(nohopi_records)} records, {nohopi_done}")
 
     # The summary log line: one terminal line per record, carrying the source.
     summary = [l for l in logcat_json(os.path.join(run, "capture-app.log"), "Hopi") if "id" in l]

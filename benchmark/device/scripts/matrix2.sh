@@ -1,11 +1,12 @@
 #!/bin/sh
-# Like matrix.sh, but alternates noop / real / real8 for ROUNDS rounds and waits before each
+# Like matrix.sh, but alternates nohopi / real / real8 for ROUNDS rounds and waits before each
 # block until the guest's 1-minute load is under 2.5 (at most 180 s), so builds see the same load.
-# usage: matrix2.sh <out.ndjson> <noop.apk> <real.apk> <sizes> <rounds> [spec ...]
+# <real8.apk> is the real build made with -Psample.maxBodyBytes=8388608, as matrix.sh says.
+# usage: matrix2.sh <out.ndjson> <nohopi.apk> <real.apk> <real8.apk> <sizes> <rounds> [spec ...]
 set -u
 ADB=~/Library/Android/sdk/platform-tools/adb
 HERE=$(cd "$(dirname "$0")" && pwd)
-OUT=$1; NOOP=$2; REAL=$3; SIZES=$4; ROUNDS=$5; shift 5
+OUT=$1; NOHOPI=$2; REAL=$3; REAL8=$4; SIZES=$5; ROUNDS=$6; shift 6
 settle() {
   i=0
   while [ $i -lt 90 ]; do
@@ -18,13 +19,13 @@ settle() {
 r=1
 while [ $r -le "$ROUNDS" ]; do
   for SPEC in "$@"; do
-    for BUILD in noop real real8; do
+    for BUILD in nohopi real real8; do
       case $BUILD in
-        noop) APK=$NOOP; CAP="";;
+        nohopi) APK=$NOHOPI; CAP="";;
         real) APK=$REAL; CAP="";;
-        real8) APK=$REAL; CAP="--cap 8388608";;
+        real8) APK=$REAL8; CAP="--cap 8388608";;
       esac
-      if [ "$BUILD" != real8 ]; then $ADB install -r "$APK" > /dev/null; fi
+      $ADB install -r "$APK" > /dev/null
       echo "== round $r $BUILD $SPEC $(settle)"
       python3 "$HERE/giant.py" "$BUILD" "mb=$SIZES;runs=5;$SPEC" "$OUT" --timeout 900 $CAP | grep -E '"runs":|^\{"label"|PROBLEM' | cut -c1-300
     done

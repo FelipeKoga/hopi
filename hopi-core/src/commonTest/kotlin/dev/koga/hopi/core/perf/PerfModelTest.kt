@@ -141,9 +141,9 @@ class PerfModelTest {
     fun excludedFramesAreCountedApart() {
         val data = PerfData()
         val deadline = 16_666_667L
-        data.inspectorOpen = true
+        // Two Hopi pauses of the main thread (a stack capture, a PSS read): a frame overlapping one is left out.
+        data.markPause(10_000_000, 20_000_000)
         data.recordFrame(10, 0, 100_000_000, deadline, false, 0, 0, null)
-        data.inspectorOpen = false
         data.markPause(1_000_000_000, 1_010_000_000)
         data.recordFrame(10, 1_005_000_000, 100_000_000, deadline, false, 0, 0, null)
         data.recordFrame(10, 2_000_000_000, 100_000_000, deadline, false, 0, 0, longArrayOf(1, 2, 3, 4, 5, 6, 7, -1))

@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.perf
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.incrementAndFetch
@@ -22,8 +22,8 @@ public fun interface PerfListener {
  * The perf model (docs/design/perf-monitors.md, "Data model"): bounded series of primitive
  * arrays, one event ring per kind, and summaries since start in constant memory. Written straight
  * from each monitor's thread (no hop); a write wakes nothing unless a listener is registered (a
- * bridge `perf.tail`, the HUD), and per-frame writes never reach listeners: only closed seconds,
- * samples and events do. In memory only, never persisted. Nothing here starts a thread.
+ * bridge `perf.tail`), and per-frame writes never reach listeners: only closed seconds, samples and
+ * events do. In memory only, never persisted. Nothing here starts a thread.
  */
 @HopiInternalApi
 public class PerfData {
@@ -78,9 +78,6 @@ public class PerfData {
     private val app = AtomicReference<String?>(null)
     private val activity = AtomicReference<String?>(null)
 
-    /** Set while the in-app inspector (`HopiScreen`) is open: frames are flagged `inspector` and left out. */
-    private val inspector = AtomicReference(false)
-
     public val seconds: FrameSeconds = FrameSeconds { closed -> writeSecond(closed) }
 
     public fun nextSeq(): Long = seq.incrementAndFetch()
@@ -101,12 +98,6 @@ public class PerfData {
     }
 
     public val screen: String? get() = app.load() ?: activity.load()
-
-    public var inspectorOpen: Boolean
-        get() = inspector.load()
-        set(value) {
-            inspector.store(value)
-        }
 
     // ---- listeners and log
 
@@ -155,7 +146,7 @@ public class PerfData {
         stagesNs: LongArray?,
     ) {
         val klass = FrameClassifier.classify(totalNs, deadlineNs)
-        val exclude = inspector.load() || overlapsPause(startNs, startNs + totalNs)
+        val exclude = overlapsPause(startNs, startNs + totalNs)
         val screen = screen
         if (!exclude && !firstFrame) {
             summaryLock.locked {

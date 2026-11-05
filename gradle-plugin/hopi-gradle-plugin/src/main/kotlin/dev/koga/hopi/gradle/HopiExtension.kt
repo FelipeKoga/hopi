@@ -3,46 +3,65 @@ package dev.koga.hopi.gradle
 import org.gradle.api.Action
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Nested
 
 /**
- * The optional `hopi { }` block of an Android application module. Every value has a default, so
- * `plugins { id("dev.koga.hopi") }` alone is the whole setup. The store settings mean what they mean
- * for the Ktor plugin and `HopiUrlSession`.
+ * The optional `hopi { }` block of an Android application module or a Kotlin Multiplatform module.
+ * Every value has a default, so `plugins { id("io.github.felipekoga.hopi") }` alone is the whole setup. The
+ * store, redaction, log and bridge settings at the top are the start's, shared by every tool, and
+ * mean what they mean for `Hopi.start` on iOS and the JVM and for the Ktor plugin, whose every
+ * client's installation makes the start's first; capture's own settings are in [network], the
+ * monitors' in [perf].
+ *
+ * In a KMP module the generated `HopiSetup` passes the top settings, `network { rules }`,
+ * `perf { enabled }` (so iOS registers the monitors only with `perf { enabled = true }`, as Android
+ * does) and `perf { remoteControl }` to `Hopi.start`; the others are Android's (iOS always captures
+ * URLSession, and starts monitors at launch with `-hopiPerf`).
  */
 public abstract class HopiExtension {
-    /** False: every variant gets the noop runtime and nothing is instrumented. */
+    /**
+     * False: no variant gets a runtime, a transform or a generated class, and in a KMP module no
+     * build gets `hopi-start` and `HopiSetup.start()` does nothing. The release guards still run on
+     * every non-debuggable variant and every iOS Release link: they refuse a runtime whatever this
+     * says.
+     */
     public abstract val enabled: Property<Boolean>
 
-    /** Rewrites OkHttp's `RealCall`, so every OkHttp call is recorded. */
-    public abstract val okhttp: Property<Boolean>
-
-    /** Rewrites every `java.net.URL` connection call site, so every `HttpURLConnection` is recorded. */
-    public abstract val urlConnection: Property<Boolean>
+    /** Set by the plugin in a KMP module: this Gradle invocation is an iOS Debug build (`IosBuild`). */
+    internal var iosDebug: Boolean = false
 
     /**
-     * Gives debuggable variants the real `hopi-ktor`/`hopi-ui` and the others their noop twins,
-     * whichever of the two the app's modules name, so no `-Phopi.enabled` is needed on Android.
+     * Read-only, for a KMP module's own build logic (a debug-only source set, a build label): true
+     * when this Gradle invocation gives the module's iOS compilations `hopi-start` and the generated
+     * `HopiSetup.start()` starts Hopi, which is a Debug build (`-Phopi.enabled=true`, or without the
+     * property Xcode's Debug configuration) with [enabled]; false in any other build, and in an
+     * Android application module.
      */
-    public abstract val selectTwins: Property<Boolean>
+    public val iosRuntime: Provider<Boolean> get() = enabled.map { it && iosDebug }
 
     public abstract val maxEntries: Property<Int>
     public abstract val maxTotalBytes: Property<Long>
     public abstract val maxBodyBytes: Property<Long>
-    public abstract val summaryLog: Property<Boolean>
-    public abstract val agentBridge: Property<Boolean>
 
     /**
-     * Applies Hopi rules (mock, fail, delay, edit; docs/design/rules.md) to the requests the
-     * interceptor and the wrappers record. False: they never read the rule state.
+     * One NDJSON line per recorded request in logcat (tag `Hopi`), the start's own line, and the
+     * performance monitors' rate-limited lines (tag `HopiPerf`, whose notices are written whatever
+     * this says).
      */
-    public abstract val rules: Property<Boolean>
+    public abstract val summaryLog: Property<Boolean>
+    public abstract val agentBridge: Property<Boolean>
     public abstract val redactedHeaders: ListProperty<String>
     public abstract val redactedQueryParameters: ListProperty<String>
     public abstract val redactionDisabled: Property<Boolean>
 
-    /** Class name patterns AGP's instrumentation leaves alone (`com.vendor.pinned.**`). */
-    public abstract val excludedClasses: ListProperty<String>
+    /** Automatic OkHttp and `HttpURLConnection` capture (docs/design/android-capture.md); on unless `network { enabled = false }`. */
+    @get:Nested
+    public abstract val network: HopiNetworkExtension
+
+    public fun network(action: Action<HopiNetworkExtension>) {
+        action.execute(network)
+    }
 
     /** The performance monitors (docs/design/perf-monitors.md); off unless `perf { enabled = true }`. */
     @get:Nested
@@ -67,23 +86,15 @@ public abstract class HopiExtension {
         redactionDisabled.set(true)
     }
 
-    /** Leaves classes matching these patterns uninstrumented. */
-    public fun excludeClasses(vararg patterns: String) {
-        excludedClasses.addAll(*patterns)
-    }
-
     internal fun applyDefaults() {
         enabled.convention(true)
-        okhttp.convention(true)
-        urlConnection.convention(true)
-        selectTwins.convention(true)
         maxEntries.convention(500)
         maxTotalBytes.convention(16L * 1024 * 1024)
         maxBodyBytes.convention(256L * 1024)
         summaryLog.convention(true)
         agentBridge.convention(false)
-        rules.convention(true)
         redactionDisabled.convention(false)
+        network.applyDefaults()
         perf.applyDefaults()
     }
 }

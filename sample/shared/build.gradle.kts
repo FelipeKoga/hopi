@@ -9,23 +9,27 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose.multiplatform)
+    // Hopi's whole iOS setup (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project"):
+    // hopi-api in every build, exported; hopi-start, which brings the runtimes, in a Debug build
+    // only (-Phopi.enabled, else Xcode's configuration), exported; the generated HopiSetup Swift
+    // calls in every configuration; the iOS release guard before every Release link. The thin
+    // hopi-ktor is in every build and installs nothing in a Release framework.
+    id("io.github.felipekoga.hopi")
 }
 
-// The selection every KMP consumer makes (docs/ARCHITECTURE.md, "Selecting real vs noop"): a shared
-// module has no build types, so a Gradle property picks the real artifacts or their noop twins for
-// every target at once. Debug runs pass -Phopi.enabled=true (the Xcode build phase does for
-// the Debug configuration); anything built without it ships the noop.
-val hopiEnabled = providers.gradleProperty("hopi.enabled").orNull?.toBoolean() ?: false
+// The start's settings, which HopiSetup passes to Hopi.start in a Debug build: the Android app's
+// (sample/androidApp). The CLI and the desktop viewer reach the app through its bridge; the
+// giant-body measurements set the caps at build time (`-Psample.maxBodyBytes=8388608`, through the
+// Xcode build phase's SAMPLE_GRADLE_ARGS); the monitors are registered, none started.
+hopi {
+    agentBridge.set(true)
+    maxBodyBytes.set(providers.gradleProperty("sample.maxBodyBytes").map { it.toLong() }.orElse(256L * 1024))
+    maxTotalBytes.set(providers.gradleProperty("sample.maxTotalBytes").map { it.toLong() }.orElse(16L * 1024 * 1024))
+    perf { enabled.set(true) }
+}
 
-// Automatic URLSession capture, iOS only (Android has no URLSession): the real module or its noop.
-val urlSessionModule = if (hopiEnabled) project(":hopi-urlsession") else project(":hopi-urlsession-noop")
-
-// HopiRules (mock, fail, delay, edit), which the rules scenarios call: the real module or its noop.
-val rulesModule = if (hopiEnabled) project(":hopi-rules") else project(":hopi-rules-noop")
-
-// HopiPerf (frames, hangs, CPU, memory), which the perf lab and bench start and Swift installs: the
-// real module or its noop. (On Android the Gradle plugin's `hopi { perf { } }` resolves it per variant.)
-val perfModule = if (hopiEnabled) project(":hopi-perf") else project(":hopi-perf-noop")
+/** The plugin's choice for this invocation: a Debug build, whose iOS framework links Hopi's runtimes. */
+val hopiRuntime: Boolean = hopi.iosRuntime.get()
 
 /** Writes `SampleBuildInfo.kt`, so the app can show which Hopi it was built with. */
 abstract class GenerateSampleBuildInfo : DefaultTask() {
@@ -45,7 +49,7 @@ abstract class GenerateSampleBuildInfo : DefaultTask() {
             """
             |package dev.koga.hopi.sample
             |
-            |/** Generated from the `hopi.enabled` Gradle property: true for the real modules, false for the noop twins. */
+            |/** Generated from the io.github.felipekoga.hopi plugin's choice (`hopi.iosRuntime`): true when an iOS build links Hopi's runtimes (hopi-start). */
             |internal const val HOPI_ENABLED: Boolean = ${realHopi.get()}
             |
             """.trimMargin(),
@@ -54,7 +58,7 @@ abstract class GenerateSampleBuildInfo : DefaultTask() {
 }
 
 val generateSampleBuildInfo = tasks.register<GenerateSampleBuildInfo>("generateSampleBuildInfo") {
-    realHopi.set(hopiEnabled)
+    realHopi.set(hopi.iosRuntime)
     outputDirectory.set(layout.buildDirectory.dir("generated/sampleBuildInfo/commonMain/kotlin"))
 }
 
@@ -77,13 +81,10 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
-            // Swift calls HopiUrlSession.shared.start() itself (iOSApp.swift) and HopiRules.shared in
-            // the rules scenarios (CaptureVerification.swift), so the framework exports both modules,
-            // real or noop: the same API either way.
-            export(urlSessionModule)
-            export(rulesModule)
-            // HopiPerf.shared.start { … } from Swift; exported, so the real framework keeps the monitors.
-            export(perfModule)
+            // The plugin exports hopi-api (HopiRules, which the rules scenarios call from Swift,
+            // CaptureVerification.swift, and HopiPerf) from every framework, and hopi-start from a
+            // Debug build's only: with no runtime each HopiRules call returns -1, false or an
+            // empty list, or does nothing.
         }
     }
 
@@ -91,16 +92,22 @@ kotlin {
         commonMain {
             kotlin.srcDir(generateSampleBuildInfo.flatMap { it.outputDirectory })
             dependencies {
-                implementation(if (hopiEnabled) project(":hopi-ktor") else project(":hopi-ktor-noop"))
-                implementation(if (hopiEnabled) project(":hopi-ui") else project(":hopi-ui-noop"))
-                // api: the Android app's rules scenarios name HopiRules too, and the iOS framework exports it.
-                api(rulesModule)
-                // api: the iOS framework exports it (HopiPerf.shared from Swift).
-                api(perfModule)
-                implementation(libs.compose.runtime)
-                implementation(libs.compose.foundation)
-                implementation(libs.compose.ui)
-                implementation(libs.compose.ui.backhandler)
+                // The thin Ktor plugin, in every build: it records only where a debug build's network
+                // runtime registered its recorder (Android's debug variants), and installs nothing
+                // on iOS, where URLSession capture records the Darwin engine.
+                implementation(project(":hopi-ktor"))
+                // HopiRules (mock, fail, delay, edit), which the rules scenarios call, and HopiPerf,
+                // which the perf lab and bench start, come from hopi-api, which the plugin adds as
+                // api in every build (the Android app's rules scenarios name HopiRules too): a debug
+                // build's start registers the runtimes behind them (on Android the app's plugin adds
+                // hopi-perf with `perf { enabled }`; on iOS hopi-start names perf's tool, so
+                // Kotlin/Native keeps hopi-perf).
+                // The sample's Compose, 1.10.3 (the catalog's compose-multiplatform-sample): Kotlin/Native
+                // 2.2.21 reads its iOS klibs.
+                implementation(libs.compose.sample.runtime)
+                implementation(libs.compose.sample.foundation)
+                implementation(libs.compose.sample.ui)
+                implementation(libs.compose.sample.ui.backhandler)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)
@@ -112,33 +119,51 @@ kotlin {
         }
         iosMain {
             // Test-only accessor for the Swift capture tests (iosAppCaptureTests), which read the
-            // records from the store: built only with the real modules, never into a release.
-            if (hopiEnabled) kotlin.srcDir("src/iosCaptureProbe/kotlin")
+            // records from the store: built only with the runtimes, never into a release.
+            if (hopiRuntime) kotlin.srcDir("src/iosCaptureProbe/kotlin")
             dependencies {
                 implementation(libs.ktor.client.darwin)
-                api(urlSessionModule)
-                if (hopiEnabled) implementation(project(":hopi-core"))
+                // The probe's store (the plugin adds hopi-start, which brings core, in a Debug build).
+                if (hopiRuntime) implementation(project(":hopi-core"))
             }
         }
     }
 }
 
 /**
- * Proves that an iOS framework built without `-Phopi.enabled=true` holds none of the URLSession
- * capture and none of its rules: no `_hopi_us_` symbol (the rule functions `_hopi_us_rule…`
- * included), no `HopiUS` capture or rule-protocol Objective-C class, no `kfun:dev.koga.hopi.core`
- * symbol (`xcrun nm`, an argument array), and neither the capture and rule queues' labels nor the
- * private selector names in its bytes. Nor any of the performance monitors: no `_hopi_perf_`
- * symbol (the C library), no `kfun:dev.koga.hopi.perf.internal` or `kfun:dev.koga.hopi.core.perf`
- * symbol (the noop's own `HopiPerf` lives in `dev.koga.hopi.perf` and is expected), no
- * `HopiPerfCadence` class and no `hopi-perf-hang` thread name. With the flag it requires all of
- * them instead (the positive control), so the check is known to see what it looks for. Run it
- * both ways.
+ * Proves that an iOS framework built without `-Phopi.enabled=true` holds no Hopi runtime: none of
+ * hopi-network's URLSession capture and its rules, none of core, of the performance monitors'
+ * runtime or of hopi-start. In `xcrun nm -m` (an argument array): no `_hopi_us_` symbol (the rule
+ * functions `_hopi_us_rule…` included), no `HopiUS` capture or rule-protocol Objective-C class, no
+ * `_hopi_hits_` symbol (core's hit counter), no `_hopi_perf_` symbol and no `HopiPerfCadence` class
+ * (perf's C library), no Kotlin symbol of any kind (`_kfun:`, `_kclass:`, …) in `dev.koga.hopi.core`,
+ * `.network`, `.urlsession`, `.android`, `.ui`, `.perf.internal` or `.start`, and no
+ * `_OBJC_CLASS_$_SharedHopi` (hopi-start's `Hopi`); in its bytes, neither the capture and rule
+ * queues' labels nor the private selector names (C strings) nor the hang watchdog's and the
+ * sampler's thread names (Kotlin strings, UTF-16); in its header, no declaration of `Hopi`,
+ * `HopiStartConfig` or the sample's capture probe. `hopi-api`'s symbols and exported classes
+ * (`dev.koga.hopi.api`, `.rules`, `.perf`) and the Ktor plugin's (`dev.koga.hopi.ktor`) are expected.
+ * With the flag it requires every one of them instead (the positive control), so the check is known
+ * to see what it looks for. Either way the header declares no module-prefixed Hopi class
+ * (`SharedHopi_…`: an internal type that reached Swift) and no `HopiRuntimes` (the registry,
+ * `@HopiInternalApi`). The header is read as declarations (`@interface`, `@protocol`, the `@class`
+ * and `@protocol` lists), never as text: the exported KDoc names types in prose.
+ *
+ * Run it both ways, each requested by its own name: with the flag the Release link it consumes
+ * holds every runtime, which the iOS release guard (the io.github.felipekoga.hopi plugin's) lets through
+ * only for that link and only while this task is requested by name, so
+ * `./gradlew check -Phopi.enabled=true`, like any invocation that links a Release framework with
+ * the flag, fails in the guard.
  */
 abstract class VerifyIosCaptureSelection : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val binary: RegularFileProperty
+
+    /** The framework's Objective-C header, `Headers/Shared.h` beside [binary]. */
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val header: RegularFileProperty
 
     @get:Input
     abstract val real: Property<Boolean>
@@ -154,35 +179,62 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
             commandLine("xcrun", "nm", "-m", file.absolutePath)
             standardOutput = output
         }
-        val symbols = output.toString(Charsets.UTF_8).lineSequence()
-        val nativeSymbols = symbols.count { "_hopi_us_" in it }
-        val captureClasses = symbols.count { "HopiUSTask" in it || "HopiUSObserver" in it }
-        val ruleSymbols = symbols.count { "HopiUSRuleProtocol" in it || "_hopi_us_rule" in it }
-        val coreSymbols = symbols.count { "kfun:dev.koga.hopi.core" in it }
-        val perfNative = symbols.count { "_hopi_perf_" in it }
-        val perfKotlin = symbols.count { "kfun:dev.koga.hopi.perf.internal" in it || "kfun:dev.koga.hopi.core.perf" in it }
-        val perfClasses = symbols.count { "HopiPerfCadence" in it }
+        val symbols = output.toString(Charsets.UTF_8).lines()
+        val declared = declarations(header.get().asFile.readText())
+        // Each family's count: 0 without the flag, above 0 with it.
+        val families = linkedMapOf(
+            "_hopi_us_ symbols" to symbols.count { "_hopi_us_" in it },
+            "capture classes" to symbols.count { "HopiUSTask" in it || "HopiUSObserver" in it },
+            "rule symbols" to symbols.count { "HopiUSRuleProtocol" in it || "_hopi_us_rule" in it },
+            "_hopi_hits_ symbols" to symbols.count { "_hopi_hits_" in it },
+            "runtime Kotlin symbols" to symbols.count { RUNTIME_KOTLIN.containsMatchIn(it) },
+            "_hopi_perf_ symbols" to symbols.count { "_hopi_perf_" in it },
+            "perf classes" to symbols.count { "HopiPerfCadence" in it },
+            "Hopi classes" to symbols.count { it.trimEnd().endsWith(HOPI_CLASS) },
+            "Hopi declarations" to declared.count { it == "SharedHopi" },
+            "HopiStartConfig declarations" to declared.count { it == "SharedHopiStartConfig" },
+            "capture probe declarations" to declared.count { it == "SharedSampleCaptureProbe" },
+        )
         val bytes = file.readBytes()
-        // C strings, NUL included: the capture queue's label, the private selectors' names, the hang watchdog's thread name.
-        val strings = listOf("dev.koga.hopi.urlsession-capture", "dev.koga.hopi.urlsession-rules", "_didReceiveData:", "_didFinishWithError:")
-            .associateWith { contains(bytes, it.toByteArray() + 0) }
-        // A Kotlin string literal is stored as UTF-16, not as a C string.
-        val perfStrings = mapOf("hopi-perf-hang" to contains(bytes, "hopi-perf-hang".toByteArray(Charsets.UTF_16LE)))
-        val found = "$nativeSymbols _hopi_us_ symbols, $captureClasses capture classes, $ruleSymbols rule symbols, $coreSymbols core symbols, strings $strings; " +
-            "$perfNative _hopi_perf_ symbols, $perfKotlin perf Kotlin symbols, $perfClasses perf classes, strings $perfStrings"
-        val perfCounts = listOf(perfNative, perfKotlin, perfClasses)
-        if (real.get()) {
-            if (nativeSymbols == 0 || captureClasses == 0 || ruleSymbols == 0 || coreSymbols == 0 || strings.values.any { !it } ||
-                perfCounts.any { it == 0 } || perfStrings.values.any { !it }
-            ) {
-                throw GradleException("The -Phopi.enabled=true framework lacks the capture or perf code (the check would not see it): $found")
-            }
-        } else if (nativeSymbols != 0 || captureClasses != 0 || ruleSymbols != 0 || coreSymbols != 0 || strings.values.any { it } ||
-            perfCounts.any { it != 0 } || perfStrings.values.any { it }
-        ) {
-            throw GradleException("The framework built without -Phopi.enabled=true holds URLSession capture or perf code: $found")
+        // C strings, NUL included: the capture and rule queues' labels, the private selectors' names.
+        // A Kotlin string literal is stored as UTF-16: the hang watchdog's and the sampler's thread names.
+        val strings = C_STRINGS.associateWith { contains(bytes, it.toByteArray() + 0) } +
+            KOTLIN_STRINGS.associateWith { contains(bytes, it.toByteArray(Charsets.UTF_16LE)) }
+        // 0 with and without the flag.
+        val never = linkedMapOf(
+            "module-prefixed Hopi declarations" to declared.count { it.startsWith("SharedHopi_") },
+            "HopiRuntimes declarations" to declared.count { it == "SharedHopiRuntimes" },
+        )
+        val found = (families + never).entries.joinToString { "${it.value} ${it.key}" } + "; strings $strings"
+        if (never.values.any { it != 0 }) {
+            throw GradleException("The framework's header declares an internal Hopi type: $found")
         }
-        logger.lifecycle("${file.name} (${if (real.get()) "real" else "noop"}): $found")
+        if (real.get()) {
+            if (families.values.any { it == 0 } || strings.values.any { !it }) {
+                throw GradleException("The -Phopi.enabled=true framework lacks a runtime's code (the check would not see it): $found")
+            }
+        } else if (families.values.any { it != 0 } || strings.values.any { it }) {
+            throw GradleException("The framework built without -Phopi.enabled=true holds Hopi runtime code: $found")
+        }
+        logger.lifecycle("${file.name} (${if (real.get()) "with the flag" else "without the flag"}): $found")
+    }
+
+    /**
+     * The names the header declares or forward-declares: `@interface X …` and `@protocol X …` (a
+     * category is its class's name again), and each name of an `@class …;` or `@protocol …;` list.
+     */
+    private fun declarations(header: String): List<String> {
+        val names = ArrayList<String>()
+        for (line in header.lines()) {
+            val text = line.trim()
+            if (!text.startsWith("@interface ") && !text.startsWith("@protocol ") && !text.startsWith("@class ")) continue
+            if (text.endsWith(";")) {
+                text.substringAfter(' ').removeSuffix(";").split(',').mapNotNullTo(names) { NAME.find(it.trim())?.value }
+            } else if (!text.startsWith("@class ")) {
+                NAME.find(text.substringAfter(' '))?.value?.let(names::add)
+            }
+        }
+        return names
     }
 
     private fun contains(haystack: ByteArray, needle: ByteArray): Boolean {
@@ -192,16 +244,32 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
         }
         return false
     }
+
+    private companion object {
+        /** Every Kotlin/Native symbol kind (`_kfun:`, `_kclass:`, `_ktypew:`, …) of a runtime's package. */
+        val RUNTIME_KOTLIN = Regex("""_k[a-z]+:dev\.koga\.hopi\.(core|network|urlsession|android|ui|perf\.internal|start)[.#]""")
+        const val HOPI_CLASS = "_OBJC_CLASS_\$_SharedHopi"
+        val NAME = Regex("""^[A-Za-z_][A-Za-z0-9_]*""")
+        val C_STRINGS = listOf("dev.koga.hopi.urlsession-capture", "dev.koga.hopi.urlsession-rules", "_didReceiveData:", "_didFinishWithError:")
+        val KOTLIN_STRINGS = listOf("hopi-perf-hang", "hopi-perf-samp")
+    }
 }
+
+// The iOS release guard (the io.github.felipekoga.hopi plugin's): every Release link of this module first fails
+// on a Hopi runtime, except the link the release check below consumes, and that one only while the
+// check is requested by name (its positive control links every runtime with -Phopi.enabled=true).
+val releaseCheckLink = "linkReleaseFrameworkIosSimulatorArm64"
+extra["hopiIosReleaseGuardExemptLink"] = releaseCheckLink
 
 // The release framework, simulator slice: what an App Store build links, minus the device slice.
 tasks.register<VerifyIosCaptureSelection>("verifyIosReleaseExcludesCapture") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Checks that the iOS release framework holds no URLSession capture or perf code (with -Phopi.enabled=true: that it does)."
-    val link = tasks.named<KotlinNativeLink>("linkReleaseFrameworkIosSimulatorArm64")
+    description = "Checks that the iOS release framework holds no Hopi runtime (with -Phopi.enabled=true: that it holds every one)."
+    val link = tasks.named<KotlinNativeLink>(releaseCheckLink)
     dependsOn(link)
     binary.set(link.flatMap { it.outputFile }.map { project.layout.projectDirectory.file(it.resolve("Shared").absolutePath) })
-    real.set(hopiEnabled)
+    header.set(link.flatMap { it.outputFile }.map { project.layout.projectDirectory.file(it.resolve("Headers/Shared.h").absolutePath) })
+    real.set(hopi.iosRuntime)
 }
 
 if (System.getProperty("os.name").startsWith("Mac")) {

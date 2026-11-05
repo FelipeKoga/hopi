@@ -16,14 +16,16 @@ import kotlin.math.roundToLong
 
 /** Human output of the perf commands. `--json` prints the bridge's lines as received instead. */
 internal object PerfRender {
-    /** What `HopiLauncher` and an activity start do for frames (docs/design/perf-monitors.md, "Frames"). */
-    const val FRAMES_HINT: String =
-        "frames attach when an activity next starts (single-activity app: send it to the background and back, or open the Hopi launcher)"
+    /** When an Android frames monitor started with no resumed activity attaches (docs/design/perf-monitors.md, "Frames"). */
+    const val FRAMES_HINT: String = "frames attach when an activity next starts"
+
+    /** Which setting turns remote control off, on either platform. */
+    private const val REMOTE_CONTROL_OFF: String = "perf remoteControl, or perfRemoteControl on iOS, is false"
 
     /** `perf status`, `start`, `stop`: one line per monitor, then the app's notices. [summary] adds the counts. */
     fun status(status: RemotePerfStatus, summary: RemotePerfSummary?, nowMs: Long): List<String> {
         val lines = ArrayList<String>()
-        lines += "${visible(status.platform)} · remote control ${if (status.remoteControl) "on" else "off (remoteControl = false)"}"
+        lines += "${visible(status.platform)} · remote control ${if (status.remoteControl) "on" else "off ($REMOTE_CONTROL_OFF)"}"
         val rows = listOf("frames", "hangs", "cpu", "memory").map { name ->
             val monitor = status.monitor(name)
             when {

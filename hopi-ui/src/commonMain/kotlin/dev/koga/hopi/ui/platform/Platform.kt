@@ -1,9 +1,13 @@
 package dev.koga.hopi.ui.platform
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.font.FontFamily
 
 /** Local wall-clock time of [epochMs]: `14:03:22`, or `14:03:22.481` [withMillis]. */
 internal expect fun formatTimeOfDay(epochMs: Long, withMillis: Boolean): String
+
+/** The sans of every HopiType style but the monospace ones: Open Runde (OFL 1.1), bundled on the JVM. */
+internal expect fun hopiSans(): FontFamily
 
 /** Hands text to the platform share sheet. */
 internal fun interface ShareSheet {
@@ -11,32 +15,17 @@ internal fun interface ShareSheet {
 }
 
 /**
- * The platform share sheet: `Intent.ACTION_SEND` on Android, `UIActivityViewController` on iOS.
- * Null where the platform has none (the JVM), and the screen then offers no share action.
+ * The platform share sheet, or null where the platform has none (the desktop JVM, this module's
+ * only target since the in-app UI went in the runtime-split plan's stage 5), and the detail then
+ * offers no share action.
  */
 @Composable
 internal expect fun rememberShareSheet(): ShareSheet?
 
 /**
- * While composed, makes the system bars' icons readable over the screen's own background: dark
- * icons when [lightBackground], light ones otherwise, whatever the host app chose. The host's
- * choice is restored when it leaves the composition. Android only; elsewhere it does nothing.
- */
-@Composable
-internal expect fun SystemBarIcons(lightBackground: Boolean)
-
-/**
- * While composed, tells `hopi-perf` which activity the launcher is in, so a frames or hangs start
- * attaches to it at once (core's `PerfLauncher`: one weak reference, written once, cleared on
- * dispose). Called only when a perf controller is registered. Android only.
- */
-@Composable
-internal expect fun PerfLauncherAnchor()
-
-/**
- * The most text handed to a share sheet or the clipboard. An Android intent and a clip both travel
- * through a binder transaction of about 1 MB, which a UTF-16 string of this length stays well
- * below; past it, `setPrimaryClip` throws in the app.
+ * The most text handed to the clipboard or a share sheet: the limit of an Android clip (a binder
+ * transaction of about 1 MB), which the in-app UI had to respect until the runtime-split plan's
+ * stage 5 removed it, kept as the desktop's cut.
  */
 internal const val MAX_SHARE_CHARS: Int = 100_000
 
@@ -47,8 +36,3 @@ internal fun cutAt(text: String, max: Int = MAX_SHARE_CHARS): String =
     } else {
         text.substring(0, if (text[max - 1].isHighSurrogate()) max - 1 else max)
     }
-
-internal fun capForShare(text: String): String {
-    val cut = cutAt(text)
-    return if (cut === text) text else cut + "\n… (cut at $MAX_SHARE_CHARS characters)"
-}

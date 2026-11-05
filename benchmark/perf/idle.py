@@ -7,9 +7,9 @@ involuntary context switches (`/proc/<pid>/task/*/status`) at the start and the 
 seconds, through `run-as` (the debug build's own uid). Hopi's threads are the `hopi-*` ones. A wake
 is a voluntary context switch: a thread that blocked and was woken. One JSON line per arm on stdout.
 
-An arm is `label=monitors[:option=value…][@package]` (see bench.py; `heartbeat=1`, the noop install).
+An arm is `label=monitors[:option=value…][@package]` (see bench.py; `heartbeat=1`, the nohopi install).
 
-usage: idle.py [--seconds 60] [--settle 10] [--arms noop=none@dev.koga.hopi.sample.noop,off=none,all=all]
+usage: idle.py [--seconds 60] [--settle 10] [--arms nohopi=none@dev.koga.hopi.sample.nohopi,off=none,all=all]
 """
 import json, os, subprocess, sys, time
 

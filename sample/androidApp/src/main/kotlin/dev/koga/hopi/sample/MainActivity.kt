@@ -9,7 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dev.koga.fakesdk.FakeSdk
-import dev.koga.hopi.android.HopiAndroid
+import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.api.HopiRuntimes
 import dev.koga.hopi.rules.HopiRules
 import dev.koga.hopi.rules.HopiSource
 import java.io.IOException
@@ -29,13 +30,20 @@ private val PROOF_VALUE = Regex("\"proof\":\"[^\"]*\"")
 private const val SQUAT_EXTRA = "squat"
 
 /**
- * Giant-body measurements: `--el maxBodyBytes N` sets Hopi's capture cap for the process
- * (before the client exists, so force-stop the app first), and `--es giant <spec>` runs
- * [giantJsonAction] at launch, e.g. `--es giant 'mb=1,5,20;shape=minified;runs=5'`.
+ * Giant-body measurements: `--es giant <spec>` runs [giantJsonAction] at launch, e.g.
+ * `--es giant 'mb=1,5,20;shape=minified;runs=5'`. Capture's caps are build settings here: install
+ * the debug build with `-Psample.maxBodyBytes=N` (and `-Psample.maxTotalBytes=N`), which the
+ * `hopi { }` block reads. `--el maxBodyBytes N` sets only the Ktor plugin's own cap
+ * ([SampleHttp.maxBodyBytes], before the client exists, so force-stop the app first), for the
+ * requests the plugin records itself, those that name their own `Accept-Encoding`; OkHttp capture
+ * records the rest at the build's cap.
  */
 private const val MAX_BODY_BYTES_EXTRA = "maxBodyBytes"
 
-/** `--el maxTotalBytes N`: Hopi's store byte cap (the body cap is clamped to half of it). */
+/**
+ * `--el maxTotalBytes N`: the Ktor plugin's store cap ([SampleHttp.maxTotalBytes]), which the store
+ * no longer takes: the start presets the build's caps first. Kept for the run's header line.
+ */
 private const val MAX_TOTAL_BYTES_EXTRA = "maxTotalBytes"
 private const val GIANT_EXTRA = "giant"
 
@@ -89,22 +97,23 @@ private const val DEV_SERVER_URL = "http://127.0.0.1:8765"
  * checks drive through intent extras.
  */
 class MainActivity : ComponentActivity() {
+    @OptIn(HopiInternalApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // The shared UI draws behind the system bars (safeDrawingPadding); this keeps their icons
         // readable on its light and dark backgrounds.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // The plugin selects the real modules or the noop twins per variant, whatever -Phopi.enabled
-        // says: the Diagnostics caption and the evidence lines say what runs (its provider started
-        // capture before the application was created).
-        SampleBuild.androidCaptureStarted = HopiAndroid.isStarted
+        // The plugin adds Hopi's runtimes to debuggable variants only, whatever -Phopi.enabled says:
+        // the network status says whether capture runs (the provider started it before the
+        // application was created), for the Diagnostics caption and the evidence lines.
+        SampleBuild.androidCaptureStarted = HopiRuntimes.networkStarted
         if (intent.hasExtra(MAX_BODY_BYTES_EXTRA)) {
             SampleHttp.maxBodyBytes = intent.getLongExtra(MAX_BODY_BYTES_EXTRA, 0L).takeIf { it > 0 }
         }
         if (intent.hasExtra(MAX_TOTAL_BYTES_EXTRA)) {
             SampleHttp.maxTotalBytes = intent.getLongExtra(MAX_TOTAL_BYTES_EXTRA, 0L).takeIf { it > 0 }
         }
-        // Created with the first activity so the bridge is up before the first request.
+        // Created with the first activity, so the first request does not pay for creating the client.
         SampleHttp.start()
         // `am start … --es selfCheck <process name>` runs the self-check against that app's bridge
         // at launch: from a second install (another uid) it must be refused.
@@ -138,10 +147,11 @@ class MainActivity : ComponentActivity() {
 /**
  * Requests Hopi records with no Ktor and no setup: the fake third-party SDK's OkHttp client and
  * HttpURLConnection calls (`sample/fakesdk`, which knows nothing of Hopi) and Kotlin's
- * `URL.readText()`. The debug build records each of them once, through the dev.koga.hopi plugin's
+ * `URL.readText()`. The debug build records each of them once, through the io.github.felipekoga.hopi plugin's
  * instrumentation; the release build sends the same requests and records nothing. Logged under
  * `HopiSample`, one line per request, then the capture status.
  */
+@OptIn(HopiInternalApi::class)
 private fun captureAction() = PlatformAction("Third-party SDK and URL.readText()") {
     withContext(Dispatchers.IO) {
         val lines = try {
@@ -149,7 +159,7 @@ private fun captureAction() = PlatformAction("Third-party SDK and URL.readText()
         } catch (e: Exception) {
             listOf("capture: ${e::class.simpleName}: ${e.message}")
         }
-        val status = "capture: started=${HopiAndroid.isStarted} okHttpInstrumented=${HopiAndroid.okHttpInstrumented}"
+        val status = "capture: started=${HopiRuntimes.networkStarted} okHttpInstrumented=${HopiRuntimes.okHttpInstrumented}"
         (lines + status).forEach { Log.i("HopiSample", it) }
         (lines + status).joinToString("\n")
     }
@@ -159,14 +169,15 @@ private fun captureAction() = PlatformAction("Third-party SDK and URL.readText()
  * One request of each shape through Ktor, the fake SDK's OkHttp client and HttpURLConnection, one
  * `{"verify":…}` line each under `HopiSample` (status, bytes read, SHA-256), then
  * `{"verify":"done",…}` with the capture status. The host matches the lines to Hopi's records and
- * compares them with a noop build's.
+ * compares them with those of a build with no runtime (the `nohopi` arm).
  */
+@OptIn(HopiInternalApi::class)
 private fun verifyAction(https: String) = PlatformAction("Capture verify") {
     withContext(Dispatchers.IO) {
         val ktorFailed = runKtorVerify(https)
         val lines = FakeSdk.verify(DEV_SERVER_URL, https)
         lines.forEach { Log.i("HopiSample", it) }
-        val done = "{\"verify\":\"done\",\"ktorFailed\":$ktorFailed,\"started\":${HopiAndroid.isStarted},\"okHttpInstrumented\":${HopiAndroid.okHttpInstrumented}}"
+        val done = "{\"verify\":\"done\",\"ktorFailed\":$ktorFailed,\"started\":${HopiRuntimes.networkStarted},\"okHttpInstrumented\":${HopiRuntimes.okHttpInstrumented}}"
         Log.i("HopiSample", done)
         done
     }
@@ -244,6 +255,7 @@ private fun rulesTargetsAction() = PlatformAction("Rules targets (for host rules
  * CPU per request (`Debug.threadCpuTimeNanos`), after `warmup` requests that are not counted.
  * Logged under `HopiSample` as `{"captureBench":…}`.
  */
+@OptIn(HopiInternalApi::class)
 private fun captureBench(spec: String) = PlatformAction("Capture benchmark") {
     val fields = spec.split(';').mapNotNull { part -> part.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
     val kinds = fields["kinds"]?.split(',') ?: listOf("okhttp", "urlconnection")
@@ -257,7 +269,7 @@ private fun captureBench(spec: String) = PlatformAction("Capture benchmark") {
             val cpuBefore = android.os.Debug.threadCpuTimeNanos()
             val nanos = FakeSdk.bench(DEV_SERVER_URL, kind, path, count, gapUs).sorted()
             val cpuPerRequest = (android.os.Debug.threadCpuTimeNanos() - cpuBefore) / count
-            val line = "{\"captureBench\":\"$kind\",\"path\":\"$path\",\"n\":$count,\"gapUs\":$gapUs,\"capture\":${HopiAndroid.isStarted}," +
+            val line = "{\"captureBench\":\"$kind\",\"path\":\"$path\",\"n\":$count,\"gapUs\":$gapUs,\"capture\":${HopiRuntimes.networkStarted}," +
                 "\"medianUs\":${nanos[count / 2] / 1000},\"p90Us\":${nanos[count * 9 / 10] / 1000},\"cpuUs\":${cpuPerRequest / 1000}}"
             Log.i("HopiSample", line)
             line

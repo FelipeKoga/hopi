@@ -1,18 +1,19 @@
 package dev.koga.hopi.core.rules
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * What every source builds the same way for a mock or a response edit (docs/design/rules.md,
- * "Actions"): the headers delivered to the app and the status line's reason phrase. A source only
- * maps the result onto its own response type.
+ * "Actions"): the headers delivered to the app, with [noStore] on the platform sources, and the
+ * status line's reason phrase. A source only maps the result onto its own response type.
  */
 @HopiInternalApi
 public object ResponseEdits {
     /**
-     * The headers of [mock] as the app receives them: the rule's own, plus the `Content-Length` Hopi
-     * computes when the status has a body (a matched `HEAD` gets the length the body would have,
-     * without the body, as a server answers it).
+     * The headers of [mock] as a source builds them, before [noStore] (which the platform sources
+     * then apply, and the Ktor recorder when its client has `HttpCache`): the rule's own, plus the
+     * `Content-Length` Hopi computes when the status has a body (a matched `HEAD` gets the length the
+     * body would have, without the body, as a server answers it).
      */
     public fun mockHeaders(mock: MockSpec): List<Pair<String, String>> {
         if (!statusHasBody(mock.status)) return mock.headers
@@ -34,6 +35,25 @@ public object ResponseEdits {
         result += edit.setHeaders
         result += edit.addHeaders
         edit.body?.let { result += CONTENT_LENGTH to it.size.toString() }
+        return result
+    }
+
+    /**
+     * [headers] with every `Cache-Control` (any case, every value) removed and one
+     * `Cache-Control: no-store` appended, the rest in order. The platform sources (OkHttp,
+     * `HttpURLConnection`, URLSession) deliver every mock and every response edit through it,
+     * unconditionally: a platform rule cannot see an HTTP cache above its stack, and Ktor's
+     * `HttpCache` stored a platform mock (a rule with `max-age=600`), a body edit and a header-only
+     * edit, and served them after the rule was gone (the runtime-split plan's stage 10
+     * experiments, R5). So a rule-set `Cache-Control` (a mock's, an edit's set or added one) and
+     * the server's under an edit never reach the app on those sources, and an app cannot exercise
+     * its own HTTP cache through a rule there. The Ktor recorder, which sees its client, applies
+     * it only when the client has `HttpCache`.
+     */
+    public fun noStore(headers: List<Pair<String, String>>): List<Pair<String, String>> {
+        val result = ArrayList<Pair<String, String>>(headers.size + 1)
+        for (header in headers) if (!header.first.equals(CACHE_CONTROL, ignoreCase = true)) result += header
+        result += CACHE_CONTROL to NO_STORE
         return result
     }
 
@@ -98,5 +118,7 @@ public object ResponseEdits {
     }
 
     private const val CONTENT_LENGTH = "Content-Length"
+    private const val CACHE_CONTROL = "Cache-Control"
+    private const val NO_STORE = "no-store"
     private val BODY_HEADERS = listOf("content-length", "content-encoding", "transfer-encoding")
 }

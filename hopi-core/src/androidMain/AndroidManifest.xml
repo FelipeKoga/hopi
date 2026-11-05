@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into debuggable variants only: the io.github.felipekoga.hopi plugin adds hopi-core with the runtimes to
+     debuggable build types (the others get no runtime, so no manifest entry). A non-debuggable app
+     that links hopi-core anyway gets one notice line and nothing started. The highest initOrder
+     runs it before other SDKs' providers, which may already make requests. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider
+            android:name="dev.koga.hopi.android.internal.HopiInitProvider"
+            android:authorities="${applicationId}.hopi-init"
+            android:exported="false"
+            android:initOrder="2147483647" />
+    </application>
+</manifest>

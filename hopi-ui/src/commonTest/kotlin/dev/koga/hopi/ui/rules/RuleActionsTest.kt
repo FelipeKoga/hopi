@@ -2,31 +2,15 @@ package dev.koga.hopi.ui.rules
 
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.TransactionSource
-import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.ui.complete
 import dev.koga.hopi.ui.pending
 import dev.koga.hopi.ui.textBody
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runTest
 
 class RuleActionsTest {
-    @BeforeTest
-    fun setUp() = RuleEngine.resetForTests()
-
-    @AfterTest
-    fun tearDown() = RuleEngine.resetForTests()
-
     @Test
     fun theExactMatchIsMethodSchemeHostPortAndPathWithoutTheQuery() {
         val match = assertNotNull(exactMatchOf(complete(1, method = "POST", url = "https://API.example.com:8443/v1/users?page=2")))
@@ -61,28 +45,5 @@ class RuleActionsTest {
         // No body, nothing to copy; a host viewer's summary has no headers, so the app refuses itself.
         assertNull(mockRefusal(encoded("br", TransactionSource.OKHTTP, body = null)))
         assertNull(mockRefusal(complete(1, responseBody = CapturedBody.notFetched(10), responseHeaders = emptyList()).copy(source = TransactionSource.OKHTTP)))
-    }
-
-    @Test
-    fun theMockIsBuiltOnTheGivenDispatcherAndReportedInTheScope() = runTest {
-        // The scope runs at once, as the tap does; the dispatcher only when the test lets it.
-        val format = StandardTestDispatcher(testScheduler)
-        val outcomes = mutableListOf<InAppOutcome>()
-        val mock = assertNotNull(inAppRuleActions(complete(1), CoroutineScope(UnconfinedTestDispatcher(testScheduler)), format) { outcomes += it }.mock)
-        mock.run()
-        assertTrue(outcomes.isEmpty())
-        assertTrue(RuleEngine.list().isEmpty())
-        advanceUntilIdle()
-        val mocked = assertIs<InAppOutcome.Mocked>(outcomes.single())
-        assertEquals(listOf(mocked.ruleId), RuleEngine.list().map { it.id })
-    }
-
-    @Test
-    fun aBodyThatDoesNotDecodeIsRefusedInTheAppsWords() {
-        // Named gzip, so the button is enabled; the tap finds bytes that are not gzip.
-        val notGzip = complete(1, responseHeaders = listOf("Content-Type" to "application/json", "Content-Encoding" to "gzip")).copy(source = TransactionSource.OKHTTP)
-        assertNull(mockRefusal(notGzip))
-        assertEquals("response body does not decode as gzip", assertIs<InAppOutcome.Refused>(mockInApp(notGzip)).message)
-        assertTrue(RuleEngine.list().isEmpty())
     }
 }

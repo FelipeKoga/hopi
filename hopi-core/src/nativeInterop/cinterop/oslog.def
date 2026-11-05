@@ -1,6 +1,9 @@
 language = C
 package = dev.koga.hopi.core.internal.oslog
 headerFilter = hopi-oslog-shim-only
+# hopi_os_log_bytes takes the pinned UTF-8 buffer itself: a pointer, not a Kotlin String (Kotlin/Native
+# 2.2 binds every other const char * parameter as String?).
+noStringConversion = hopi_os_log_bytes
 ---
 // os_log is a variadic macro whose format string must live in the binary image, so it cannot be
 // called from Kotlin directly; this shim is compiled into the klib. The headers are included here,

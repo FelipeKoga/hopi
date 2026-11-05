@@ -14,7 +14,7 @@ kotlin {
     explicitApi()
 
     compilerOptions {
-        optIn.add("dev.koga.hopi.core.HopiInternalApi")
+        optIn.add("dev.koga.hopi.api.HopiInternalApi")
         optIn.add("androidx.compose.ui.ExperimentalComposeUiApi")
     }
 }
@@ -22,7 +22,7 @@ kotlin {
 dependencies {
     // Targets, adb tracking, bridge.json, RemoteSession and BridgeDecoder: shared with the CLI.
     implementation(project(":hopi-connect"))
-    // HopiPanes and the monochrome theme (jvm); the in-app screen is never composed here.
+    // HopiPanes and its theme: the desktop viewer's screens (JVM only, unpublished).
     implementation(project(":hopi-ui"))
     // The viewer's own HopiStore, the JSON writer (exports) and the redactor.
     implementation(project(":hopi-core"))
@@ -34,6 +34,11 @@ dependencies {
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.compose.ui.test)
+}
+
+sourceSets.test {
+    // FakeUsbmuxd and FakeXcrun (USB iPhones without a phone).
+    kotlin.srcDir(rootProject.layout.projectDirectory.dir("hopi-connect/src/testShared/kotlin"))
 }
 
 tasks.jar {
@@ -67,7 +72,7 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             packageName = "Hopi"
             packageVersion = desktopVersion
-            description = "Hopi desktop viewer: HTTP traffic of a running app"
+            description = "Hopi desktop viewer: devtools for a running KMP or CMP app"
             vendor = "dev.koga"
             // Beyond the defaults: the bridge.json watch's sensitivity modifier (com.sun.nio.file).
             modules("jdk.unsupported")

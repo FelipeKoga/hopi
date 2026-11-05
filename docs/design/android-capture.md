@@ -5,10 +5,19 @@ Status: built (2026-10-24); what changed while building it, and the device measu
 "capture every HTTP request the app makes, including third-party SDKs, with no per-client
 configuration". The iOS part (URLSession) is built, see `docs/design/urlsession-capture.md`. This
 design reuses its `source` field, its store semantics (`CaptureInstallation`) and its Ktor dedupe
-rule (`PlatformCapture`). Records go into the existing `HopiStore`, so the in-app screen, the NDJSON
-log line, the bridge/CLI and the desktop viewer show them with no change: `TransactionSource.OKHTTP`
+rule (`PlatformCapture`). Records go into the existing `HopiStore`, so the NDJSON log line, the
+bridge/CLI and the desktop viewer (and the in-app screen, until the runtime-split plan's stage 5
+removed it) show them with no change: `TransactionSource.OKHTTP`
 (`"okhttp"`) and `TransactionSource.URL_CONNECTION` (`"urlconnection"`) already exist in core, on
 the wire, in `BridgeDecoder` and in the UI's `sourceLabel` (`OkHttp`, `HttpURLConnection`).
+
+**History note (2026-10-30).** The runtime-split plan (`docs/design/api-runtime-split-plan.md`)
+removed the noop twins (`hopi-android-noop` with `hopi-android` in its stage 9, 2026-10-29; the UI
+and Ktor twins in its stages 5 and 10), then the parity check `:checkNoopParity` and the twin
+selection `selectTwins` (stage 11, 2026-10-30). The sections it changed say so with their stage;
+every other passage that names a noop, a twin or parity (the architecture contract changes, the
+tests, the A/B method, the implementation steps, the risks, and "As built" to the end) records the
+design as built before it and is kept as history. The contract is `docs/ARCHITECTURE.md`.
 
 ## Goals and non-goals
 
@@ -16,7 +25,9 @@ Goals:
 
 - Setup is one line in the app module's `build.gradle.kts`: `plugins { id("dev.koga.hopi") }`. No
   code, no per-client, per-SDK or per-session setup, and no `-Phopi.enabled` for Android apps that
-  use the plugin. An optional `hopi { … }` block holds the same settings as `HopiUrlSessionConfig`.
+  use the plugin. An optional `hopi { … }` block holds the same store settings as `Hopi.start` on
+  iOS (`HopiStartConfig`; before stage 9 of the runtime-split plan, iOS's own capture config), and,
+  since that stage, capture's own settings in `hopi { network { } }`.
 - Every OkHttp call (OkHttp 3.14, 4.x and 5.x; 3.12 and 3.13 are rewritten but left unrecorded,
   see "Dedupe with the Ktor plugin") and every `HttpURLConnection` /
   `HttpsURLConnection` opened through `java.net.URL` in the APK's own code is recorded once: app
@@ -31,8 +42,10 @@ Goals:
   they are only counted; the records queued for a store consumer that fell behind keep at most
   `maxTotalBytes` of captures between them. No `peekBody` or read-ahead. Hopi does no work of its
   own on the main thread. The only main-thread cost is the auto-start, measured.
-- Release (non-debuggable) variants are not instrumented and get the noop twin. They contain no
-  capture class and no reference to one, and an automated check proves it.
+- Release (non-debuggable) variants are not instrumented and get no runtime (until stage 9 of the
+  runtime-split plan, 2026-10-29, the noop twin; since then a release variant that resolves a
+  runtime fails its build in the plugin's release guard). They contain no capture class and no
+  reference to one, and an automated check proves it (`verifyReleaseHasNoRuntime` since stage 9).
 
 Non-goals (v1):
 
@@ -101,8 +114,8 @@ owner is not exactly `java/net/URL` (a `URL` subclass cannot exist, the class is
 
 The hooks are internal top-level functions (`@file:JvmName("HopiOkHttpHooks")` and
 `@file:JvmName("HopiUrlHooks")`). Kotlin compiles them to public static methods with unmangled
-names, but they are not part of the ABI dump, so the noop needs no copy of them and the release
-check can look for their types. The OkHttp hook and the URL hooks are in two classes, so an app
+names, but they are not part of the ABI dump (it stays empty), and the release check can look for
+their types. The OkHttp hook and the URL hooks are in two classes, so an app
 without OkHttp never loads a class whose signatures name `okhttp3` types (no soft verification
 failure on ART). One shared constant table (`HookDescriptors`, in the `hopi-instrument` module
 below) defines owner, name and descriptor. A runtime test loads both hook classes and checks every
@@ -309,13 +322,13 @@ Rules for the wrapper:
 - **The app's request thread** (OkHttp's, or whatever thread calls the `URLConnection`): one state
   object per request (id, two times, references to the immutable request/headers, the capture
   `okio.Buffer` or a `ByteArray` block list for the `URLConnection` tee, counters, one
-  `AtomicBoolean` for "terminal posted"), and two queued writes (`store.submitDeferred`). The body
-  copy below the cap happens on the reader's thread: zero-copy segment sharing for OkHttp, one
-  bounded array copy per chunk for `URLConnection`. Hopi converts no header, trims no array and
-  formats nothing on this thread.
+  `AtomicBoolean` for "terminal posted"), and the record queued twice as itself
+  (`store.submitStart`, then `store.submitEnd`). The body copy below the cap happens on the
+  reader's thread: zero-copy segment sharing for OkHttp, one bounded array copy per chunk for
+  `URLConnection`. Hopi converts no header, joins no blocks and formats nothing on this thread.
 - **The store's consumer thread** (`hopi-store`, background priority, core's, see ARCHITECTURE.md
   "Store"): builds each record from the request's state (converts `Headers`/the header strings to
-  `List<Pair>`, trims the bodies' arrays, `source = "okhttp"`/`"urlconnection"`), applies it and,
+  `List<Pair>`, joins each body's blocks into one array, `source = "okhttp"`/`"urlconnection"`), applies it and,
   in the same pass, writes its summary line: one thread. While no viewer is attached
   (`HopiStore.attachViewer`: a bridge connection, the UI on screen) a request's start wakes
   nothing, and its end wakes the consumer only from its untimed sleep: after a pass it dozes 50 ms,
@@ -343,8 +356,14 @@ Rules for the wrapper:
 
 ## Auto-start
 
-The real runtime's `AndroidManifest.xml` declares one provider. It is merged only into debuggable
-variants, because only they depend on the real runtime:
+`hopi-core`'s `AndroidManifest.xml` declares one provider (`hopi-android`'s until the
+runtime-split plan's stage 4, 2026-10-28; the class kept its package). With the plugin it is
+merged only into debuggable variants, because only they depend on `hopi-core`: the plugin adds it
+with the runtimes to debuggable build types (since stage 9 of the runtime-split plan, whatever
+`network { }` and `perf { }` enable, so even with no tool), and the release guard fails a release
+variant that resolves it. An app that links a real Hopi module without the plugin
+merges it wherever that module goes, where it starts nothing and writes one notice line
+(ARCHITECTURE.md, Android capture, "Start").
 
 ```xml
 <provider
@@ -357,23 +376,56 @@ variants, because only they depend on the real runtime:
 A plain `ContentProvider` is used, not androidx.startup, so there is no new dependency and no
 merge with the app's own `InitializationProvider`. The highest `initOrder` makes it start before
 other SDKs' providers that may make requests from their own providers (Firebase's
-`FirebaseInitProvider` uses 100). `onCreate` (main thread) does three things. (1) It reads the
-configuration from resources (`hopi_*` bools, integers and string arrays, a few lookups). The
-runtime's own `res/` holds the defaults, and the plugin generates a resource overlay in the app
-from the `hopi { … }` block, so it also works without the plugin (with defaults). (2) It validates
-the caps; invalid caps give a notice line and no start, `HopiUrlSession`'s rule. (3) It sets
-`started`. If `Class.forName("okhttp3.internal.connection.RealCall", false, loader)` (or
+`FirebaseInitProvider` uses 100). `onCreate` (main thread) does four things. (1) It checks
+`FLAG_DEBUGGABLE` in the app's `ApplicationInfo` (a companion function of the flags, which fails
+closed when there is none): an app that is not debuggable gets one notice line, always, since the
+configuration is not read, `not started: <package> is not debuggable (FLAG_DEBUGGABLE unset); a
+Hopi runtime reached a non-debuggable build, check the app's dependencies`, and nothing else. (2)
+It reads the configuration: not resources (see "As built"), but a Java class the plugin generates
+into each debuggable variant from the `hopi { … }` block,
+`dev.koga.hopi.android.generated.HopiGeneratedConfig extends HopiConfigValues` (core's), whose
+constructor passes the global settings (the store caps, redaction, `summaryLog`, `agentBridge`)
+and then the tool list, each tool constructed with its own settings:
+`new NetworkTool(okhttp, urlConnection, rules)` with `network { enabled }` (the default) and
+`new PerfEntry(autoStart, hangThresholdMs, hangHeartbeat, remoteControl)` with
+`perf { enabled = true }`, possibly neither (since stage 9 of the runtime-split plan). One
+`Class.forName` and one constructor call. Without that class (a runtime added without the plugin) it writes one notice line,
+`not started: no generated configuration; apply the dev.koga.hopi Gradle plugin to the app`, and
+starts nothing: the tool list lives in that class, and nothing was rewritten anyway (before stage 4
+it started with defaults). (3) It registers core's current-activity callbacks (perf-monitors.md,
+"How the monitors find the app"). (4) It runs core's start sequence (ARCHITECTURE.md, "Start
+sequence") with the tool list: invalid caps give a notice line and no start (iOS's rule: a Swift
+caller cannot catch); the default store's caps are preset; with `agentBridge` the store installation is made at
+once on a background thread; then each tool starts. The network tool sets `started`. If
+`Class.forName("okhttp3.internal.connection.RealCall", false, loader)` (or
 `okhttp3.RealCall`) loads and carries `@HopiInstrumented`, it also calls
 `PlatformCapture.coverWithPassThrough("io.ktor.client.engine.okhttp.")`; for `okhttp3.RealCall`
 only when `okhttp3.RequestBody` has `isDuplex()` (OkHttp 3.14 and later, one reflective lookup made
 only for 3.x). When the generated configuration says the `URL` calls of Ktor's Android engine were
 rewritten (`urlConnection`, false when an exclude pattern matches
-`io.ktor.client.engine.android.AndroidClientEngine`, and false without the plugin), it also covers
+`io.ktor.client.engine.android.AndroidClientEngine`), it also covers
 `io.ktor.client.engine.android.`. The class is not initialized, and no OkHttp class runs code. The consumer keep rules (below) keep `RealCall`'s name and the annotation in
-a minified debug build. Requests made before the provider runs (`Application.attachBaseContext`,
-other processes) are not recorded.
+a minified debug build, and `hopi-core`'s keep the provider and the generated class. Requests made
+before the provider runs (`Application.attachBaseContext`, other processes) are not recorded. With
+`summaryLog` the provider ends with one line of its own cost, in parts: `android capture started
+(okhttp instrumented, <total> us; config <n> us, network <n> us, perf <n> us)`. The line marks the
+end of the start sequence, whatever tools ran: with `network { enabled = false }` it has no
+`network` part, and with no tool only `config` (ARCHITECTURE, Android capture, "Start").
 
 ## Dedupe with the Ktor plugin
+
+**Since the runtime-split plan's stage 10 (2026-10-29)** "the plugin" below is the Ktor plugin's
+recorder, `hopi-network`'s adapter (`dev.koga.hopi.network.internal.ktor`, compiled against Ktor
+and `hopi-ktor` `compileOnly`), which the network tool registers in `hopi-api`'s Ktor slot right
+after it starts capture, through one forwarder; the thin `hopi-ktor` installs it per client and
+installs nothing without it. Everything below holds for it, with three changes. Android capture is
+now the only coverer: on iOS the plugin installs nothing and URLSession capture covers no engine.
+An app without the Gradle plugin (the runtime added by hand, a Robolectric test where nothing is
+transformed) gets no recorder at all, so its Ktor plugin records nothing, rather than recording as
+`"ktor"`; with the Gradle plugin and nothing covered (an unknown OkHttp version, OkHttp excluded),
+the recorder records as `"ktor"`. And the tool covers the engines before it registers the
+recorder, so the in-flight window of the timing paragraph is gone; the withdrawal stays,
+unreachable outside tests. As designed and first built:
 
 The iOS rule is reused unchanged: **platform capture is the source of truth for the engines it
 covers, and the plugin defers.** The auto-start covers `io.ktor.client.engine.okhttp.` only when
@@ -447,12 +499,16 @@ does.
 
 ### Layout
 
+Since stage 9 of the runtime-split plan (2026-10-29): `hopi-android` and `hopi-android-noop` are
+gone; the Android runtime below is `hopi-network`'s `androidMain` (its packages kept), beside the
+iOS URLSession capture; the contract is ARCHITECTURE's ("Modules", "Android capture"). The layout as designed:
+
 ```text
 settings.gradle.kts         pluginManagement { includeBuild("gradle-plugin") }
 gradle-plugin/              an included build (its own settings.gradle.kts, the root's version catalog through versionCatalogs { from(files("../gradle/libs.versions.toml")) })
   instrument/               plain JVM (kotlin("jvm")), artifact dev.koga.hopi:hopi-instrument: the ASM visitors, HookDescriptors; ASM compileOnly (AGP supplies it at run time), testImplementation for its tests
   plugin/                   java-gradle-plugin, id "dev.koga.hopi", class dev.koga.hopi.gradle.HopiPlugin, artifact dev.koga.hopi:hopi-gradle-plugin; compileOnly com.android.tools.build:gradle-api:9.4.0; implementation project(":instrument")
-hopi-android/               KMP library, android target only (com.android.kotlin.multiplatform.library, like the other modules), explicitApi(), ABI validation; depends on hopi-core; compileOnly OkHttp 4.12.0 (the app brings its own; 4.12 is the lowest API Hopi compiles against, so 5.x-only API cannot creep in); androidResources enabled for the config defaults; manifest provider; consumer keep rules
+hopi-android/               KMP library, android target only (com.android.kotlin.multiplatform.library, like the other modules), explicitApi(), ABI validation; depends on hopi-core; compileOnly OkHttp 4.12.0 (the app brings its own; 4.12 is the lowest API Hopi compiles against, so 5.x-only API cannot creep in); consumer keep rules (as built: no resources, the configuration is a generated class; the manifest provider is hopi-core's since the runtime-split plan's stage 4)
 hopi-android-noop/          the same public API, no dependency, no manifest entry, no resources
 sample/fakesdk/             com.android.library, Java only, no Hopi plugin, no Hopi dependency (the third-party stand-in, below)
 ```
@@ -462,9 +518,15 @@ start, the configuration, the capture dispatcher and the store installation, and
 installs both rewrites. Two modules would mean two parity pairs and two providers for no
 selection a developer needs (`hopi { okhttp = false }` turns one off at build time instead).
 `hopi-android` is not a dependency of `hopi-ktor` or of any KMP module. Only the plugin adds it,
-to an Android application.
+to an Android application. (Since the runtime-split plan's stage 10 its successor, `hopi-network`,
+compiles the Ktor plugin's recorder against `hopi-ktor` `compileOnly`: neither brings the other
+at run time, and the thin `hopi-ktor` depends on `hopi-api` alone.)
 
-Public API (what the noop mirrors):
+Public API (what the noop mirrors). Since stage 9 of the runtime-split plan (2026-10-29): deleted,
+with the noop; the status it held is the network status of `hopi-api`'s registry,
+`HopiRuntimes.networkStarted` and `okHttpInstrumented` (`@HopiInternalApi`), which the network tool
+writes once capture runs, so nothing of the runtime is public and `hopi-network`'s dumps are
+empty; the contract is ARCHITECTURE's ("Modules", "Start sequence"). As designed:
 
 ```kotlin
 public object HopiAndroid {
@@ -478,13 +540,24 @@ public object HopiAndroid {
 Nothing else is public. `HopiInitProvider`, the hooks, the interceptor and the wrappers are in
 `dev.koga.hopi.android.internal`. They are internal Kotlin declarations, or `@HopiInternalApi`
 where a class must be public for the manifest. `HopiInitProvider` is a public class. Its package
-is excluded from the ABI dumps the same way `hopi-ui` excludes `dev.koga.hopi.ui.desktop`, with the
-reason recorded in the build script: the class is the manifest's, and the noop has no manifest. The
+is excluded from the ABI dumps the same way `hopi-ui` excluded `dev.koga.hopi.ui.desktop` (until
+the runtime-split plan's stage 5 left `hopi-ui` without a dump), with the reason recorded in the
+build script: the class is the manifest's, and the noop has no manifest. The
 pair is added to `noopTwins` in the root build, so `:checkNoopParity` covers it, with a
 `DefaultsParityTest`-style check that both `isStarted` and `okHttpInstrumented` read false in the
-noop.
+noop. (Since the runtime-split plan's stage 4, 2026-10-28, `HopiInitProvider`, its manifest entry,
+`HopiConfigValues` and `GeneratedConfig` are `hopi-core`'s, in the same package; `hopi-android`'s
+excluded package keeps the hooks, the interceptor, the wrappers and the network tool the generated
+configuration names, which the app's own classes must reach.)
 
 ### DSL
+
+Since stage 9 of the runtime-split plan (2026-10-29): `okhttp`, `urlConnection`, `rules` and
+`excludeClasses` are in `hopi { network { } }`, beside `network { enabled }` (default true; false
+leaves out the network runtime, the transform and the network tool); `enabled = false` gives no
+variant anything, and the release guard runs whatever it says; since stage 11 (2026-10-30)
+`selectTwins` is gone (see "Twin selection (removed)"); the contract is ARCHITECTURE's ("Consumer
+API"). As designed:
 
 ```kotlin
 hopi {                                   // all optional; defaults are HopiUrlSessionConfig's
@@ -505,10 +578,19 @@ hopi {                                   // all optional; defaults are HopiUrlSe
 ```
 
 Every value is a Gradle `Property` and is configuration-cache safe. A task per debuggable variant
-(`generate<Variant>HopiConfig`) writes `values/hopi_config.xml`, registered with
-`variant.sources.res?.addGeneratedSourceDirectory(…)`.
+(`generate<Variant>HopiConfig`) writes the generated configuration class (Auto-start), registered
+with `variant.sources.java?.addGeneratedSourceDirectory(…)`; the design's
+`values/hopi_config.xml` became that class while building it (see "As built").
 
 ### Variant wiring
+
+Since stage 9 of the runtime-split plan (2026-10-29): `finalizeDsl` adds `hopi-core` to every
+debuggable build type (with `enabled`), `hopi-network` with `network { enabled }` and `hopi-perf`
+with `perf { enabled = true }`, and nothing to the others; every debuggable variant gets a
+generated configuration (its tool list may be empty) and, with `network { enabled }`, the
+transform; every variant that is not debuggable gets the release guard, `hopiReleaseGuard<Variant>`,
+before its `pre<Variant>Build`; the contract is ARCHITECTURE's ("Selecting the runtimes in a KMP project", "Release
+guards"). The wiring as designed and first built:
 
 - The plugin applies only together with `com.android.application`
   (`pluginManager.withPlugin`). Applied anywhere else, it fails with "apply dev.koga.hopi to the
@@ -516,8 +598,10 @@ Every value is a Gradle `Property` and is configuration-cache safe. A task per d
   with `ALL` is what covers the libraries.
 - `androidComponents.finalizeDsl`: for each build type, it adds `<buildType>Implementation`
   of `dev.koga.hopi:hopi-android:<version>` when `isDebuggable` (and `enabled`), else of
-  `hopi-android-noop`. Debuggable is a build-type property, and finalizeDsl is the last point
-  where dependencies can be declared.
+  `hopi-android-noop`; since the runtime-split plan's stage 4, a debuggable one also gets
+  `hopi-core`, because javac compiles the generated configuration against core's types and every
+  runtime takes core as `implementation` only. Debuggable is a build-type property, and
+  finalizeDsl is the last point where dependencies can be declared.
 - `androidComponents.onVariants`: for `variant.debuggable && enabled`, it calls
   `variant.instrumentation.transformClassesWith(HopiClassVisitorFactory::class.java,
   InstrumentationScope.ALL) { okhttp.set(…); urlConnection.set(…) }` and adds the excludes.
@@ -534,8 +618,8 @@ Every value is a Gradle `Property` and is configuration-cache safe. A task per d
   published module). A unit test reads both files and compares them.
 - **This repository** (the runtime is a project of the root build, and Gradle substitutes only an
   included build's projects for coordinates): the plugin adds `project(":hopi-android")` /
-  `project(":hopi-android-noop")` when `project.rootProject.findProject(":hopi-android")` exists,
-  else the coordinates. Consumers always get the coordinates. The `instrument` module goes the
+  `project(":hopi-android-noop")` (and, since stage 4, `project(":hopi-core")`) when
+  `project.rootProject.findProject` finds that project, else the coordinates. Consumers always get the coordinates. The `instrument` module goes the
   other way: `hopi-android`'s host tests depend on `dev.koga.hopi:hopi-instrument`, which Gradle
   substitutes from the included build.
 - Debug minify: the instrumentation runs on class files before R8, so R8 sees the rewritten
@@ -543,36 +627,42 @@ Every value is a Gradle `Property` and is configuration-cache safe. A task per d
   `HopiInstrumented` annotation (`-keepattributes RuntimeVisibleAnnotations`) and the two
   `RealCall` class names
   (`-keep,allowoptimization,allowshrinking class okhttp3.internal.connection.RealCall`). They apply
-  only where the real runtime is, which is debuggable variants only.
+  only where the real runtime is, which is debuggable variants only. Since stage 4 `hopi-core`'s
+  consumer rules keep the same two packages, for the provider and the generated configuration it
+  loads by name. Since the runtime-split plan's stage 10 `hopi-network`'s consumer rules also hold
+  `-dontwarn io.ktor.**`, `-dontwarn dev.koga.hopi.ktor.**` and `-dontwarn kotlinx.io.**`: the Ktor
+  plugin's recorder is compiled against Ktor, `hopi-ktor` and kotlinx-io, which an app may not
+  have (the network tool catches the missing class), and R8 must not fail a minified debuggable
+  variant on them (the functional test's minified variant, which has no Ktor, keeps the references;
+  10.4 in the plan). The side effect, as `-dontwarn okhttp3.**` has for OkHttp: in a minified
+  debuggable variant, the only kind with `hopi-network`, they also mute R8's missing-class reports
+  for the app's own Ktor and kotlinx-io.
 
-### Twin selection (why `-Phopi.enabled` is no longer needed on Android)
+### Twin selection (removed)
 
-With `selectTwins = true` (the default), the plugin adds a dependency substitution to each
-variant's `compileConfiguration` and `runtimeConfiguration`. Debuggable variants get
-`hopi-ktor-noop`→`hopi-ktor` and `hopi-ui-noop`→`hopi-ui`. The other variants get the reverse.
-This applies to Maven coordinates in group `dev.koga.hopi` and to this repository's project
-paths. A KMP shared module compiled against either twin links against the other, because the ABI
-is the same (`:checkNoopParity`) and no public declaration of either side is `inline` or `const`
-(checked against the dumps today, and made a test of the parity task: an `inline`/`const` line in
-a parity-checked dump fails it, because its body would be inlined from the side compiled against).
-So an Android app builds debug with the real inspector and release with the noop whatever the
-property says, and the property keeps its meaning for iOS frameworks and for apps without the
-plugin. A release build can no longer ship the real modules by passing a property. To do that, a
-developer must remove the plugin, which is the "deliberate, visible choice" the architecture asks
-for.
+Removed in the runtime-split plan's stage 11 (2026-10-30), after its stage 10 had deleted the last
+twin pair (`hopi-ktor-noop`, 2026-10-29). `selectTwins` swapped each twin pair per variant by a
+dependency substitution (the real module in debuggable variants, the noop in the others), safe only
+while `:checkNoopParity` held both sides to one ABI with no inlined body; both are in git commit
+`086c055`, the last that has them. What replaced it: the plugin adds the runtimes to debuggable
+build types only and substitutes nothing, and the release guard refuses a runtime anywhere else
+(ARCHITECTURE, "Selecting the runtimes in a KMP project" and "Release guards").
 
-Consequence for the sample: `sample/androidApp` applies the plugin. A debug build without the flag
-is now real (Ktor plugin, UI, capture), and the release build is always noop. The generated
-`HOPI_ENABLED` constant stays for iOS. The Android app shows `HopiAndroid.isStarted` instead. The
-`-Phopi.enabled=true` instructions for the bridge checks become unnecessary on Android, and the
-architecture doc's sample section changes accordingly.
+## Release exclusion
 
-## Noop twin and release exclusion
+Since stage 9 of the runtime-split plan (2026-10-29): release variants get no runtime (as designed,
+the noop twin below), the plugin's release guard fails one that resolves a runtime, and one task,
+`:sample:androidApp:verifyReleaseHasNoRuntime`, replaces both release checks below (the release
+classpath's Hopi components are exactly `:hopi-api` and `:hopi-ktor-noop` (since stage 10
+`:hopi-api` and the thin `:hopi-ktor`), no type of a runtime's
+package is referenced, the merged manifest declares no Hopi component); the contract is ARCHITECTURE's ("Release guards",
+"The sample's release checks"). As designed and first built:
 
 - `hopi-android-noop`: the public API above, both values false, no manifest, no resources, no
   dependency. ABI dump, in `:checkNoopParity`.
 - `:sample:androidApp:verifyReleaseUsesNoop` (exists): the expected release classpath becomes
-  `{:hopi-ktor-noop, :hopi-ui-noop, :hopi-android-noop}`. The dex reader is extended from
+  `{:hopi-ktor-noop, :hopi-ui-noop, :hopi-android-noop}` (`:hopi-ui-noop` until the runtime-split
+  plan's stage 5 deleted it). The dex reader is extended from
   `class_defs` to `type_ids` and `method_ids`. The release APK must have no type in
   `Ldev/koga/hopi/android/internal/` or `Ldev/koga/hopi/core/` (a reference in instrumented
   bytecode would show up there even though no such class is packaged). It must have no provider
@@ -589,8 +679,8 @@ architecture doc's sample section changes accordingly.
   that the fake SDK's classes, the sample's own classes and `kotlin.io.TextStreamsKt` invoke
   `HopiUrlHooks.*`. The stdlib class is a valid check because the sample calls `URL.readText()`
   from its Diagnostics and the debug build has no R8 to remove it. It requires the provider in the
-  merged manifest. The debug classpath must hold `:hopi-android`, `:hopi-core`, `:hopi-ktor` and
-  `:hopi-ui`.
+  merged manifest. The debug classpath must hold `:hopi-android`, `:hopi-core`, `:hopi-ktor` and,
+  until the runtime-split plan's stage 5, `:hopi-ui`.
 - `verifyHopiSelection` keeps its role for the `-Phopi.enabled` direction. With the plugin applied
   it checks the plugin's rule (release is always noop) instead of the property.
 
@@ -641,6 +731,12 @@ one, and the dex check proves the rewrite on the SDK's own classes.
 Host and JVM tests are part of the base check. Device tests are not, because they boot the
 emulator.
 
+Since stage 9 of the runtime-split plan (2026-10-29) the host tests below are `hopi-network`'s
+(`:hopi-network:testAndroidHostTest`, packages kept), the noop's tests went with it, and the
+plugin's TestKit tests also cover the release guard (`aRuntimeInANonDebuggableVariantFailsTheBuild`:
+a runtime named for release by project, by coordinates and through a library) and
+`network { enabled = false }` (a fixture with perf's tool, one with no tool). The list as designed:
+
 **`gradle-plugin:instrument:test`** (JVM, ASM, no AGP):
 
 1. Each rewrite on fixture classes compiled in the test (Java source via `javax.tools`, Kotlin
@@ -688,7 +784,10 @@ classes pass through the `instrument` rewriter, so these are instrumentation-equ
 9. Ktor dedupe: Ktor's OkHttp engine in the instrumented loader with `hopi-ktor` installed gives
    one record per request, `"okhttp"`. Two concurrent POSTs with different bodies give the right
    bodies. A channel body is captured. Redirects are one record per hop. Without the annotation
-   (a non-rewritten OkHttp), the plugin records as `"ktor"`, and nothing is recorded twice.
+   (a non-rewritten OkHttp), the plugin records as `"ktor"`, and nothing is recorded twice. (Since
+   the runtime-split plan's stage 10 the scenarios register the recorder, bound to the test's store,
+   in `hopi-api`'s Ktor slot before `install(Hopi)`, through the test-only `ScenarioKtorHooks`; a
+   test with `hopi-ktor` hidden from the app checks that the network tool then registers none.)
 10. Concurrency: 64 parallel calls with distinct bodies, each record with its own body. The
     capture dispatcher's order holds: no `Started` after its terminal record.
 11. Allocation bound: with the cap at 1 byte and at 256 KB, the reader thread's allocation for an
@@ -712,7 +811,11 @@ plugin is applied to a library. A second fixture has no `hopi-*` project, so the
 coordinates a consumer of Maven Local gets: stand-in jars, published by a build of their own into a
 fixture repository, for the runtime, `hopi-perf` and two twin pairs, which a library names in both
 directions (`hopi-ktor-noop`, `hopi-rules`); the debug APK must hold every real stand-in and the
-release APK every noop. The TestKit directory is a dedicated one under the plugin's
+release APK every noop. (Since the runtime-split plan's stage 7 the library names `hopi-ktor-noop`
+and `hopi-api`, which has no twin and must be in both APKs, and since stage 8 no `hopi-perf`:
+`perf { enabled = true }` adds it, so the debug APK holds it and the release APK none. Since stage
+10 the library names the thin `hopi-ktor` and `hopi-api`, both in both APKs, and no twin pair is
+left.) The TestKit directory is a dedicated one under the plugin's
 `build/`, never the developer's Gradle user home. A `--stop` there would also stop the outer
 build's daemon, which has the same Gradle version and the same home. AGP is not downloaded: the
 nested build runs `--offline`, and its environment sets
@@ -740,7 +843,9 @@ the same (the same server log) and that `hopi` finds no bridge.
   C = `hopi { enabled = false }` through a sample property (`-Psample.hopiCapture=false`), which
   means noop runtime and no transform. The Ktor/UI selection is the same in both (real, so the
   difference is capture and its instrumentation only; the Ktor plugin defers in A and records in
-  C, so the Ktor rows also measure the swap).
+  C, so the Ktor rows also measure the swap). Since the runtime-split plan's stage 10 both arms
+  have the thin `hopi-ktor` and C registers no recorder, so the plugin records nothing in C: the
+  Ktor rows compare capture with no Hopi at all.
 - **Workload** (`--es captureBench <spec>`, the `GiantSpec` style): sequential requests through
   `FakeSdk`'s OkHttp client (`execute` on one worker thread), `FakeSdk`'s `HttpURLConnection`, and
   the app's Ktor client, at 1 KB, 64 KB, 1 MB and 5 MB, `Content-Length` and chunked. It records
@@ -867,7 +972,8 @@ Built as designed, with the deviations below; each has its reason. Files: `gradl
   values, and a resource overlay has to be merged per variant; a class is one lookup and no resource
   processing. (A first version used `public static final` boxed fields read by reflection; eleven
   `getField` calls were replaced by the constructor.) Without the class (the runtime added by hand)
-  the defaults apply.
+  the defaults apply. (History: since the runtime-split plan's stage 4 the class extends core's
+  `HopiConfigValues` and carries the tool list, and without it nothing starts; see "Auto-start".)
 - **Subproject names.** The included build's projects are `hopi-instrument` and
   `hopi-gradle-plugin`, not `instrument` and `plugin`: Gradle substitutes an included build's
   project for a coordinate by its project name, and hopi-android's tests name
@@ -884,11 +990,20 @@ Built as designed, with the deviations below; each has its reason. Files: `gradl
   JSON parser stops after the last byte without asking for more). The same rules hold for the
   `URLConnection` wrapper, and `disconnect()` with a response whose stream was never opened is
   `Complete`, `"not read"`.
-- **Capture buffer.** The tee copies with `Buffer.copyTo(OutputStream, …)` into one bounded
-  `ByteArray` per body, not into a shared-segment `okio.Buffer` (the spike item): it keeps no
-  segment of the app's alive, and the array starts at the cap when `Content-Length` says the body
-  reaches it (no growth copies; the first device run, which grew from 8 KB, cost the reader about
-  0.5 ms more per 1 MB body).
+- **Capture buffer.** The tee copies with `Buffer.copyTo(OutputStream, …)` into bounded `ByteArray`
+  blocks per body (`BoundedCapture`), not into a shared-segment `okio.Buffer` (the spike item): it
+  keeps no segment of the app's alive. A body whose `Content-Length` is known is one block of that
+  size, the cap when the body reaches it (no growth copies; the first device run, which grew from
+  8 KB, cost the reader about 0.5 ms more per 1 MB body); a body of unknown size starts at 8 KB and
+  goes on in blocks as large as what is kept, up to 64 KB, as the Ktor plugin's capture does, so
+  growing never copies what was kept, and the store's thread joins the blocks once. Until
+  2026-10-29 such a body grew one array by doubling up to the cap and the store's thread trimmed
+  it, so a chunked body under the cap allocated 3.2 to 4.2 times itself (E1 R7 of the
+  runtime-split plan); in blocks the reader allocates the body and less than one 64 KB block more,
+  and the join the body once more (`BoundedCaptureTest`), about twice in all. R7, run again with
+  each request's allocation window waiting for the store's pass that builds its record, reads
+  2.00x to 2.07x for those bodies, 1.98x to 2.20x past the cap and 1.00x to 1.04x with a
+  `Content-Length` (the runtime-split plan, "Stage 9 leaves for later stages").
 - **The URLConnection header maps** (`getRequestProperties()` before the connection,
   `getHeaderFields()` after it) are kept as the returned maps and flattened on the capture
   dispatcher, not on the app's thread.
@@ -1044,8 +1159,8 @@ logcat lines to the host during the block. Changes:
 - `responded` reads the raw `Content-Type` header instead of OkHttp's parsed `MediaType`;
   `ResponseSkip.reason` matches the MIME type in place without allocating; `HttpURLConnection`
   response headers are read by index instead of through the per-call map; the redirect check
-  compares the URL object first; a body's trimming copy runs on the store's thread, never the
-  reader's.
+  compares the URL object first; a body's trimming copy (since 2026-10-29 the join of its blocks)
+  runs on the store's thread, never the reader's.
 - Binary and `text/event-stream` bodies are wrapped with a counting-only capture (cap 0), so
   their records end with the body: exact size, duration and failure state; an SSE stream stays
   `Pending` until the app closes it (`AndroidCaptureTest`: chunked binary, a connection dropped
@@ -1145,7 +1260,25 @@ A review of the hardening pass confirmed seven defects; all are fixed, with test
   counted. Still held by a queued record: the app's own `Request`
   and its body object (OkHttp) or the connection with whatever the platform buffered
   (`HttpURLConnection`), as before. The request thread now pays that atomic add plus one volatile
-  read of the request capture per end; re-measure on the emulator pending (`captureBench`).
+  read of the request capture per end. Measured on 2026-10-27 with every fix of that day in
+  (`benchmark/android-capture/2026-10-27/`, criteria in
+  `benchmark/perf/2026-10-27/session-verdicts.md`): API 35 emulator, debuggable builds, dev server
+  `--nodelay`, `/json` back to back, 1000 after 1000 warm-up, arms noop, before (9356117, the tree
+  without the fixes), after (1c81938) and noop2. The 4 rounds registered before any data, in that
+  order: after minus before calling-thread CPU +4, −22, −2, +37 µs on OkHttp and +1, −6, +1, +12
+  on `HttpURLConnection`, inside the noop2 − noop band in 3 of 4 rounds on each (pass); median
+  wall inside it on OkHttp (pass), not on `HttpURLConnection` (+84, −70, −1, −39 against −19..+0,
+  scattered both ways: fail). A follow-up set after reading those, 4 rounds with after and before
+  swapped on a quieter guest: CPU +11, −3, +9, +2 µs on OkHttp and −1, −3, +3, −2 on
+  `HttpURLConnection`, outside that run's narrower bands (−15..0, −2..+1). Over the 8 rounds the
+  CPU difference is a median of +3 µs on OkHttp (mean +4.5; the pooled band's +39 edge comes from
+  the session's first block, a noop at guest load 8.4 that read 267 µs) and 0 on
+  `HttpURLConnection`: no cost shows on `HttpURLConnection`, and on OkHttp one of up to about
+  10 µs is not ruled out. Process CPU per block (the whole process, launch and JIT included) was
+  lower after than before in 6 of 8 rounds, inconclusive by the follow-up's own rule, and the
+  difference sits in the JIT pool and the main thread, not in Hopi's threads (within ±22 ms a
+  block). Against noop, after the fixes, 8 rounds: calling-thread CPU +24 µs median on OkHttp
+  (2 rounds over 30) and +22.5 on `HttpURLConnection` (1 over 30), median wall +27 and +12 µs.
 - **An older CLI** shows a `failedAfterResponse` record's status (`200`) in its code column
   instead of `ERR` (ARCHITECTURE.md, "A failure after the response arrived keeps the response").
 - **The iOS idle harness** summed the CPU of the threads alive at each end, so a thread that

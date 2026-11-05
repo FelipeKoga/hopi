@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.bridge
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /** One request line read by [BridgeLineReader]. */
 @HopiInternalApi

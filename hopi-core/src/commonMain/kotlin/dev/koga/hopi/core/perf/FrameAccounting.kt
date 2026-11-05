@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.perf
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /** How a frame compares with its deadline (docs/design/perf-monitors.md, "Frames"). */
 @HopiInternalApi
@@ -69,7 +69,7 @@ public class FrameSeconds(private val onClosed: (FrameSecond) -> Unit) {
 
     /**
      * Adds one frame of epoch second [atSecond]. [klass] is its classification; [firstFrame], the
-     * first frame of a window; [exclude], left out of the figures (inspector open, Hopi pause).
+     * first frame of a window; [exclude], left out of the figures (a Hopi pause of the main thread).
      */
     public fun add(atSecond: Long, totalNs: Long, klass: FrameClass, firstFrame: Boolean, missedVsyncs: Int, metricsLost: Int, exclude: Boolean, screen: String?) {
         val closed = lock.locked {

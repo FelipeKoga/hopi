@@ -48,19 +48,29 @@ public object SampleHttp {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
-     * Hopi's per-body capture cap for this process, or null for the plugin's default (256 KB).
+     * The Ktor plugin's per-body capture cap for this process, or null for its default (256 KB).
      * A debug setting for the giant-body measurements (`--el maxBodyBytes N` on Android, the
-     * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start].
+     * `-maxBodyBytes N` launch argument on iOS); it applies only when set before [start]. On
+     * Android it reaches only the requests the plugin records itself: OkHttp capture records the
+     * rest at the debug build's cap (`-Psample.maxBodyBytes=N`). On iOS only `Hopi.start`'s cap
+     * applies, the same build property (`sample/shared`'s `hopi { }` block): the plugin installs
+     * nothing there.
      */
     public var maxBodyBytes: Long? = null
 
     /**
-     * Hopi's store byte cap, or null for the default (16 MB), which clamps the body cap to half
-     * of it: a 16 MB body cap needs 32 MB here. A debug setting like [maxBodyBytes]
-     * (`--el maxTotalBytes N`, `-maxTotalBytes N`).
+     * The Ktor plugin's store byte cap, or null for the default (16 MB), which clamps the body cap
+     * to half of it: a 16 MB body cap needs 32 MB here. A debug setting like [maxBodyBytes]
+     * (`--el maxTotalBytes N`, `-maxTotalBytes N`). It does nothing on iOS, where the plugin
+     * installs nothing; on Android the start's cap wins (`-Psample.maxTotalBytes=N`), which the
+     * start presets before any client exists.
      */
     public var maxTotalBytes: Long? = null
 
+    /**
+     * Built lazily, at the first request or [start], so after Hopi's start (the provider on
+     * Android, `Hopi.start` on iOS): the plugin reads the recorder once, when the client is built.
+     */
     internal val client: HttpClient by lazy {
         platformHttpClient {
             expectSuccess = false
@@ -76,7 +86,7 @@ public object SampleHttp {
 
     internal val api: ItemsApi by lazy { ItemsApi(client) }
 
-    /** Creates the client now, so the agent bridge is up before the first request. */
+    /** Creates the client now instead of at its first request. */
     public fun start() {
         client
     }

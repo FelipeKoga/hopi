@@ -8,7 +8,7 @@ import dev.koga.hopi.core.perf.PerfTimer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/** The per-thread scan is counted: one viewer leaving (a tail ending) never stops it for another (the Perf tab). */
+/** The per-thread scan is counted: one viewer leaving (a tail ending) never stops it for another (a second tail). */
 class ThreadWatchersTest {
     private class RecordingBackend : MonitorBackend {
         override val platform = "test"

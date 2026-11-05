@@ -4,15 +4,26 @@ Status: built (2026-10-24); the deviations from the design below are listed at t
 "As built". Part of the owner requirement "capture every HTTP request the app
 makes, including third-party SDKs, with no per-client configuration". This document covers the
 iOS part (URLSession); the Android part (OkHttp, `HttpURLConnection`) has its own design. Both
-write into the existing `HopiStore`, so the in-app screen, the NDJSON log line, the bridge/CLI and
-the desktop viewer show the new records with no change beyond the `source` field below.
+write into the existing `HopiStore`, so the NDJSON log line, the bridge/CLI and the desktop viewer
+(and the in-app screen, until the runtime-split plan's stage 5 removed it) show the new records
+with no change beyond the `source` field below.
+
+**History note (2026-10-30).** The runtime-split plan (`docs/design/api-runtime-split-plan.md`)
+removed `hopi-urlsession`, its noop twin `hopi-urlsession-noop` and the other twins (stages 5 to
+10, 2026-10-28 and 29), then the parity check `:checkNoopParity` (stage 11, 2026-10-30). The
+sections it changed say so with their stage; every other passage that names a noop, a twin or
+parity (the architecture contract changes, the tests, the A/B method, the implementation steps,
+"As built" and "Hardening") records the design as built before it and is kept as history. The
+contract is `docs/ARCHITECTURE.md`.
 
 ## Goals and non-goals
 
 Goals:
 
-- One call at startup, from Kotlin or Swift, in debug builds: `HopiUrlSession.start()`
-  (`HopiUrlSession.shared.start()` in Swift). No per-session, per-client or per-SDK setup.
+- One call at startup, from Kotlin or Swift, in debug builds: since the runtime-split plan's stage
+  6 (2026-10-28) `hopi-start`'s `Hopi.start()` (`Hopi.shared.start()` in Swift), which also
+  registers the performance monitors, and since stage 9 (2026-10-29) the only one (the design's
+  own start, below, was removed with its module). No per-session, per-client or per-SDK setup.
 - Every in-process URLSession request is recorded once: completion-handler, delegate and
   async/await APIs, any delegate shape (custom, partial, nil, `NSProxy`), `URLSession.shared`,
   default and ephemeral configurations, sessions created before `start()`, and the Ktor Darwin
@@ -22,7 +33,9 @@ Goals:
   metrics, `respondsToSelector:` answers, delegate identity, `protocolClasses`.
 - Bounded: the response body is kept up to `maxBodyBytes` and only counted past it. The app's
   threads do no copying; the main thread does no Hopi work at all.
-- Release builds get the noop twin and contain none of this code, checked automatically.
+- Release builds contain none of this code, checked automatically: since stage 9 of the
+  runtime-split plan (2026-10-29) they get no runtime and no `hopi-start` (as designed, the noop
+  twin), and the iOS release guard fails a Release link that would hold one.
 
 Non-goals (v1): WebSocket frames, `NSURLSessionStreamTask`, AVFoundation media loading, WKWebView,
 `NSURLConnection`, raw CFNetwork/BSD sockets, gRPC or Cronet stacks, physical iOS devices for
@@ -132,11 +145,12 @@ cost is a private-API dependency, which the self-check, the metadata fallback an
 run turn into a visible degradation instead of a crash. This is a debug-only library, absent from
 release builds, so App Store review never sees it.
 
-Recorded URL: `originalRequest.URL`, what the app asked for, as the Ktor plugin records the URL
-as sent. After a native redirect the status, headers and body are the final hop's; the detail
-view shows the final URL (`currentRequest.URL`) on a separate line when it differs, carried in
-the transaction as `finalUrl` (nullable, additive on the wire like `source`). CFNetwork rewrites
-`currentRequest` even without a redirect: it lowercases the scheme and host and writes an empty
+Recorded URL: `originalRequest.URL`, what the app asked for, as the Ktor plugin's recorder (on
+Android and the JVM) records the URL as sent. After a native redirect the status, headers and
+body are the final hop's; the detail view shows the final URL (`currentRequest.URL`) on a
+separate line when it differs, carried in the transaction as `finalUrl` (nullable, additive on
+the wire like `source`). CFNetwork rewrites `currentRequest` even without a redirect: it
+lowercases the scheme and host and writes an empty
 path as `/` (checked: dot segments, escapes, user info and fragments stay as written), so both
 URLs are compared in that canonical form and `finalUrl` is set only when a redirect changed the
 URL. A redirect to the same URL in another case is not shown.
@@ -154,7 +168,7 @@ URL. A redirect to the same URL in another case is not shown.
 | `URLSession.shared`, default and ephemeral configurations | Byte path | |
 | Swift `data(for:)`, `data(from:)`, `upload(for:from:)`, `bytes(for:)`, `download(for:)` | Byte path | Spike covered all but `download(for:)`; the Swift test target covers all five |
 | Sessions created before `start()` | Byte path for every task **resumed** after `start()` | Hooks are class-level and need no session or delegate. A task resumed before `start()` is not recorded (a chunk for a task without state is ignored), nor is one resumed before, suspended, and resumed after it (it would show part of the transfer as all of it). A task created before and resumed after `start()` is recorded, but an upload-from-data body created before `start()` is skipped as `"not observed"`. |
-| Ktor Darwin engine | Byte path | One record per request, see Dedupe |
+| Ktor Darwin engine | Byte path | One record per request, see Dedupe (since the runtime-split plan's stage 10 the Ktor plugin installs nothing on iOS); under `ContentEncoding` the body is recorded decoded, as the app reads it (stage 10's R3, see Dedupe) |
 | Background sessions | Metadata path | While the app runs. Tasks finished while the app was suspended or relaunched by the system are not recorded. |
 | `NSURLSessionWebSocketTask` | Not recorded in v1 | Skipped at resume (class check). Frames and the handshake are a later "WebSocket inspection" item. |
 | `NSURLSessionStreamTask` | Not recorded | Not HTTP |
@@ -254,6 +268,17 @@ which ends when the app's reader takes in the body. The detail view labels it as
 
 ## Dedupe with the Ktor plugin
 
+**Since the runtime-split plan's stage 10 (2026-10-29) this section is history on iOS.** The Ktor
+plugin is thin: its recorder is `hopi-network`'s, which the network tool registers on Android and
+`Hopi.start` on the JVM, and on iOS nothing registers it, so the plugin installs nothing there and
+nothing defers. `UrlSessionCapture.start` covers no engine any more (its `cover` call and
+`KTOR_DARWIN_ENGINE_PACKAGE` were deleted): URLSession capture records Ktor's Darwin engine as any
+URLSession client, once, and another engine (CIO) is not recorded on iOS. The in-flight
+withdrawal below (`HopiStore.withdraw`) is kept in the recorder, unreachable outside tests, for a
+recorder that would cover an engine late (Android's network tool covers before it registers the
+recorder). The plugin's own settings (`redactHeaders`, `logSink`, `agentBridge`, the caps) do
+nothing on iOS: `Hopi.start { }` holds the store's. As designed and first built:
+
 Constraint: one record per request, without changing the wire (no marker header) and without
 changing any observable app state (no `taskDescription`, no `NSURLProtocol` property on a request
 Hopi does not own).
@@ -262,8 +287,9 @@ Hopi does not own).
 defers.**
 
 - `hopi-core` gains `PlatformCapture` (`@HopiInternalApi`): `cover(enginePackage: String)` and
-  `covers(engineClassName: String?): Boolean`, an atomic set. `HopiUrlSession.start()` calls
-  `cover("io.ktor.client.engine.darwin.")` once the byte path or the metadata path is installed.
+  `covers(engineClassName: String?): Boolean`, an atomic set. The start (`UrlSessionCapture.start`,
+  which the network tool calls) calls `cover("io.ktor.client.engine.darwin.")` once the byte path
+  or the metadata path is installed.
 - The Ktor plugin reads its client's engine class name once at install
   (`client.engine::class.qualifiedName`, supported on Kotlin/Native), and on each send, at
   `HttpSendPipeline.Monitoring`, checks `PlatformCapture.covers(name)` (one atomic read). When it is
@@ -288,7 +314,7 @@ defers.**
   missed the same way; the window is `hopi_us_start`'s own time.
 - What of the withdrawn record has already gone out decides what the store publishes. The summary
   log line is written only at a record's end (`Completed`), so the log never had it. A bridge
-  `tail` (and the in-app list) shows a start as soon as a pass applies it while a viewer is
+  `tail` shows a start as soon as a pass applies it while a viewer is
   attached, and `RemoteSession` then holds it pending (`pending`, `highestSeen`). So the store drops
   the entry and every later snapshot of its id, and publishes the plugin's last snapshot (failed,
   `"withdrawn: platform capture started during this request"`) as its end only when an earlier
@@ -311,7 +337,13 @@ today); JSON bodies built with `setBody`/content negotiation are `ByteArrayConte
 and are captured. Ktor's `HttpRedirect` sends each hop as its own task (to be confirmed by the
 Ktor test; Ktor's delegate implements `willPerformHTTPRedirection`), so hops stay separate records
 as with the plugin. Ktor's response decoding happens after URLSession's, so the recorded body is
-URLSession's decoded body, as the app's Ktor reader receives it.
+URLSession's decoded body, as the app's Ktor reader receives it. Measured in the runtime-split
+plan's stage 10 (R3, 2026-10-29, `KtorDarwinTest` and `UrlSessionCaptureTest` since): URLSession
+decodes gzip whoever named `Accept-Encoding` (the app's own, or Ktor's under `ContentEncoding`),
+and the Darwin engine drops the compression headers, so Ktor does not decode a second time; the
+record holds the decoded body the app read, under the wire's `Content-Encoding: gzip` and
+compressed `Content-Length`. So nothing decodes `urlsession` records, and core's `heldCodings`
+excludes them: a header-driven decoder would fail on them.
 
 Rejected: "the plugin records, platform capture skips tasks whose session delegate is
 `KtorNSURLSessionDelegate`". It would miss Ktor clients without the plugin (a KMP SDK's own
@@ -322,7 +354,8 @@ client), and telling the two apart needs a per-request mark that changes app sta
 Backward compatible in both directions:
 
 - `HttpTransaction.source: String?`, default null. Values: `"ktor"`, `"urlsession"`, and the
-  Android part's `"okhttp"`, `"urlconnection"`. The Ktor plugin sets `"ktor"`.
+  Android part's `"okhttp"`, `"urlconnection"`. The Ktor plugin sets `"ktor"` (its recorder, on
+  Android and the JVM, since the runtime-split plan's stage 10; nothing records `"ktor"` on iOS).
 - `TransactionJson`: summary line, bridge summary and detail write `"source":"…"` right after
   `"state"` (before `error`, `reqHeld`, `resHeld`, `urlTruncated`, `errorTruncated`), omitted when
   null. The line budget logic counts it like any other fixed field (at most 24 bytes, within the
@@ -338,11 +371,32 @@ Backward compatible in both directions:
 
 ### Module layout
 
+Since stage 9 of the runtime-split plan (2026-10-29): the library, its binding (package
+`dev.koga.hopi.network.internal.urlsession`), `UrlSessionCapture`, `UrlSessionRules` and the iOS
+network tool are `hopi-network`'s iosMain (`dev.koga.hopi.network.internal`), beside the Android
+runtime; a rule's hit counter is core's own small C library, `hopi_hits` (binding
+`dev.koga.hopi.core.internal.hits`), which the URLSession library retains and claims through
+`hopi_hits_*` calls only; the public module and its noop below are deleted; the contract is ARCHITECTURE's ("Modules",
+"URLSession capture"). The layout as designed and first built:
+
 | Module | Targets | Contents |
 | --- | --- | --- |
 | `hopi-core` (iosMain) | iosArm64, iosSimulatorArm64 | The ObjC static library, its cinterop binding (package `dev.koga.hopi.core.internal.urlsession`, like the `oslog` shim), and `UrlSessionCapture` (`@HopiInternalApi`): the Kotlin side of the callbacks, record → `HttpTransaction`, `PlatformCapture` |
 | `hopi-urlsession` | android, jvm, iosArm64, iosSimulatorArm64 | Public API (`HopiUrlSession`, `HopiUrlSessionConfig`), depends on `hopi-core`. iOS calls `UrlSessionCapture`; Android and JVM do nothing (`start()` returns at once, `isStarted` stays false), so `commonMain` code can call it. ABI-validated. |
 | `hopi-urlsession-noop` | same | Same API, does nothing, depends on nothing. ABI-validated, added to `:checkNoopParity`. |
+
+**From the runtime-split plan's stage 6 to its stage 9 (2026-10-28 and 29).** The start moved to
+`hopi-start` (iosArm64 and iosSimulatorArm64; no noop twin, linked and exported by Debug
+frameworks only): `Hopi.start` runs core's start sequence with the network tool `NetworkTool`,
+which then sat in `hopi-core`'s iosMain beside `UrlSessionCapture` and called its `start`, and with
+perf's tool. The tool was public (`@HopiInternalApi`) because `hopi-start` names it, and not in
+`hopi-urlsession`, whose ABI dump had no filter and was compared with a noop that held only
+`HopiUrlSession` and `HopiUrlSessionConfig`, and which the sample still exported then.
+`HopiUrlSession` stayed until stage 9, which moved the library, `UrlSessionCapture`,
+`UrlSessionRules` and the tool into `hopi-network` (above), after splitting off the native hit
+counter that core's rule engine uses (it stays in core). The parity reason below for keeping the
+library in core went with the twins. The DCE claim below is out of date: `HitCounter.ios.kt` also
+referred to the library, and the test it names was never built.
 
 The native code lives in `hopi-core` because a cinterop binding cannot be annotated or filtered
 the same way on both sides of a parity pair; `hopi-core` is not parity-checked and already carries
@@ -351,13 +405,30 @@ files are linked only when a referenced symbol pulls them in, and only `UrlSessi
 to them, which Kotlin/Native's DCE drops unless `HopiUrlSession.start()` is reachable. A test
 asserts it (a framework built with `hopi-ktor` alone has no `_hopi_us_` symbol).
 
+Refuted for static frameworks (the runtime-split plan's stage 9 experiments, E2.3, 2026-10-29):
+Kotlin/Native drops a dependency's unreferenced Kotlin in every framework kind, but merges a
+cinterop archive member whole into every static framework, Debug and Release: a probe framework
+with only `hopi-perf` (so core, which then held the library) on its classpath and nothing of Hopi
+referenced held all 139 `_hopi_us_` symbols and `hopi_perf.o`'s 45, with no Hopi Kotlin symbol. Only
+a dynamic framework's own link drops both. The claim holds for dynamic frameworks alone, and the
+test above was never built. So the iOS release guard, not dead-code elimination, keeps a runtime
+out of a Release framework (ARCHITECTURE, "Release guards"). Since the runtime-split plan's stage
+10 the question no longer arises for `hopi-ktor`: the thin plugin brings `hopi-api` and Ktor only,
+no `hopi-core` and no native library, and the guard lets it through.
+
 ### Native build
 
 ```text
-hopi-core/src/nativeInterop/objc/hopi_urlsession.h   C declarations only (hopi_us_*)
-hopi-core/src/nativeInterop/objc/hopi_urlsession.m   hooks, state, capture queue (ARC)
-hopi-core/src/nativeInterop/cinterop/urlsession.def
+hopi-network/src/nativeInterop/objc/hopi_urlsession.h   C declarations only (hopi_us_*)
+hopi-network/src/nativeInterop/objc/hopi_urlsession.m   hooks, state, capture queue (ARC)
+hopi-network/src/nativeInterop/cinterop/urlsession.def
+hopi-core/src/nativeInterop/objc/hopi_hits.{h,m}       a rule's hit counter (hopi_hits_*), core's own
+hopi-core/src/nativeInterop/cinterop/hits.def
 ```
+
+(Paths since stage 9 of the runtime-split plan, 2026-10-29; the library was `hopi-core`'s before,
+with the hit counter inside it. `hopi_urlsession.m` includes `hopi_hits.h` and holds each rule's
+counter as a strong `id`; its compile task adds core's `objc` directory to the include path.)
 
 Gradle registers, per iOS target, two `Exec` tasks with argument arrays (no shell):
 
@@ -376,7 +447,7 @@ anyway.
 
 ```text
 language = Objective-C
-package = dev.koga.hopi.core.internal.urlsession
+package = dev.koga.hopi.network.internal.urlsession
 headers = hopi_urlsession.h
 headerFilter = hopi_urlsession.h
 staticLibraries = libhopi_urlsession.a
@@ -405,6 +476,10 @@ GC safepoints on a thread that is not Kotlin's). The ObjC side is about 500 line
 
 ### Consumer API
 
+Since stage 9 of the runtime-split plan (2026-10-29): deleted with its module and its noop; iOS
+starts capture with `hopi-start`'s `Hopi.start { }` only (stage 6), whose `HopiStartConfig` holds the
+same settings plus `rules`, `perf` and `perfRemoteControl`; the contract is ARCHITECTURE's ("Consumer API"). As designed:
+
 ```kotlin
 public object HopiUrlSession {
     /** Starts automatic URLSession capture. Idempotent; the first call's config wins. iOS only. */
@@ -432,7 +507,9 @@ it moves from `hopi-ktor` into `hopi-core` as one `@HopiInternalApi` function bo
 type of its own, instead of reusing `HopiConfig`/`HopiLogSink`, keeps `hopi-urlsession`
 independent of `hopi-ktor` (a pure-URLSession or Swift-first app has no Ktor). The name is not
 `Hopi`: that already names the Ktor plugin, and two `Hopi` declarations in one framework collide
-in the ObjC export.
+in the ObjC export. (That function is core's `CaptureInstallation.install`. Since the
+runtime-split plan's stage 10 the Ktor plugin's recorder, `hopi-network`'s, calls it on Android
+and the JVM, the start's settings first, and on iOS the plugin makes no installation at all.)
 
 Swift: a Kotlin framework exports only its own declarations and those it `export`s. The consumer
 adds, next to its `implementation`:
@@ -452,9 +529,21 @@ HopiUrlSession.shared.start()
 ```
 
 The call compiles in both configurations, because the noop exports the same API. The sample
-does this in `iOSApp.swift`.
+did this in `iOSApp.swift` until the runtime-split plan's stage 6. Then it called
+`Hopi.shared.start { … }` from `hopi-start` inside `#if HOPI`, a Swift condition that followed the
+same build setting as the Gradle build phase; since O8 (2026-11-03) it calls
+`HopiSetup.shared.start()` in every configuration, which the `dev.koga.hopi` plugin generates into
+`sample/shared`: it starts Hopi in a Debug build and does nothing in any other
+(docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project").
 
-### Noop twin and release exclusion
+### Release exclusion
+
+Since stage 9 of the runtime-split plan (2026-10-29): a Release framework holds no runtime (as
+designed, the noop twin below), the iOS release guard fails a Release link whose classpath holds one, and
+`:sample:shared:verifyIosReleaseExcludesCapture` checks the framework by families that now include
+core's `_hopi_hits_`, every runtime package's Kotlin symbols, hopi-start's `Hopi` and the header's
+declarations; the Android release check is `verifyReleaseHasNoRuntime`; the contract is ARCHITECTURE's ("Release guards",
+"The sample's release checks"). As designed and first built:
 
 - `hopi-urlsession-noop`: the same declarations, `start()` empty, `isStarted` always false, every
   config setter accepted and read back. ABI dumps for all four targets, in `:checkNoopParity`, and
@@ -487,6 +576,10 @@ and the Modules table gains `hopi-urlsession` and `hopi-urlsession-noop`; the Da
 the analytics debugger is unchanged: that tool keeps an explicit API.
 
 ## Tests
+
+Since stage 9 of the runtime-split plan (2026-10-29) the iOS tests below are `hopi-network`'s
+(`:hopi-network:iosSimulatorArm64Test`, test package `dev.koga.hopi.urlsession` kept) and core's
+(the hit counter). The list as designed:
 
 `hopi-core` and `hopi-urlsession` `iosSimulatorArm64Test` (Kotlin/Native on the simulator), with
 a test-only ObjC archive and cinterop on the **test** compilation (never in the main klib):
@@ -618,13 +711,16 @@ not exact. Here all arms are built the same way:
    to code that compares `object_getClass`.
 5. **Missed at `start()`.** Tasks resumed before `start()` are not recorded, even when
    suspended and resumed after it; an upload
-   body of a task created before `start()` is `"not observed"`; a Ktor request the engine has when
-   `start()` runs is recorded once or missed, never twice: the plugin withdraws its record when it
-   finds the engine covered by the time the engine answers (see Dedupe; until 2026-10-27 one
-   resumed after the hooks was recorded twice).
-6. **Ktor under deferral.** Channel request bodies (`HTTPBodyStream`) are no longer captured on iOS
-   once `start()` runs; the duration ends at the network's end, not at the reader's; Ktor-only
-   details (which client, Ktor's view of headers) are gone from those records.
+   body of a task created before `start()` is `"not observed"`; a Ktor Darwin request is
+   URLSession capture's like any other task, so one resumed before `start()` is missed (since the
+   runtime-split plan's stage 10 the plugin records nothing on iOS; it used to withdraw its record
+   when it found the engine covered by the time the engine answered, see Dedupe, and until
+   2026-10-27 one resumed after the hooks was recorded twice).
+6. **Ktor Darwin under URLSession capture.** Channel request bodies (`HTTPBodyStream`) are
+   recorded as `"stream, not captured"`; the duration ends at the network's end, not at the
+   reader's; Ktor-only details (which client, Ktor's view of headers) are absent from those
+   records. Since the runtime-split plan's stage 10 this holds for every Darwin request recorded:
+   the plugin, whose tee captured those bodies, installs nothing on iOS.
 7. **Request headers that URLSession adds** (configuration `HTTPAdditionalHeaders`, cookies,
    `User-Agent`, `Accept-Encoding`) are not seen, and header order and duplicates follow
    Foundation's dictionary.

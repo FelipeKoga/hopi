@@ -25,9 +25,12 @@ class CapabilitiesTest {
     fun aRuleAppliesNowhereOnlyWhenEverySourceItIsCheckedAgainstExcludesIt() {
         assertTrue(Capabilities.appliesNowhere(RuleSpec(MatchShorthand.parse("*/a", setOf(RuleSource.URL_SESSION)), edit = responseEdit)))
         assertFalse(Capabilities.appliesNowhere(RuleSpec(MatchShorthand.parse("*/a", setOf(RuleSource.URL_SESSION, RuleSource.KTOR)), edit = responseEdit)))
-        // Naming none: Ktor records on every platform and excludes nothing, so it applies the rule.
-        assertTrue(RuleSource.KTOR in platformSources)
-        assertFalse(Capabilities.appliesNowhere(RuleSpec(MatchShorthand.parse("*/a"), edit = responseEdit)))
+        // Naming none: on Android and the JVM the Ktor plugin's recorder is a source and excludes
+        // nothing, so it applies the rule; on iOS the plugin installs nothing and URLSession, the
+        // only source, excludes a response edit, so the rule applies nowhere.
+        val urlSessionOnly = platformSources == setOf(RuleSource.URL_SESSION)
+        assertEquals(!urlSessionOnly, RuleSource.KTOR in platformSources)
+        assertEquals(urlSessionOnly, Capabilities.appliesNowhere(RuleSpec(MatchShorthand.parse("*/a"), edit = responseEdit)))
         // A stated difference is not an exclusion.
         assertFalse(Capabilities.appliesNowhere(RuleSpec(MatchShorthand.parse("*/old", setOf(RuleSource.URL_SESSION)), mock = MockSpec(302))))
     }

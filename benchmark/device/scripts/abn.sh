@@ -5,6 +5,11 @@
 # warm.py then keeps the runs after the 5th of each block.
 # A label ending in -aot is compiled with `cmd package compile -m speed` after its install.
 # HOST_LOAD_MAX, when set, also waits (at most 180 s) for the host's 1-minute load to fall under it.
+# On Android a capture cap is a build setting: build each capped <apk> with its cap
+# (`./gradlew :sample:androidApp:assembleDebug -Psample.maxBodyBytes=<cap>`, then copy the APK out of
+# build/outputs, which the next build overwrites). `@<cap>` passes giant.py's --cap, which labels the
+# run and sets only the Ktor plugin's own cap; giant.py builds nothing here, so the installed APK
+# and its compile are the ones measured.
 # usage: abn.sh <out.ndjson> <sizes> <runs> <rounds> "<label>=<apk>[@<cap>] ..." [spec ...]
 set -u
 ADB=~/Library/Android/sdk/platform-tools/adb

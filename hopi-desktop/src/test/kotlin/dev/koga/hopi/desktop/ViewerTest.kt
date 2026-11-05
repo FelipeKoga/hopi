@@ -34,6 +34,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -61,8 +62,15 @@ internal fun jvmOnlyTargets() = Targets(
     ),
 )
 
-internal fun <T> StateFlow<T>.await(timeoutMs: Long = 20_000, predicate: (T) -> Boolean): T =
+internal fun <T> StateFlow<T>.await(timeoutMs: Long = 20_000, predicate: (T) -> Boolean): T = try {
     runBlocking { withTimeout(timeoutMs) { first(predicate) } }
+} catch (e: TimeoutCancellationException) {
+    throw AssertionError("none within $timeoutMs ms; the last value: $value; threads: ${hopiThreads()}", e)
+}
+
+/** The live threads of Hopi's desktop code (the viewer's worker, its watches), by name. */
+internal fun hopiThreads(): List<String> =
+    Thread.getAllStackTraces().keys.filter { it.isAlive && it.name.startsWith("hopi-desktop") }.map { it.name }
 
 /** The app's side in-process: a store and its JVM bridge in [directory], as `agentBridge = true` starts it. */
 internal class FakeApp(private val directory: Path) : AutoCloseable {
@@ -88,6 +96,8 @@ class ViewerTest {
     fun tearDown() {
         closeables.asReversed().forEach { it.close() }
         root.toFile().deleteRecursively()
+        // A watch a closed viewer left running would fail the next test's thread checks instead.
+        awaitThreads("no watch once the viewers closed") { names -> names.none { it.startsWith("hopi-desktop-watch") } }
     }
 
     private fun <T : AutoCloseable> T.closing(): T = also { closeables += it }

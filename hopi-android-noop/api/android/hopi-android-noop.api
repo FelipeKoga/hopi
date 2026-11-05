@@ -1,6 +1,0 @@
-public final class dev/koga/hopi/android/HopiAndroid {
-	public static final field INSTANCE Ldev/koga/hopi/android/HopiAndroid;
-	public final fun getOkHttpInstrumented ()Z
-	public final fun isStarted ()Z
-}
-

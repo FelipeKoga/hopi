@@ -25,10 +25,11 @@ internal expect fun benchGcCount(): Long
  * The overhead A/B workload (docs/design/perf-monitors.md, "Performance plan"): Android
  * `--es perfBench <spec>`, iOS `-perfBench <spec>`, e.g. `monitors=hangs;n=10000;runs=3`.
  *
- * - `monitors`: `none` (the default: the real module with nothing started, or the noop build),
+ * - `monitors`: `none` (the default: the runtime with nothing started, or a build with no runtime),
  *   `all`, or a comma list of `frames,hangs,cpu,memory`, started with [HopiPerf.start] before the
- *   run (a noop build starts nothing and says `"running":""`); `heartbeat=1` runs the Android hang
- *   monitor on its heartbeat instead of the Looper printer ([dev.koga.hopi.perf.HopiPerfConfig.hangHeartbeat]);
+ *   run (a build with no runtime starts nothing and says `"running":""`); `heartbeat=1` runs the
+ *   Android hang monitor on its heartbeat instead of the Looper printer
+ *   ([dev.koga.hopi.perf.HopiPerfConfig.hangHeartbeat]);
  * - `mode=messages` (the default): per kind and run, `n` main-thread units after `warmup`
  *   uncounted ones, one `{"perfBench":"messages",…}` line with the median, p90, p99 and mean gap
  *   between unit starts (what one unit of the chain costs the main thread, the monitors' work
@@ -56,7 +57,7 @@ public suspend fun runPerfBench(spec: String): String {
     }
     // Lets the launch's own work (first frames, the monitors' attach message, JIT) drain first.
     delay(SETTLE_MS)
-    val head = "\"build\":\"${if (SampleBuild.realHopi) "real" else "noop"}\",\"monitors\":\"${monitors.joinToString(",") { it.name.lowercase() }}\"," +
+    val head = "\"build\":\"${if (SampleBuild.realHopi) "real" else "nohopi"}\",\"monitors\":\"${monitors.joinToString(",") { it.name.lowercase() }}\"," +
         "\"heartbeat\":$heartbeat,\"running\":\"${HopiPerf.running.joinToString(",") { it.name.lowercase() }}\""
     if (mode == "idle") {
         val ready = "{\"perfBench\":\"idle\",$head,\"at\":${labWallMs()}}"

@@ -5,7 +5,7 @@ plugins {
 // A stand-in for a third-party SDK (analytics, ads, crash reporting): Java only, its own OkHttp
 // client and its own HttpURLConnection calls, and no Hopi anywhere, neither the plugin nor a
 // dependency. The sample app's debug build must still record every request it makes, because the
-// app's dev.koga.hopi plugin instruments the app's dependencies too (docs/design/android-capture.md).
+// app's io.github.felipekoga.hopi plugin instruments the app's dependencies too (docs/design/android-capture.md).
 android {
     namespace = "dev.koga.fakesdk"
     compileSdk = libs.versions.android.compileSdk.get().toInt()

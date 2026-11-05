@@ -9,8 +9,9 @@ drift hits every arm alike. Writes the raw lines to <out>/<platform>-bench.ndjso
 arm and kind, the median over runs and blocks and its difference from the first arm.
 
 An arm is `label=monitors[:option=value…][@package]`: the monitors (`+` between several), spec
-options such as `heartbeat=1`, and on Android a second install, e.g. the noop build: `./gradlew :sample:androidApp:assembleDebug
--Psample.hopiCapture=false -Psample.applicationIdSuffix=.noop` gives `dev.koga.hopi.sample.noop`.
+options such as `heartbeat=1`, and on Android a second install, e.g. the build with no runtime (the
+`nohopi` arm): `./gradlew :sample:androidApp:assembleDebug -Psample.hopiCapture=false
+-Psample.applicationIdSuffix=.nohopi` gives `dev.koga.hopi.sample.nohopi`.
 
 usage: bench.py <out dir> [--platform android|ios] [--blocks 3] [--n 10000] [--runs 3]
                 [--arms off=none,hangs=hangs,frames=frames,all=all]

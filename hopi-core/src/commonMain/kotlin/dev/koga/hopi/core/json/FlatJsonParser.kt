@@ -1,6 +1,6 @@
 package dev.koga.hopi.core.json
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * Parses a JSON object whose values are strings, integers, booleans or null. Anything else

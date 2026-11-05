@@ -1,6 +1,6 @@
 package dev.koga.hopi.connect
 
-import dev.koga.hopi.core.HopiInternalApi
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.json.parseFlatJsonObject
 import java.io.IOException
 import java.nio.file.Files
@@ -11,7 +11,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * A bridge reachable on host loopback ([port]), plus whatever must be undone when the command ends
- * (the adb forward). [token] is sent as the first line on token transports and never printed.
+ * (the adb forward, a USB iPhone's relay). [token] is sent as the first line on token transports
+ * and never printed.
  */
 @HopiInternalApi
 public class BridgeEndpoint(
@@ -43,12 +44,54 @@ public class Targets(private val environment: HostEnvironment) {
     private val simctl: Simctl? by lazy {
         if (environment.isMac && environment.isExecutable(Simctl.XCRUN)) Simctl(Simctl.XCRUN, environment.processes) else null
     }
+    private val devicectl: Devicectl? by lazy {
+        if (environment.isMac && environment.isExecutable(Simctl.XCRUN)) Devicectl(Simctl.XCRUN, environment.processes, environment.shutdownHooks) else null
+    }
+    private val usbmuxd: Usbmuxd? by lazy {
+        val socket = environment.usbmuxdSocket
+        if (environment.isMac && environment.isExecutable(Simctl.XCRUN) && Files.exists(socket)) Usbmuxd(socket) else null
+    }
+
+    /** The devices devicectl listed, by [udidKey]. One it did not list, or a listing that failed, is asked about again. */
+    private val described = HashMap<String, CoreDevice>()
 
     /** Null when adb is not installed. */
     public fun androidDevices(): List<AdbDevice>? = adb?.devices()
 
     /** Null when this host has no simulators (not macOS, or no Xcode). */
     public fun simulators(): List<Simulator>? = simctl?.booted()
+
+    /**
+     * The iPhones (and iPads) attached over USB: usbmuxd's `USB` entries, one per UDID. devicectl
+     * names them; it runs only while an attached one is not named yet (a [Targets] keeps every
+     * name devicectl gave), so a phone it did not list at first (not yet trusted, say) is named
+     * once it does. Null when this host cannot reach them (not macOS, no Xcode, no usbmuxd socket).
+     */
+    public fun usbIphones(): List<UsbIphone>? {
+        val attached = usbDevices() ?: return null
+        val known = describe(attached.map { it.udid })
+        return attached.map { device -> known[udidKey(device.udid)].let { UsbIphone(device.udid, it?.name, it?.os) } }
+    }
+
+    /** usbmuxd's USB entries whose UDID may reach a subprocess's arguments, one per UDID; null as [usbIphones]. */
+    private fun usbDevices(): List<UsbmuxDevice>? = usbmuxd?.devices()
+        ?.filter { it.connection == "USB" && TargetIds.DEVICE.matches(it.udid) }
+        ?.distinctBy { udidKey(it.udid) }
+
+    private fun describe(udids: List<String>): Map<String, CoreDevice> = synchronized(described) {
+        if (udids.any { udidKey(it) !in described }) {
+            // Names only: a devicectl that fails, or does not list a device, leaves it unnamed until a later call.
+            val listed = try {
+                devicectl?.devices().orEmpty()
+            } catch (_: CliException) {
+                emptyList()
+            }
+            for (device in listed) described[udidKey(device.udid)] = device
+        }
+        HashMap(described)
+    }
+
+    private fun udidKey(udid: String): String = udid.replace("-", "").uppercase()
 
     /** The Hopi bridges listening on Android device [serial] (see [Adb.bridges]); empty when adb cannot tell. */
     public fun androidBridges(serial: String): List<String> = adb?.bridges(serial).orEmpty()
@@ -107,9 +150,13 @@ public class Targets(private val environment: HostEnvironment) {
 
     /**
      * Where [app]'s bridge on the booted simulator [device] (the only one when null) writes its
-     * `bridge.json`; the file need not exist. Throws [CliException] like [open].
+     * `bridge.json`; the file need not exist. Throws [CliException] like [open]. A USB iPhone's is
+     * on the device: there is none on the host.
      */
-    public fun iosBridgeFile(app: String, device: String?): Path = iosBridge(app, device).first
+    public fun iosBridgeFile(app: String, device: String?): Path {
+        val simctl = simctl ?: throw notReachable(NO_XCODE)
+        return simulatorBridge(simctl, simctl.booted(), app, device).first
+    }
 
     /**
      * The bridge of [app] on [platform] (inferred from the attached targets when null), on [device]
@@ -123,15 +170,32 @@ public class Targets(private val environment: HostEnvironment) {
             Platform.Jvm -> openJvm(bridgeFile ?: throw usageError("--platform jvm needs --bridge-file <path>"), app)
         }
 
+    /**
+     * The bridge of [app] on the USB iPhone [udid], never a simulator: what the desktop viewer
+     * opens for an iPhone it listed, so an unplugged one says so. Throws [CliException] like [open].
+     */
+    public fun openUsbIphone(app: String, udid: String): BridgeEndpoint {
+        if (devicectl == null) throw notReachable(NO_XCODE_USB)
+        val attached = usbDevices() ?: throw notReachable("usbmuxd is not running: no socket at ${environment.usbmuxdSocket}")
+        val device = attached.firstOrNull { sameUdid(it.udid, udid) }
+            ?: throw notReachable("${usbLabel(udid)} is not attached (usbmuxd does not list it): plug it in, then reconnect")
+        return openUsb(app, device)
+    }
+
     private fun requireApp(app: String?): String = app ?: throw usageError("android and ios targets need --app <id>")
 
-    /** The platform that has a target: the one listing [device], else the only one with a ready target. */
+    /**
+     * The platform that has a target: the one listing [device], else the only one with a ready
+     * target. A USB iPhone counts only when no adb device is ready and no simulator is booted, so
+     * attaching one never changes which target a command finds.
+     */
     private fun inferPlatform(device: String?): Platform {
         val androids = discover { androidDevices() }
         val simulators = discover { simulators() }
         if (device != null) {
             if (androids?.any { it.serial == device } == true) return Platform.Android
             if (simulators?.any { it.udid == device } == true) return Platform.Ios
+            if (discover { usbDevices() }?.any { sameUdid(it.udid, device) } == true) return Platform.Ios
             throw notReachable("device $device is neither listed by adb devices nor a booted simulator")
         }
         val hasAndroid = androids?.any(AdbDevice::isReady) == true
@@ -142,6 +206,7 @@ public class Targets(private val environment: HostEnvironment) {
             )
             hasAndroid -> Platform.Android
             hasSimulator -> Platform.Ios
+            !discover { usbDevices() }.isNullOrEmpty() -> Platform.Ios
             androids == null && simulators == null -> throw notReachable(
                 "no device: adb not found (set ANDROID_HOME or put adb on PATH) and no iOS simulator tools",
             )
@@ -208,15 +273,85 @@ public class Targets(private val environment: HostEnvironment) {
     }
 
     private fun openIos(app: String, device: String?): BridgeEndpoint {
-        val (file, simulator) = iosBridge(app, device)
+        val simctl = simctl ?: throw notReachable(NO_XCODE)
+        val simulators = simctl.booted()
+        usbIphoneTarget(device, simulators)?.let { return openUsb(app, it) }
+        val (file, simulator) = simulatorBridge(simctl, simulators, app, device)
         val unreachable = "app not running or agentBridge = false: no bridge answers for $app on ${simulator.name}"
         val (port, token) = readBridgeFile(file, missing = unreachable)
         return BridgeEndpoint(port, token, Platform.Ios, app, unreachable)
     }
 
-    private fun iosBridge(app: String, device: String?): Pair<Path, Simulator> {
-        val simctl = simctl ?: throw notReachable("iOS simulators need macOS with Xcode: /usr/bin/xcrun not found")
-        val simulators = simctl.booted()
+    /**
+     * The USB iPhone to use: the one [device] names when no booted simulator has that UDID, or
+     * the only one attached when [device] is null and no simulator is booted. Null leaves the
+     * choice, and its errors, to the simulators exactly as before.
+     */
+    private fun usbIphoneTarget(device: String?, simulators: List<Simulator>): UsbmuxDevice? {
+        if (device != null && simulators.any { it.udid == device }) return null
+        if (device == null && simulators.isNotEmpty()) return null
+        val attached = discover { usbDevices() }.orEmpty()
+        if (attached.isEmpty()) return null
+        // As usbmuxd writes the UDID, so --device may differ in case or in the dash.
+        val requested = device?.let { named -> attached.firstOrNull { sameUdid(it.udid, named) }?.udid }
+        if (device != null && requested == null) {
+            val available = simulators.map { "${it.name} (${it.udid})" } + attached.map { usbLabel(it.udid) }
+            throw notReachable("iOS device $device not found (available: ${available.joinToString()})")
+        }
+        val udid = pickDevice(
+            requested,
+            attached.map { Candidate(it.udid, usbLabel(it.udid), ready = true, "attached") },
+            kind = "USB iPhone",
+            none = "no USB iPhone is attached",
+        )
+        return attached.first { it.udid == udid }
+    }
+
+    /**
+     * Reads the app's `bridge.json` from its data container on the device with devicectl (the
+     * same path as on a simulator), then serves a relay on host loopback whose every connection
+     * usbmuxd carries to the bridge's port on the device. The token check is the bridge's, as ever.
+     */
+    private fun openUsb(app: String, device: UsbmuxDevice): BridgeEndpoint {
+        val usbmuxd = usbmuxd ?: throw notReachable("usbmuxd is not running: no socket at ${environment.usbmuxdSocket}")
+        val devicectl = devicectl ?: throw notReachable(NO_XCODE_USB)
+        val label = usbLabel(device.udid)
+        val unreachable = "app not running or agentBridge = false: no bridge answers for $app on $label"
+        val text = devicectl.readAppFile(device.udid, app, IOS_BRIDGE_FILE) { reason ->
+            "$unreachable (devicectl could not copy $IOS_BRIDGE_FILE: $reason)"
+        }
+        val (port, token) = parseBridgeFile(text) ?: throw notReachable("$IOS_BRIDGE_FILE of $app on $label is not a Hopi bridge file")
+        val relay = try {
+            UsbmuxRelay(usbmuxd, device.deviceId, port)
+        } catch (e: IOException) {
+            throw notReachable("cannot listen on host loopback to relay to $label: ${e.message}")
+        }
+        return BridgeEndpoint(
+            port = relay.localPort,
+            token = token,
+            platform = Platform.Ios,
+            app = app,
+            unreachableMessage = unreachable,
+            transportLost = {
+                if (detached(device.udid)) {
+                    "$label is no longer attached (usbmuxd does not list it); the app may still be running: reconnect it and run the command again"
+                } else {
+                    null
+                }
+            },
+        ) { relay.close() }
+    }
+
+    /** Whether usbmuxd answers and no longer lists [udid] over USB. */
+    private fun detached(udid: String): Boolean = try {
+        usbDevices()?.none { sameUdid(it.udid, udid) } == true
+    } catch (_: CliException) {
+        false
+    }
+
+    private fun usbLabel(udid: String): String = "$udid (USB)"
+
+    private fun simulatorBridge(simctl: Simctl, simulators: List<Simulator>, app: String, device: String?): Pair<Path, Simulator> {
         val udid = pickDevice(
             device,
             simulators.map { Candidate(it.udid, "${it.name} (${it.udid})", ready = true, it.state) },
@@ -259,6 +394,9 @@ public class Targets(private val environment: HostEnvironment) {
     public companion object {
         /** Where the iOS bridge writes its `bridge.json`, relative to the app's data container. */
         public const val IOS_BRIDGE_FILE: String = "Library/Caches/hopi/bridge.json"
+
+        private const val NO_XCODE = "iOS simulators need macOS with Xcode: /usr/bin/xcrun not found"
+        private const val NO_XCODE_USB = "iPhones on USB need macOS with Xcode 15 or later: /usr/bin/xcrun not found"
     }
 }
 
@@ -287,9 +425,14 @@ public fun readBridgeFile(file: Path, missing: String): Pair<Int, String> {
     } catch (e: IOException) {
         throw notReachable("cannot read $file: ${e.message}")
     }
+    return parseBridgeFile(text) ?: throw notReachable("$file is not a Hopi bridge file")
+}
+
+/** The port and token of a `bridge.json` [text]; null when it is not one. */
+internal fun parseBridgeFile(text: String): Pair<Int, String>? {
     val fields = parseFlatJsonObject(text)
     val port = (fields?.get("port") as? Long)?.takeIf { it in 1..65535 }?.toInt()
     val token = (fields?.get("token") as? String)?.takeIf { TOKEN.matches(it) }
-    if (port == null || token == null) throw notReachable("$file is not a Hopi bridge file")
+    if (port == null || token == null) return null
     return port to token
 }

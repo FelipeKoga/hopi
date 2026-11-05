@@ -198,10 +198,11 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
 internal val USAGE_TEXT: String = """
     |Usage: hopi <command> [options]
     |
-    |Reads the HTTP traffic an app records with Hopi (agentBridge = true).
+    |Reads what Hopi records in a running app (HTTP traffic, rules, performance) and drives its
+    |rules and monitors. The app needs agentBridge = true.
     |
     |Commands:
-    |  devices                 list reachable targets: adb devices and booted iOS simulators
+    |  devices                 list reachable targets: adb devices, booted iOS simulators, iPhones on USB
     |  list                    the newest transactions (--limit, default $DEFAULT_LIMIT), oldest first
     |  tail                    retained transactions, then live events until interrupted
     |  get <id>                full detail of one transaction, bodies included
@@ -237,7 +238,8 @@ internal val USAGE_TEXT: String = """
     |Options:
     |  --app <id>              applicationId (Android) or bundle id (iOS); required except for jvm
     |  --platform <p>          android, ios or jvm; inferred when only one of adb/simctl has a target
-    |  --device <id>           adb serial or simulator UDID, when several are attached
+    |  --device <id>           adb serial, simulator UDID or USB iPhone UDID, when several are attached;
+    |                          an iPhone is picked unnamed only when no adb device or simulator is ready
     |  --bridge-file <path>    bridge.json of a JVM process (implies --platform jvm)
     |  --json                  NDJSON output, one object per line (the stable contract for agents)
     |  --limit <n>             list: at most n transactions, 1..$MAX_LIMIT

@@ -41,17 +41,14 @@ internal object HopiIcons {
     val Terminal by lazy { icon("Terminal", "M4 17l6-6-6-6", "M12 19h8") }
     val Share by lazy { icon("Share", "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8", "M16 6l-4-4-4 4", "M12 2v13") }
 
-    /** Horizontal sliders: the rules list. */
-    val Rules by lazy { icon("Rules", "M21 4h-7", "M10 4H3", "M21 12h-9", "M8 12H3", "M21 20h-5", "M12 20H3", "M14 2v4", "M8 10v4", "M16 18v4") }
-
     /** A wand: a made-up response from this one. */
     val Mock by lazy { icon("Mock", "M15 4V2", "M15 16v-2", "M8 9h2", "M20 9h2", "M17.8 11.8L19 13", "M17.8 6.2L19 5", "M3 21l9-9", "M12.2 6.2L11 5") }
 
-    /** A pulse: the performance monitors. */
-    val Perf by lazy { icon("Perf", "M22 12h-4l-3 9L9 3l-3 9H2") }
+    /** A toast that failed. */
+    val Alert by lazy { icon("Alert", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0", "M12 8v4", "M12 16h.01") }
 
-    /** Up and down arrows: traffic in both directions, the launcher's glyph. */
-    val Traffic by lazy { icon("Traffic", "M7 3v18", "M3 7l4-4 4 4", "M17 21V3", "M21 17l-4 4-4-4") }
+    /** A toast that worked. */
+    val Check by lazy { icon("Check", "M20 6 9 17l-5-5") }
 
     private fun icon(name: String, vararg paths: String): ImageVector {
         val builder = ImageVector.Builder(

@@ -1,6 +1,7 @@
 package dev.koga.hopi.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
@@ -26,8 +28,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.koga.hopi.connect.RemoteRule
 import dev.koga.hopi.connect.RemoteRules
@@ -35,8 +41,10 @@ import dev.koga.hopi.connect.RemoteSession
 import dev.koga.hopi.connect.RemoteUnsupported
 import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.rules.FailKind
+import dev.koga.hopi.ui.desktop.HopiDesktopColors
 import dev.koga.hopi.ui.desktop.HopiDesktopType
 import dev.koga.hopi.ui.desktop.hopiDesktopColors
+import dev.koga.hopi.ui.theme.HopiTone
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
@@ -114,19 +122,30 @@ internal fun RulesPanel(
             BasicText("Rules", style = HopiDesktopType.bodyStrong.copy(color = colors.text))
             if (rules.rules.isNotEmpty()) BasicText(rules.rules.size.toString(), style = HopiDesktopType.meta.copy(color = colors.textFaint))
             Spacer(Modifier.weight(1f))
+            // Destructive: it removes every rule in the app.
             ChromeButton(
                 "Clear",
                 enabled = rules.supported && rules.rules.isNotEmpty() && !state.busy && session != null,
                 onClick = { session?.let { s -> send({ s.clearRules() }) { removed -> if (removed == 1L) "1 rule removed" else "$removed rules removed" } } },
+                variant = ButtonVariant.Destructive,
             )
-            ChromeButton("Close", onClick = { state.open = false })
+            ChromeButton("Close", onClick = { state.open = false }, variant = ButtonVariant.Ghost)
         }
         Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
         state.message?.let {
+            // A callout in the outcome's hue (messageTone).
+            val tone = messageTone(it, colors)
             BasicText(
                 it,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag(RulesTags.MESSAGE),
-                style = HopiDesktopType.meta.copy(color = colors.text),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(tone.bg)
+                    .border(1.dp, tone.border, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag(RulesTags.MESSAGE),
+                style = HopiDesktopType.meta.copy(color = tone.fg),
             )
         }
         when {
@@ -142,7 +161,7 @@ internal fun RulesPanel(
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         BasicText("Add", style = HopiDesktopType.section.copy(color = colors.textFaint), modifier = Modifier.align(Alignment.CenterVertically))
                         for (kind in listOf(FormKind.Mock, FormKind.Fail, FormKind.Delay, FormKind.Edit)) {
-                            ChromeButton(kind.label, onClick = { state.edit(RuleForm(kind)) })
+                            ChromeButton(kind.label, onClick = { state.edit(RuleForm(kind)) }, variant = ButtonVariant.Secondary)
                         }
                     }
                     if (rules.rules.isEmpty()) {
@@ -165,6 +184,19 @@ internal fun RulesPanel(
         }
     }
 }
+
+/**
+ * The message's hue: what this panel reports itself ("Rule #3 added", "… updated", "… removed",
+ * "2 rules removed") is success, or warning when an added rule lists sources it does not fully
+ * apply to (more lines follow); anything else is a refusal or an error.
+ */
+private fun messageTone(message: String, colors: HopiDesktopColors): HopiTone = when {
+    !DONE.matches(message.substringBefore('\n')) -> colors.error
+    '\n' in message -> colors.warning
+    else -> colors.success
+}
+
+private val DONE = Regex("""Rule #\d+ (added|updated|removed)|\d+ rules? removed""")
 
 /** Checks the form on this side first (nothing is uploaded for a form that cannot be sent), then sends it. */
 private fun submit(form: RuleForm, session: RemoteSession, state: RulesPanelState, scope: CoroutineScope) {
@@ -238,26 +270,32 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
             ChromeButton("Update", onClick = onUpdate, enabled = enabled)
             ChromeButton("Remove", onClick = onRemove, enabled = enabled)
         }
-        val hits = buildString {
-            append(rule.hits)
-            rule.times?.let { append('/').append(it) }
+        // The same text as `action  ·  hits  ·  label`: exhausted in the warning amber, inactive in red.
+        val hits = buildAnnotatedString {
+            append(rule.hits.toString())
+            rule.times?.let { append("/$it") }
             append(if (rule.hits == 1L && rule.times == null) " hit" else " hits")
-            if (rule.exhausted) append(" · exhausted")
+            if (rule.exhausted) withStyle(SpanStyle(color = colors.warning.fg)) { append(" · exhausted") }
             // Every source it names excludes it: it never applies, whatever its switch says.
-            if (rule.inactive) append(" · inactive")
-            if (rule.priority != 0) append(" · priority ").append(rule.priority)
+            if (rule.inactive) withStyle(SpanStyle(color = colors.error.fg)) { append(" · inactive") }
+            if (rule.priority != 0) append(" · priority ${rule.priority}")
         }
-        BasicText(
-            listOfNotNull(rule.action, hits, rule.label).joinToString("  ·  "),
-            modifier = Modifier.padding(start = 42.dp, top = 2.dp),
-            style = HopiDesktopType.meta.copy(color = colors.textMuted),
-        )
-        // A source that never gets the rule in full contrast, first; a difference it applies with, muted.
+        val line = buildAnnotatedString {
+            append(rule.action)
+            append("  ·  ")
+            append(hits)
+            rule.label?.let {
+                append("  ·  ")
+                append(it)
+            }
+        }
+        BasicText(line, modifier = Modifier.padding(start = 42.dp, top = 2.dp), style = HopiDesktopType.meta.copy(color = colors.textMuted))
+        // A source that never gets the rule in the warning amber, first; a difference it applies with, muted.
         for (entry in rule.unsupported.sortedBy { it.applies }) {
             BasicText(
                 if (entry.applies) "⚠ $entry" else entry.notApplied(),
                 modifier = Modifier.padding(start = 42.dp),
-                style = HopiDesktopType.meta.copy(color = if (entry.applies) colors.textMuted else colors.text),
+                style = HopiDesktopType.meta.copy(color = if (entry.applies) colors.textMuted else colors.warning.fg),
             )
         }
     }
@@ -278,7 +316,7 @@ private fun FormView(form: RuleForm, state: RulesPanelState, chooseBodyFile: () 
                 },
                 onClick = onSave,
                 enabled = !state.busy,
-                primary = true,
+                variant = ButtonVariant.Primary,
                 modifier = Modifier.testTag(RulesTags.SAVE),
             )
             ChromeButton("Cancel", onClick = {
@@ -374,7 +412,7 @@ private fun Headers(label: String, table: HeaderTable) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ChromeTextField(row.first, "Name", Modifier.weight(0.4f).testTag(RulesTags.header(label, index, value = false)))
                 ChromeTextField(row.second, "value", Modifier.weight(0.6f).testTag(RulesTags.header(label, index, value = true)))
-                ChromeButton("×", onClick = { table.rows.removeAt(index) })
+                ChromeButton("×", onClick = { table.rows.removeAt(index) }, variant = ButtonVariant.Ghost)
             }
         }
         ChromeButton("Add header", onClick = { table.add() })
