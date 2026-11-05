@@ -113,7 +113,7 @@ internal fun TransactionListPane(
                 )
             }
         }
-        HairlineDivider()
+        Spacer(Modifier.height(4.dp))
         when {
             // Rows are still being built off the main thread: show nothing for that one frame.
             model == null -> Unit
@@ -174,11 +174,12 @@ private fun SearchField(state: TextFieldState, focus: FocusRequester?) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .focusRing(if (focused) colors.ring else null)
-            .heightIn(min = 44.dp)
-            .clip(HopiRadius.md)
-            .background(colors.background)
-            .border(1.dp, if (focused) colors.ring else colors.border, HopiRadius.md)
-            .padding(start = 12.dp),
+            .heightIn(min = 48.dp)
+            .clip(HopiRadius.full)
+            // M3 Expressive's search bar: a filled pill, outlined in primary while focused.
+            .background(colors.containerHigh)
+            .then(if (focused) Modifier.border(2.dp, colors.ring, HopiRadius.full) else Modifier)
+            .padding(start = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HopiIcons.Search, colors.textFaint, size = 16.dp)
@@ -209,19 +210,15 @@ private fun SearchField(state: TextFieldState, focus: FocusRequester?) {
 
 @Composable
 private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: (Long) -> Unit, selected: Boolean) {
+    // M3 Expressive's list: each request a tonal card with large corners and a small gap, the
+    // selected one in secondaryContainer.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .then(
-                if (selected) {
-                    Modifier
-                        .background(colors.surface)
-                        .drawBehind { drawRect(colors.primary, size = Size(2.dp.toPx(), size.height)) }
-                        .semantics { this.selected = true }
-                } else {
-                    Modifier
-                },
-            )
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(HopiRadius.lg)
+            .background(if (selected) colors.secondaryContainer else colors.surface)
+            .then(if (selected) Modifier.semantics { this.selected = true } else Modifier)
             .clickable(onClickLabel = "Open details") { onOpen(row.id) }
             .heightIn(min = 60.dp),
     ) {
@@ -264,7 +261,6 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
                 }
             }
         }
-        HairlineDivider(Modifier.padding(start = 72.dp))
     }
 }
 
@@ -274,10 +270,10 @@ private fun TransactionRowItem(row: TransactionRow, colors: HopiColors, onOpen: 
  */
 @Composable
 private fun StatusBadge(row: TransactionRow, colors: HopiColors) {
-    val shape = HopiRadius.sm
+    val shape = HopiRadius.md
     val base = Modifier
-        .widthIn(min = 44.dp)
-        .heightIn(min = 26.dp)
+        .widthIn(min = 48.dp)
+        .heightIn(min = 30.dp)
         .clip(shape)
         .clearAndSetSemantics { contentDescription = row.badgeDescription }
     val (modifier, color) = when (row.status) {
@@ -292,7 +288,7 @@ private fun StatusBadge(row: TransactionRow, colors: HopiColors) {
                 color = colors.textFaint,
                 topLeft = Offset(stroke / 2, stroke / 2),
                 size = Size(size.width - stroke, size.height - stroke),
-                cornerRadius = CornerRadius(6.dp.toPx()),
+                cornerRadius = CornerRadius(12.dp.toPx()),
                 style = Stroke(width = stroke, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))),
             )
         } to colors.textMuted

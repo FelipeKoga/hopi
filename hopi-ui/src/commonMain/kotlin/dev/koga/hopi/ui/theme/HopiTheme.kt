@@ -39,6 +39,11 @@ internal class HopiColors(
     val surface: Color,
     /** shadcn's muted: secondary buttons, the tabs' track, a selected picker chip. */
     val muted: Color,
+    /** M3's surfaceContainerHigh: list cards, text fields, an unselected chip. */
+    val containerHigh: Color,
+    /** M3's secondaryContainer: a selected row, a tonal button, the navigation indicator. */
+    val secondaryContainer: Color,
+    val onSecondaryContainer: Color,
     val border: Color,
     /** A focused field's border and its outer ring. */
     val ring: Color,
@@ -72,6 +77,7 @@ internal class HopiColors(
 // its on-container text, and an outline one step up.
 internal val LightColors = HopiColors(
     background = Color(0xFFF5FBF5), surface = Color(0xFFE9EFEA), muted = Color(0xFFDEE4DE),
+    containerHigh = Color(0xFFE3EAE4), secondaryContainer = Color(0xFFD1E8D8), onSecondaryContainer = Color(0xFF0C1F15),
     border = Color(0xFFBFC9C1), ring = Color(0xFF2C6A47),
     text = Color(0xFF171D19), textMuted = Color(0xFF404943), textFaint = Color(0xFF59625C),
     primary = Color(0xFF2C6A47), onPrimary = Color(0xFFFFFFFF),
@@ -88,6 +94,7 @@ internal val LightColors = HopiColors(
 
 internal val DarkColors = HopiColors(
     background = Color(0xFF0F1511), surface = Color(0xFF1B211D), muted = Color(0xFF303632),
+    containerHigh = Color(0xFF262B27), secondaryContainer = Color(0xFF334B40), onSecondaryContainer = Color(0xFFCFE9D9),
     border = Color(0xFF3F4943), ring = Color(0xFF7FD9A3),
     text = Color(0xFFDEE4DE), textMuted = Color(0xFFBFC9C1), textFaint = Color(0xFF8F9A92),
     primary = Color(0xFF81DFA2), onPrimary = Color(0xFF003920),
@@ -115,12 +122,13 @@ internal object HopiRadius {
 /** Text styles: Open Runde for the sans ([hopiSans], bundled), the platform monospace for code. */
 internal object HopiType {
     private val sans: FontFamily = hopiSans()
-    val title = TextStyle(fontFamily = sans, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp)
+    val title = TextStyle(fontFamily = sans, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp)
     val body = TextStyle(fontFamily = sans, fontSize = 14.sp, lineHeight = 19.sp)
     val bodyStrong = TextStyle(fontFamily = sans, fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium)
     val label = TextStyle(fontFamily = sans, fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium)
     val meta = TextStyle(fontFamily = sans, fontSize = 12.sp, lineHeight = 16.sp)
-    val section = TextStyle(fontFamily = sans, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    val section = TextStyle(fontFamily = sans, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.1.sp)
+    val tag = TextStyle(fontFamily = sans, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
     val mono = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontFamily = FontFamily.Monospace)
     val monoStrong = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
     val badge = TextStyle(fontSize = 12.sp, lineHeight = 14.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)

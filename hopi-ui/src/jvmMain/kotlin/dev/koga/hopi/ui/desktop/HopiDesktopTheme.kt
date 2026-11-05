@@ -23,6 +23,11 @@ public class HopiDesktopColors internal constructor(
     public val surface: Color,
     /** Secondary buttons, a selected picker chip. */
     public val muted: Color,
+    /** M3's surfaceContainerHigh: cards, text fields, an unselected chip. */
+    public val containerHigh: Color,
+    /** M3's secondaryContainer: a selected item, a tonal button. */
+    public val secondaryContainer: Color,
+    public val onSecondaryContainer: Color,
     public val border: Color,
     /** A focused field's border and its outer ring. */
     public val ring: Color,
@@ -70,6 +75,9 @@ public val hopiDesktopColors: HopiDesktopColors
             background = colors.background,
             surface = colors.surface,
             muted = colors.muted,
+            containerHigh = colors.containerHigh,
+            secondaryContainer = colors.secondaryContainer,
+            onSecondaryContainer = colors.onSecondaryContainer,
             border = colors.border,
             ring = colors.ring,
             text = colors.text,

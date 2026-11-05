@@ -1,5 +1,7 @@
 package dev.koga.hopi.ui.detail
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -149,42 +151,38 @@ internal fun TransactionDetailPane(
     }
 }
 
-/** shadcn's segmented control at desktop size: a muted track, the selected tab a raised thumb; 48 dp targets. */
+/**
+ * M3 Expressive's connected button group: one pill per tab with a 2 dp gap, the outer corners round,
+ * the inner ones small, and the selected one filled with primary and fully round; 48 dp targets.
+ */
 @Composable
 private fun Tabs(selected: DetailTab, onTab: (DetailTab) -> Unit, colors: HopiColors) {
+    val tabs = DetailTab.entries
     Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .drawBehind {
-                val inset = 6.dp.toPx()
-                drawRoundRect(colors.muted, Offset(0f, inset), Size(size.width, size.height - 2 * inset), CornerRadius(8.dp.toPx()))
-            },
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        for (tab in DetailTab.entries) {
+        for ((index, tab) in tabs.withIndex()) {
             val isSelected = tab == selected
+            val outer = 20.dp
+            val inner = if (isSelected) 20.dp else 6.dp
+            val shape = RoundedCornerShape(
+                topStart = if (index == 0) outer else inner,
+                bottomStart = if (index == 0) outer else inner,
+                topEnd = if (index == tabs.lastIndex) outer else inner,
+                bottomEnd = if (index == tabs.lastIndex) outer else inner,
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 48.dp)
+                    .heightIn(min = 44.dp)
+                    .clip(shape)
+                    .background(if (isSelected) colors.primary else colors.containerHigh)
                     .semantics { this.selected = isSelected }
-                    .clickable(interactionSource = null, indication = null, role = Role.Tab) { onTab(tab) }
-                    .then(
-                        if (isSelected) {
-                            Modifier.drawBehind {
-                                val topLeft = Offset(3.dp.toPx(), 9.dp.toPx())
-                                val thumb = Size(size.width - 6.dp.toPx(), size.height - 18.dp.toPx())
-                                val corner = CornerRadius(6.dp.toPx())
-                                drawRoundRect(colors.background, topLeft, thumb, corner)
-                                drawRoundRect(colors.border, topLeft, thumb, corner, style = Stroke(1.dp.toPx()))
-                            }
-                        } else {
-                            Modifier
-                        },
-                    ),
+                    .clickable(role = Role.Tab) { onTab(tab) },
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(tab.label, modifier = Modifier.padding(vertical = 14.dp), style = HopiType.label.copy(color = if (isSelected) colors.text else colors.textMuted))
+                BasicText(tab.label, modifier = Modifier.padding(vertical = 12.dp), style = HopiType.label.copy(color = if (isSelected) colors.onPrimary else colors.text))
             }
         }
     }

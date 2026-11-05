@@ -115,11 +115,12 @@ internal fun FilterChip(label: String, count: Int, selected: Boolean, onClick: (
     ) {
         Row(
             modifier = Modifier
-                .heightIn(min = 32.dp)
+                .heightIn(min = 36.dp)
                 .clip(HopiRadius.full)
-                .then(if (selected) Modifier.background(colors.primary) else Modifier.background(colors.background).border(1.dp, colors.border, HopiRadius.full))
+                // M3 Expressive: a tonal pill, filled with primary once selected.
+                .background(if (selected) colors.primary else colors.containerHigh)
                 .indication(source, LocalIndication.current)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -157,17 +158,18 @@ internal fun ActionButton(
     ) {
         Row(
             modifier = Modifier
-                .heightIn(min = 36.dp)
+                .heightIn(min = 40.dp)
                 .clip(HopiRadius.full)
-                .background(tone?.bg ?: colors.muted)
+                // M3's tonal button: secondaryContainer, or the tone's container.
+                .background(tone?.bg ?: colors.secondaryContainer)
                 .then(if (tone != null) Modifier.border(1.dp, tone.border, HopiRadius.full) else Modifier)
                 .indication(source, LocalIndication.current)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(vector, tone?.fg ?: colors.text, size = 16.dp)
+            Icon(vector, tone?.fg ?: colors.onSecondaryContainer, size = 18.dp)
             Spacer(Modifier.width(8.dp))
-            BasicText(label, style = HopiType.label.copy(color = tone?.fg ?: colors.text), maxLines = 1)
+            BasicText(label, style = HopiType.label.copy(color = tone?.fg ?: colors.onSecondaryContainer), maxLines = 1)
         }
     }
 }
@@ -184,7 +186,8 @@ internal fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing:
         modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        BasicText(text.uppercase(), style = HopiType.section.copy(color = colors.textFaint))
+        // M3 Expressive's section label: sentence case, in primary.
+        BasicText(text.replaceFirstChar { it.uppercase() }, style = HopiType.section.copy(color = colors.primary))
         if (trailing != null) {
             Spacer(Modifier.width(8.dp))
             BasicText(trailing, style = HopiType.meta.copy(color = colors.textFaint), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -199,11 +202,10 @@ internal fun Tag(text: String, tone: HopiTone, modifier: Modifier = Modifier) {
         text,
         // A shaped fill, not a clip: a clip is a graphics layer, and every ruled list row has a tag.
         modifier = modifier
-            .background(tone.bg, HopiRadius.full)
-            .border(1.dp, tone.border, HopiRadius.full)
-            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .background(tone.bg, HopiRadius.sm)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
             .clearAndSetSemantics { contentDescription = text.lowercase() },
-        style = HopiType.section.copy(color = tone.fg),
+        style = HopiType.tag.copy(color = tone.fg),
         maxLines = 1,
         softWrap = false,
     )

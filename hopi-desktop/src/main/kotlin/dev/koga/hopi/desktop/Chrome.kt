@@ -1,6 +1,9 @@
 package dev.koga.hopi.desktop
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,8 +53,9 @@ internal fun ChromeButton(text: String, onClick: () -> Unit, modifier: Modifier 
     val colors = hopiDesktopColors
     val (fill, label, edge) = when (variant) {
         ButtonVariant.Primary -> Triple(colors.primary, colors.onPrimary, colors.primary)
-        ButtonVariant.Secondary -> Triple(colors.muted, colors.text, colors.muted)
-        ButtonVariant.Outline -> Triple(colors.background, colors.text, colors.border)
+        // M3 Expressive: filled, tonal (secondaryContainer), outlined, text.
+        ButtonVariant.Secondary -> Triple(colors.secondaryContainer, colors.onSecondaryContainer, colors.secondaryContainer)
+        ButtonVariant.Outline -> Triple(Color.Transparent, colors.text, colors.border)
         ButtonVariant.Ghost -> Triple(Color.Transparent, colors.text, Color.Transparent)
         ButtonVariant.Destructive -> Triple(colors.destructive, colors.onDestructive, colors.destructive)
     }
@@ -70,7 +74,8 @@ internal fun ChromeButton(text: String, onClick: () -> Unit, modifier: Modifier 
                 role = Role.Button,
                 onClick = onClick,
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .heightIn(min = 40.dp)
+            .padding(horizontal = 18.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(text, style = HopiDesktopType.label.copy(color = label))
@@ -87,10 +92,10 @@ internal fun ChromeChip(text: String, selected: Boolean, onClick: () -> Unit, mo
     Box(
         modifier
             .clip(Pill)
-            .background(if (selected) colors.muted else colors.background)
-            .border(1.dp, if (selected) colors.ring else colors.border, Pill)
+            // M3 Expressive: a tonal pill, secondaryContainer once selected.
+            .background(if (selected) colors.secondaryContainer else colors.containerHigh)
             .clickable(role = Role.RadioButton, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+            .padding(horizontal = 14.dp, vertical = 7.dp),
     ) {
         // The same text as "$text · $detail", the state in its hue.
         val label = buildAnnotatedString {
@@ -100,7 +105,7 @@ internal fun ChromeChip(text: String, selected: Boolean, onClick: () -> Unit, mo
                 withStyle(SpanStyle(color = colors.warning.fg)) { append(detail) }
             }
         }
-        BasicText(label, style = HopiDesktopType.label.copy(color = if (selected) colors.text else colors.textMuted), maxLines = 1)
+        BasicText(label, style = HopiDesktopType.label.copy(color = if (selected) colors.onSecondaryContainer else colors.textMuted), maxLines = 1)
     }
 }
 
@@ -121,9 +126,10 @@ internal fun ChromeTextField(state: TextFieldState, placeholder: String, modifie
             Box(
                 Modifier
                     .hopiFocusRing(if (focused) colors.ring else null)
-                    .background(colors.background, Shape)
-                    .border(1.dp, if (focused) colors.ring else colors.border, Shape)
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                    // M3's filled field: a container, outlined in primary while focused.
+                    .background(colors.containerHigh, Shape)
+                    .then(if (focused) Modifier.border(2.dp, colors.ring, Shape) else Modifier)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (state.text.isEmpty()) BasicText(placeholder, style = HopiDesktopType.mono.copy(color = colors.textFaint), maxLines = 1)
@@ -133,11 +139,16 @@ internal fun ChromeTextField(state: TextFieldState, placeholder: String, modifie
     )
 }
 
-/** An on/off switch: a filled track with the knob at the end when on; [description] names it for tests and screen readers. */
+/**
+ * An on/off switch in M3's shape: a 52x32 track, primary when on with a 24 dp knob in onPrimary,
+ * outlined when off with a 16 dp knob; [description] names it for tests and screen readers.
+ */
 @Composable
 internal fun ChromeSwitch(checked: Boolean, description: String, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val colors = hopiDesktopColors
     val track = RoundedCornerShape(50)
+    val knob by animateDpAsState(if (checked) 24.dp else 16.dp, spring(dampingRatio = 0.6f, stiffness = 500f))
+    val offset by animateDpAsState(if (checked) 24.dp else 8.dp, spring(dampingRatio = 0.6f, stiffness = 500f))
     Box(
         modifier
             .semantics { contentDescription = description }
@@ -148,13 +159,17 @@ internal fun ChromeSwitch(checked: Boolean, description: String, onChange: (Bool
     ) {
         Box(
             Modifier
-                .size(width = 30.dp, height = 16.dp)
-                .background(if (checked) colors.primary else colors.background, track)
-                .border(1.dp, if (checked) colors.primary else colors.textFaint, track)
-                .padding(2.dp),
-            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+                .size(width = 52.dp, height = 32.dp)
+                .background(if (checked) colors.primary else colors.containerHigh, track)
+                .border(2.dp, if (checked) colors.primary else colors.textFaint, track),
+            contentAlignment = Alignment.CenterStart,
         ) {
-            Box(Modifier.size(12.dp).background(if (checked) colors.onPrimary else colors.textFaint, CircleShape))
+            Box(
+                Modifier
+                    .offset(x = offset - (knob - 16.dp) / 2)
+                    .size(knob)
+                    .background(if (checked) colors.onPrimary else colors.textFaint, CircleShape),
+            )
         }
     }
 }

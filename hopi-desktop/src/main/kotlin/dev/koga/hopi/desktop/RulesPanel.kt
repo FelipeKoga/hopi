@@ -256,8 +256,16 @@ private fun <T> CoroutineScope.launchCommand(state: RulesPanelState, command: ()
 @Composable
 private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> Unit, onUpdate: () -> Unit, onRemove: () -> Unit) {
     val colors = hopiDesktopColors
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    // M3 Expressive: each rule a tonal card with large corners.
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(colors.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ChromeSwitch(rule.enabled, RulesTags.toggle(rule.id), onChange = { if (enabled) onToggle(it) })
             BasicText("#${rule.id}", style = HopiDesktopType.meta.copy(color = colors.textFaint))
             BasicText(
@@ -299,7 +307,6 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
             )
         }
     }
-    Spacer(Modifier.fillMaxWidth().height(1.dp).background(colors.border))
 }
 
 @Composable
@@ -439,7 +446,7 @@ private fun Body(label: String, body: BodyField, chooseBodyFile: () -> BodyFile?
 
 @Composable
 private fun Section(text: String) {
-    BasicText(text.uppercase(), modifier = Modifier.padding(top = 6.dp), style = HopiDesktopType.section.copy(color = hopiDesktopColors.textFaint))
+    BasicText(text.replaceFirstChar { it.uppercase() }, modifier = Modifier.padding(top = 6.dp), style = HopiDesktopType.section.copy(color = hopiDesktopColors.primary))
 }
 
 @Composable

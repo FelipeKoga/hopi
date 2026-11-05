@@ -167,7 +167,7 @@ internal fun PerfPanel(session: RemoteSession?, state: PerfPanelState, modifier:
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    BasicText("THREADS", Modifier.weight(1f), style = HopiDesktopType.section.copy(color = colors.textFaint))
+                    BasicText("Threads", Modifier.weight(1f), style = HopiDesktopType.section.copy(color = colors.primary))
                     ChromeSwitch(threads, PerfTags.THREADS, onChange = {
                         threads = it
                         perf?.watchThreads(it)
@@ -198,10 +198,28 @@ private fun Monitors(view: RemotePerfView, onToggle: (String, Boolean) -> Unit) 
     val colors = hopiDesktopColors
     val status = view.status
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        for (name in PerfClient.MONITORS) {
+        val monitors = PerfClient.MONITORS
+        for ((index, name) in monitors.withIndex()) {
             val running = status?.monitor(name)
             val available = status == null || name in status.available
-            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 3.dp, bottom = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            // M3 Expressive's grouped list: tonal cards 2 dp apart, the group's outer corners large.
+            val big = 20.dp
+            val small = 6.dp
+            val shape = RoundedCornerShape(
+                topStart = if (index == 0) big else small,
+                topEnd = if (index == 0) big else small,
+                bottomStart = if (index == monitors.lastIndex) big else small,
+                bottomEnd = if (index == monitors.lastIndex) big else small,
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 1.dp)
+                    .clip(shape)
+                    .background(colors.surface)
+                    .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Column(Modifier.weight(1f)) {
                     BasicText(name, style = HopiDesktopType.bodyStrong.copy(color = if (available) colors.text else colors.textFaint))
                     BasicText(
@@ -313,7 +331,8 @@ private fun HangRow(hang: RemotePerfEvent) {
 private fun Section(title: String, latest: String?) {
     val colors = hopiDesktopColors
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        BasicText(title.uppercase(), style = HopiDesktopType.section.copy(color = colors.textFaint))
+        // M3 Expressive's section label: sentence case, in primary.
+        BasicText(title, style = HopiDesktopType.section.copy(color = colors.primary))
         Spacer(Modifier.weight(1f))
         latest?.let { BasicText(it, style = HopiDesktopType.meta.copy(color = colors.text), maxLines = 1) }
     }

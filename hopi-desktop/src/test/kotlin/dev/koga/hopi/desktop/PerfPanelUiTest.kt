@@ -136,7 +136,7 @@ class PerfPanelUiTest {
         connected(app)
         openPanel()
         waitForText("This app's Hopi has no perf monitors")
-        assertFalse(exists("Frames per second".uppercase()))
+        assertFalse(exists("Frames per second"))
     }
 
     @Test
