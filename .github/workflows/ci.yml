@@ -68,7 +68,7 @@ jobs:
       # platforms;android-36 (the plugin's TestKit fixtures) and build-tools;36.0.0 (AGP 9.4.0's).
       - name: Base check
         run: |
-          ./gradlew :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-network:jvmTest \
+          ./gradlew --continue :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-ui:jvmTest :hopi-network:jvmTest \
             :hopi-cli:test :hopi-connect:test :hopi-desktop:test \
             :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest check \
             :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseHasNoRuntime :hopi-network:testAndroidHostTest \

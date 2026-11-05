@@ -47,9 +47,20 @@ class HangWatchdogTest {
     @Test
     fun aStallOverTheThresholdIsOneHangWithTheMainStack() {
         main = Thread.currentThread()
-        unit(50)
-        Thread.sleep(400)
-        assertEquals(0, data.hangs.count, "50 ms is no hang")
+        // A 50 ms unit that really ran under the 150 ms threshold: Thread.sleep overshoots on a
+        // contended runner, so a try that took 100 ms or more is retried and its hangs not counted.
+        var prior: Int
+        var took: Long
+        var tries = 0
+        do {
+            prior = data.hangs.count
+            val start = platform.nowMs()
+            unit(50)
+            took = platform.nowMs() - start
+            Thread.sleep(400)
+        } while (took >= 100 && ++tries < 5)
+        assertTrue(took < 100, "no 50 ms unit ran under 100 ms in 5 tries")
+        assertEquals(prior, data.hangs.count, "50 ms is no hang")
         // Idle long enough for the one doze: the watchdog sleeps with no timer.
         val deadline = System.nanoTime() + 2_000_000_000
         while (!busy.signal.sleeping && System.nanoTime() < deadline) Thread.sleep(5)
@@ -60,8 +71,8 @@ class HangWatchdogTest {
 
         unit(700)
         val end = System.nanoTime() + 2_000_000_000
-        while ((data.hangs.since(0).singleOrNull()?.ended != true) && System.nanoTime() < end) Thread.sleep(5)
-        val hang = data.hangs.since(0).single()
+        while ((data.hangs.since(0).drop(prior).singleOrNull()?.ended != true) && System.nanoTime() < end) Thread.sleep(5)
+        val hang = data.hangs.since(0).drop(prior).single()
         assertTrue(hang.ended)
         assertTrue(hang.durationMs in 650..1_500, "${hang.durationMs}")
         assertEquals(3, hang.stacks.size, "stacks at 150, 300 and 600 ms")

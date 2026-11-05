@@ -284,7 +284,9 @@ internal class UsbmuxRelay(private val usbmuxd: Usbmuxd, private val deviceId: L
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         closeQuietly(server)
-        open.toList().forEach(::release)
+        // A pump releases its link concurrently: iterate the live set, since toList() can read a
+        // size and then find the element gone (NoSuchElementException).
+        open.forEach(::release)
     }
 
     /** One relayed pair. An end of input is passed on as a half close; a failure closes both at once. */
