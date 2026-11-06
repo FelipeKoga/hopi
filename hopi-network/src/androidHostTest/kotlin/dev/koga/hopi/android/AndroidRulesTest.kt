@@ -214,6 +214,18 @@ class AndroidRulesTest {
     }
 
     @Test
+    fun okHttpRefusesAnEditToAnotherOriginOnAClientWhoseAuthenticatorWouldAddACredential() {
+        // localhost is another origin than the server's 127.0.0.1, and reaches the same server.
+        add(rule("GET */users/*", RuleSource.OKHTTP, edit = EditSpec(request = RequestEdit(host = "localhost", path = "/headers"))))
+        okhttp("path" to "/users/1")
+        assertEquals(listOf("GET /users/1"), server.received.toList(), "an authenticator would answer a 401 with a credential")
+        assertEquals(null, one().ruleApplied)
+        okhttp("path" to "/users/1", "authenticator" to false)
+        assertEquals(listOf("GET /users/1", "GET /headers"), server.received.toList())
+        assertEquals("edit-request", store.awaitTerminal(2).last().ruleApplied)
+    }
+
+    @Test
     fun okHttpEditToAPinnedHostStillFailsThePinAndAMockOnItNeverConnects() {
         TlsServer().use { tls ->
             val wrongPin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="

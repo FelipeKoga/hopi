@@ -113,8 +113,10 @@ public object RuleValidation {
             if (it.isEmpty() || it.length > 253 + 2) return bad("$field.host: invalid host")
             val ipv6 = it.length > 2 && it.startsWith("[") && it.endsWith("]")
             val inner = if (ipv6) it.substring(1, it.length - 1) else it
-            if (inner.isEmpty() || inner.any { c -> !(c.isLetterOrDigit() || c == '-' || c == '.' || c == '_' || ipv6 && c == ':') }) {
-                return bad("$field.host: invalid host")
+            // ASCII only: a Unicode host (`gıthub.com`) is a look-alike another name resolves to.
+            // An internationalized host is written in its punycode form (`xn--…`).
+            if (inner.isEmpty() || inner.any { c -> !(c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '-' || c == '.' || c == '_' || ipv6 && c == ':') }) {
+                return bad("$field.host: invalid host (ASCII letters, digits, '-', '.', '_'; punycode for an internationalized name)")
             }
         }
         edit.port?.let { if (it !in 1..65535) return bad("$field.port: must be 1..65535") }

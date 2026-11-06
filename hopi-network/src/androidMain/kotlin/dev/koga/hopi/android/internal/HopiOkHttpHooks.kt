@@ -3,6 +3,7 @@
 package dev.koga.hopi.android.internal
 
 import dev.koga.hopi.api.HopiInternalApi
+import okhttp3.Authenticator
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 
@@ -32,8 +33,11 @@ public fun interceptors(client: OkHttpClient): List<Interceptor> {
         if (seen.own3 === own) return seen.list3!!
     }
     var hasHopi = false
-    for (i in own.indices) if (own[i] === HopiOkHttpInterceptor) hasHopi = true
-    val list = if (hasHopi) own else WithHopi(own)
+    for (i in own.indices) if (own[i] === HopiOkHttpInterceptor || own[i] === HopiOkHttpInterceptor.WithAuthenticator) hasHopi = true
+    // A client whose authenticator answers a 401 adds a credential below Hopi, to whatever host the
+    // request went: its rules refuse an edit to another origin (OkHttpRules).
+    val hopi = if (client.authenticator === Authenticator.NONE) HopiOkHttpInterceptor else HopiOkHttpInterceptor.WithAuthenticator
+    val list = if (hasHopi) own else WithHopi(own, hopi)
     // Newest first; the oldest of four is dropped. A lost race between two misses drops a slot, never a pair.
     lastSeen = if (seen == null) {
         LastSeen(own, list, null, null, null, null, null, null)
@@ -66,8 +70,8 @@ internal const val CACHED_CLIENTS = 4
 private var lastSeen: LastSeen? = null
 
 /** The client's immutable list plus Hopi's interceptor, not copied (RealCall copies it itself). */
-private class WithHopi(private val own: List<Interceptor>) : AbstractList<Interceptor>(), RandomAccess {
+private class WithHopi(private val own: List<Interceptor>, private val hopi: Interceptor) : AbstractList<Interceptor>(), RandomAccess {
     override val size: Int get() = own.size + 1
 
-    override fun get(index: Int): Interceptor = if (index == own.size) HopiOkHttpInterceptor else own[index]
+    override fun get(index: Int): Interceptor = if (index == own.size) hopi else own[index]
 }

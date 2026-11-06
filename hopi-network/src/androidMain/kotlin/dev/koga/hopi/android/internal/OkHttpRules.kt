@@ -42,8 +42,15 @@ internal class RuleRecordMark(val ruleId: Long?, val applied: String?, val mocke
  * when the rule state is not EMPTY.
  */
 internal object OkHttpRules {
-    fun intercept(chain: Interceptor.Chain, request: Request, state: RuleState): Response {
-        val rule = state.firstMatch(RuleSource.OKHTTP, OkHttpRuleRequest(request))
+    /**
+     * [authenticated]: the client has an `Authenticator`, which answers a 401 by adding a credential
+     * to the request below Hopi, past the edit's removal: an edit to another origin is refused there.
+     */
+    fun intercept(chain: Interceptor.Chain, request: Request, state: RuleState, authenticated: Boolean): Response {
+        val refused: ((CompiledRule) -> Boolean)? = if (!authenticated) null else { rule ->
+            rule.requestEdit?.let { RequestEdits.changesOrigin(request.url.toString(), it) } == true
+        }
+        val rule = state.firstMatch(RuleSource.OKHTTP, OkHttpRuleRequest(request), refused)
         val target = AndroidCapture.target()
         val call = chain.call()
         if (rule == null) return HopiOkHttpInterceptor.proceedRecorded(chain, request, OkHttpRecord(target, request, call))

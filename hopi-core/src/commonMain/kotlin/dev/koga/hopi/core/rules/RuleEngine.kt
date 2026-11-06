@@ -26,13 +26,18 @@ public class RuleState internal constructor(
     /**
      * One rule per request: the first rule of [source] that matches [request] and whose claim
      * succeeds (an exhausted rule does not match and the scan goes on); null when none applies.
+     * A matching rule [refused] says the source cannot apply (an edit to another origin on a
+     * client that would add the app's credentials back) ends the scan: no rule, nothing claimed.
      */
-    public fun firstMatch(source: RuleSource, request: RuleRequest): CompiledRule? {
+    public fun firstMatch(source: RuleSource, request: RuleRequest, refused: ((CompiledRule) -> Boolean)? = null): CompiledRule? {
         val rules = bySource[source.ordinal]
         if (rules.isEmpty()) return null
         val methodIndex = CompiledRule.methodIndex(request.method)
         for (rule in rules) {
-            if (rule.matches(request, methodIndex) && rule.claim()) return rule
+            if (!rule.matches(request, methodIndex)) continue
+            // A rule the source cannot apply safely: the request goes unruled, the rule unclaimed.
+            if (refused != null && refused(rule)) return null
+            if (rule.claim()) return rule
         }
         return null
     }

@@ -42,8 +42,7 @@ public object RequestEdits {
             val port = edit.port?.let { if (it == parts.defaultPort && parts.port == null) null else it } ?: parts.port
             parts.copy(host = host, port = port, path = edit.path ?: parts.path, query = editQuery(parts.query, edit)).toString()
         }
-        val originChanged = (edit.host != null && !edit.host.removePrefix("[").removeSuffix("]").equals(parts.host, ignoreCase = true)) ||
-            (edit.port != null && edit.port != parts.effectivePort)
+        val originChanged = changesOrigin(parts, edit)
         return EditedRequest(
             method = edit.method ?: method,
             url = editedUrl,
@@ -51,6 +50,32 @@ public object RequestEdits {
             body = edit.body,
             originChanged = originChanged,
         )
+    }
+
+    /**
+     * Whether [edit] sends a request for [url] to another origin (host or port). Hosts compare
+     * ignoring ASCII case only: a Unicode case mapping (`ı` and `i`) never makes two hosts the same,
+     * so a look-alike host is always another origin. True for a URL that is not absolute `http(s)`.
+     */
+    public fun changesOrigin(url: String, edit: RequestEdit): Boolean {
+        if (edit.host == null && edit.port == null) return false
+        return changesOrigin(UrlParts.parse(url) ?: return true, edit)
+    }
+
+    private fun changesOrigin(parts: UrlParts, edit: RequestEdit): Boolean =
+        (edit.host != null && !asciiEqualsIgnoreCase(edit.host.removePrefix("[").removeSuffix("]"), parts.host)) ||
+            (edit.port != null && edit.port != parts.effectivePort)
+
+    private fun asciiEqualsIgnoreCase(a: String, b: String): Boolean {
+        if (a.length != b.length) return false
+        for (i in a.indices) {
+            val x = a[i]
+            val y = b[i]
+            if (x == y) continue
+            if (x.code >= 0x80 || y.code >= 0x80) return false
+            if ((if (x in 'A'..'Z') x + 32 else x) != (if (y in 'A'..'Z') y + 32 else y)) return false
+        }
+        return true
     }
 
     /**

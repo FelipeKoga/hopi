@@ -17,6 +17,7 @@ import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleSpec
 import dev.koga.hopi.core.rules.RuleState
 import dev.koga.hopi.ktor.HopiLogSink
+import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.HttpClient
 import io.ktor.client.call.HttpClientCall
 import io.ktor.client.engine.mock.MockEngine
@@ -367,6 +368,24 @@ class RulesTest {
             assertNull(sent.headers[HttpHeaders.Authorization])
             assertNull(sent.headers[HttpHeaders.Cookie])
             assertEquals("1", sent.headers["X-Keep"])
+        }
+    }
+
+    @Test
+    fun anOriginChangeIsRefusedOnAClientWithTheAuthPlugin() = runBlocking<Unit> {
+        TestStore().use { t ->
+            add(rule("GET */users/*", edit = EditSpec(request = RequestEdit(host = "staging.example.com"))))
+            val seen = Collections.synchronizedList(mutableListOf<HttpRequestData>())
+            val client = mockClient(t.store) { request ->
+                seen += request
+                respond("ok")
+            }.config {
+                // Ktor's Auth plugin answers a 401 with a fresh token to whatever host the request went.
+                install(createClientPlugin("Auth") {})
+            }
+            client.get("https://api.example.com/users/1")
+            assertEquals("api.example.com", seen.single().url.host)
+            assertNull(t.awaitTerminal().single().ruleApplied)
         }
     }
 

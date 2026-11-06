@@ -256,7 +256,14 @@ at the real `resume`, so there the delay adds to them instead of racing them (st
   added `Cookie` never travels next to the app's own. On URLSession, an origin-changing edit is not
   applied to a request whose session configuration adds one of these headers
   (`HTTPAdditionalHeaders`) that the edit does not set or add itself: URLSession merges those below
-  Hopi, so they cannot be removed, and the request goes out unedited and unclaimed.
+  Hopi, so they cannot be removed, and the request goes out unedited and unclaimed. Likewise on
+  OkHttp a client with an `Authenticator` (which answers a 401 by adding a credential below Hopi,
+  to whatever host the request went) and on the Ktor plugin a client with Ktor's `Auth` plugin
+  (which resends with a fresh token) refuse an origin-changing edit: unedited and unclaimed.
+  Known gaps: OkHttp network interceptors and `HttpURLConnection`'s `java.net.Authenticator` may
+  add a credential below Hopi too, unseen. Hosts compare ignoring ASCII case only, and an edit's
+  `host` must be ASCII (an internationalized name in its punycode form): a look-alike such as
+  `gıthub.com`, which a Unicode case mapping would call `github.com`, is refused.
 - Response: `status`, `setHeaders` / `addHeaders` / `removeHeaders`, `body`. `Content-Length` is
   recomputed when the body is replaced, and a replaced body also removes `Content-Encoding`: where
   the recorder sees the body still encoded (an app that set its own `Accept-Encoding` on OkHttp, a

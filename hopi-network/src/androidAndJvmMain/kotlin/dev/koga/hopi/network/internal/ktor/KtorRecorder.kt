@@ -7,7 +7,9 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.model.TransactionSource
 import dev.koga.hopi.core.start.StartConfig
 import dev.koga.hopi.core.store.HopiStore
+import dev.koga.hopi.core.rules.CompiledRule
 import dev.koga.hopi.core.rules.FailKind
+import dev.koga.hopi.core.rules.RequestEdits
 import dev.koga.hopi.core.rules.RuleEngine
 import dev.koga.hopi.core.rules.RuleSource
 import dev.koga.hopi.core.rules.RuleState
@@ -28,6 +30,8 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.contentLength
+import io.ktor.util.AttributeKey
+import io.ktor.util.Attributes
 import io.ktor.util.date.getTimeMillis
 import io.ktor.util.pipeline.PipelineContext
 import io.ktor.util.pipeline.PipelinePhase
@@ -165,7 +169,12 @@ private class Recorder(
     @OptIn(InternalAPI::class)
     private suspend fun sendRuled(context: MonitoringHook.Context, request: HttpRequestBuilder, content: OutgoingContent, covered: Boolean, state: RuleState) {
         val started = TimeSource.Monotonic.markNow()
-        val rule = state.firstMatch(RuleSource.KTOR, KtorRuleRequest(request, content))
+        // Ktor's Auth plugin answers a 401 by sending the request again with a fresh token, to
+        // whatever host it went: an edit to another origin is refused on such a client.
+        val refused: ((CompiledRule) -> Boolean)? = if (!client.hasAuthPlugin()) null else { rule ->
+            rule.requestEdit?.let { RequestEdits.changesOrigin(request.url.buildString(), it) } == true
+        }
+        val rule = state.firstMatch(RuleSource.KTOR, KtorRuleRequest(request, content), refused)
         val sent = rule?.requestEdit?.let { applyRequestEdit(request, content, it, store.redactor) } ?: content
         val capture = captureRequest(sent, maxBodyBytes)
         val pending = HttpTransaction.pending(
@@ -411,3 +420,13 @@ internal fun channelFailureOrigin(cause: Throwable): Throwable {
         }
     }
 }
+
+/**
+ * Ktor's registry of a client's installed plugins (`PLUGIN_INSTALLED_LIST`, internal to Ktor):
+ * an attribute key equals another of the same name and type.
+ */
+private val InstalledPlugins = AttributeKey<Attributes>("ApplicationPluginRegistry")
+
+/** Whether Ktor's `Auth` plugin (ktor-client-auth, which Hopi does not link) is installed on this client. */
+private fun HttpClient.hasAuthPlugin(): Boolean =
+    attributes.getOrNull(InstalledPlugins)?.allKeys?.any { it.name == "Auth" } == true

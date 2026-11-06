@@ -6,6 +6,7 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.redact.Redactor
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -203,6 +204,19 @@ class RuleSpecTest {
         assertTrue(patch.clearTimes)
         assertEquals(false, patch.enabled)
         assertIs<RuleParse.Failed>(RuleJson.parsePatch(mapOf("times" to 0L)))
+    }
+
+    @Test
+    fun aLookAlikeHostIsAnotherOriginAndARuleCannotNameIt() {
+        // `ı` (U+0131) upper-cases to `I`: a Unicode case-insensitive compare would call these the same host.
+        assertTrue(RequestEdits.changesOrigin("https://api.github.com/x", RequestEdit(host = "api.g\u0131thub.com")))
+        assertTrue(RequestEdits.changesOrigin("https://api.g\u0131thub.com/x", RequestEdit(host = "api.github.com")))
+        assertFalse(RequestEdits.changesOrigin("https://API.Example.com/x", RequestEdit(host = "api.example.COM")))
+        assertFalse(RequestEdits.changesOrigin("https://api.example.com/x", RequestEdit(path = "/y")))
+        val headers = listOf("Authorization" to "Bearer t")
+        assertEquals(emptyList(), assertNotNull(RequestEdits.apply("GET", "https://api.github.com/x", headers, RequestEdit(host = "api.g\u0131thub.com"), Redactor.Default)).headers)
+        val error = RuleValidation.validate(RuleSpec(MatchShorthand.parse("GET */x", RuleSource.entries.toSet()), edit = EditSpec(request = RequestEdit(host = "api.g\u0131thub.com"))))
+        assertTrue(error?.message.orEmpty().contains("invalid host"), error.toString())
     }
 
     @Test

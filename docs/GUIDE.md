@@ -726,7 +726,9 @@ nothing, and URLSession capture rules Ktor's Darwin engine like any session:
 A rule never weakens the app's security. A mock or fail contacts nothing; an edited request goes
 through the app's own client or session, with its TLS, certificate pins, `HostnameVerifier`, proxy
 and challenge delegate. The scheme cannot change, an edit to another host or port drops
-`Authorization`, `Cookie` and the redacted headers unless it sets them itself, a mock may not set a
+`Authorization`, `Cookie` and the redacted headers unless it sets them itself (and is not applied on
+a client that would add a credential back: an OkHttp `Authenticator`, Ktor's `Auth`, a URLSession
+configuration's headers), its `host` must be ASCII (punycode for an internationalized name), a mock may not set a
 cookie, and no mocked or edited response enters an HTTP cache: every mock and response edit on
 OkHttp and `HttpURLConnection`, and every mock on URLSession, reaches the app with
 `Cache-Control: no-store` in place of any `Cache-Control` the rule or the server gave, since a

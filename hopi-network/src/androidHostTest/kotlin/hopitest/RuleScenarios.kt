@@ -92,10 +92,12 @@ internal object RuleScenarios {
                 networkCalls.incrementAndGet()
                 chain.proceed(chain.request())
             }
-            .authenticator(Authenticator { _, _ ->
+        if (args["authenticator"] != false) {
+            builder.authenticator(Authenticator { _, _ ->
                 authenticatorCalls.incrementAndGet()
                 null
             })
+        }
         (args["readTimeoutMs"] as? Long)?.let { builder.readTimeout(it, TimeUnit.MILLISECONDS) }
         (args["callTimeoutMs"] as? Long)?.let { builder.callTimeout(it, TimeUnit.MILLISECONDS) }
         (args["cache"] as? java.io.File)?.let { builder.cache(okhttp3.Cache(it, 1L shl 20)) }

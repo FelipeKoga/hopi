@@ -39,7 +39,14 @@ import okio.buffer
  */
 @HopiInternalApi
 public object HopiOkHttpInterceptor : Interceptor {
-    override fun intercept(chain: Interceptor.Chain): Response {
+    override fun intercept(chain: Interceptor.Chain): Response = intercept(chain, authenticated = false)
+
+    /** Hopi's interceptor on a client with an `Authenticator`, which a 401 makes add a credential. */
+    internal object WithAuthenticator : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response = intercept(chain, authenticated = true)
+    }
+
+    private fun intercept(chain: Interceptor.Chain, authenticated: Boolean): Response {
         val request = chain.request()
         if (!AndroidCapture.started) return chain.proceed(request)
         // Only the Ktor plugin adds the marker, and it says so first: no header scan before that.
@@ -49,7 +56,7 @@ public object HopiOkHttpInterceptor : Interceptor {
         // One read and a reference comparison: with no rule the call takes exactly the path it took
         // before rules existed.
         val state = if (AndroidCapture.rules) RuleEngine.state else RuleState.EMPTY
-        if (state !== RuleState.EMPTY) return OkHttpRules.intercept(chain, request, state)
+        if (state !== RuleState.EMPTY) return OkHttpRules.intercept(chain, request, state, authenticated)
         return proceedRecorded(chain, request, OkHttpRecord(AndroidCapture.target(), request, chain.call()))
     }
 
