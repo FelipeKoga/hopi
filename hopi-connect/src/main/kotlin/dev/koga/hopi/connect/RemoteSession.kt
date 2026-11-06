@@ -571,7 +571,10 @@ public class RemoteSession(
                 link
             } ?: return null
             val reply = try {
-                current.request.send(BridgeClient.request("get").field("id", id).endObject().toString())
+                // Full bodies: once this detail is here, the app cuts its copy back to its cap.
+                val get = BridgeClient.request("get").field("id", id)
+                if (current.full) get.field("trim", true)
+                current.request.send(get.endObject().toString())
                 current.request.reply()
             } catch (e: CliException) {
                 // NOT_FOUND: cleared or evicted on the app's side; the connection is still fine.

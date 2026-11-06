@@ -280,6 +280,8 @@ public class BridgeSession(
                         // Encoded by the writer as it sends: a queued reply holds the snapshot, not
                         // a string several times its body.
                         enqueue(Outgoing.Detail(transaction))
+                        // The reply holds this snapshot, so the store's copy can go back to the cap.
+                        if (command.trim) store.trimBodies(command.id, FullBodies.trimTo)
                     }
                 }
                 is BridgeCommand.Tail -> {

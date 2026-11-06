@@ -48,7 +48,9 @@ public object CaptureInstallation {
             if (summaryLog) startProcessSummarySink(store)
             if (agentBridge) AgentBridgeHook.requestStart(store)
         }
-        return Installed(store, minOf(maxBodyBytes, store.maxTotalBytes / 2).toInt())
+        val cap = minOf(maxBodyBytes, store.baseMaxTotalBytes / 2).toInt()
+        FullBodies.installed(cap)
+        return Installed(store, cap)
     }
 
     /** Why these caps would make [install] throw, or null when they are valid. */

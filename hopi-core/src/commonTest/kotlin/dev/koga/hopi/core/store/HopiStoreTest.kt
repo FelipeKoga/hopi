@@ -622,6 +622,22 @@ class HopiStoreTest {
         runCurrent()
         assertEquals(50, seen.size)
     }
+
+    @Test
+    fun trimBodiesCutsAFetchedBodyBackToTheCap() = runTest {
+        val store = store()
+        store.submit(complete(1, responseBody = bytesBody(1000), requestBody = bytesBody(50)))
+        runCurrent()
+        assertTrue(store.trimBodies(1, 100))
+        store.trimBodies(99, 100)
+        runCurrent()
+        val cut = assertNotNull(store.get(1))
+        assertEquals(100, cut.responseBody!!.bytes.size)
+        assertTrue(cut.responseBody!!.truncated)
+        assertEquals(1000L, cut.responseBody!!.totalBytes)
+        assertEquals(50, cut.requestBody!!.bytes.size, "a body under the cap stays as it was")
+        assertFalse(cut.requestBody!!.truncated)
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

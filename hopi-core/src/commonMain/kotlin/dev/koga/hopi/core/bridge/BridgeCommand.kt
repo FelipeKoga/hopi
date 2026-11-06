@@ -19,7 +19,8 @@ public sealed interface BridgeCommand {
 
     public data class List(public val since: Long, public val limit: Int) : BridgeCommand
 
-    public data class Get(public val id: Long) : BridgeCommand
+    /** [trim]: the client keeps the body (full bodies), so the app cuts its own copy back afterwards. */
+    public data class Get(public val id: Long, public val trim: Boolean = false) : BridgeCommand
 
     /** [rules]: also send `{"type":"rules","rev":N}` whenever the rule set changes. */
     public data class Tail(public val since: Long, public val rules: Boolean = false) : BridgeCommand
@@ -143,7 +144,7 @@ public sealed interface BridgeCommand {
                         ?.takeIf { it in 1..MAX_LIMIT } ?: return invalid("limit")
                     List(since, limit.toInt())
                 }
-                "get" -> Get(requiredId(fields) ?: return idError(fields))
+                "get" -> Get(requiredId(fields) ?: return idError(fields), trim = flag(fields, "trim") ?: return invalid("trim"))
                 "tail" -> Tail(
                     nonNegative(fields, "since", 0) ?: return invalid("since"),
                     rules = flag(fields, "rules") ?: return invalid("rules"),

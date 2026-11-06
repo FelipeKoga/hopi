@@ -332,6 +332,13 @@ public class HopiStore(
      */
     public fun withdraw(last: HttpTransaction): Boolean = enqueue(Withdrawal(last), terminal = true)
 
+    /**
+     * Cuts [id]'s bodies to their first [maxBytes] (marked truncated, their total kept): a host
+     * viewer holding full bodies has fetched it whole, so the app keeps no more than without it.
+     * Queued after the record's end, so it applies to the end; no event, nothing changes on screen.
+     */
+    public fun trimBodies(id: Long, maxBytes: Int): Boolean = enqueue(Trim(id, maxBytes), terminal = true)
+
     private fun enqueue(write: Any, terminal: Boolean): Boolean {
         if (!terminal) {
             val sent = writes.trySend(write).isSuccess
@@ -474,6 +481,8 @@ public class HopiStore(
     private class Deferred(val build: () -> HttpTransaction)
 
     private class Withdrawal(val last: HttpTransaction)
+
+    private class Trim(val id: Long, val maxBytes: Int)
 
     /** A terminal snapshot whose request body is the one the store held for its start when it was queued ([onStoredStart]). */
     private class EndOnStoredStart(val end: HttpTransaction)
@@ -636,6 +645,7 @@ public class HopiStore(
     private fun apply(queued: Any, terminalLane: Boolean): Boolean {
         val changed = applyClear()
         if (queued is Withdrawal) return withdrawNow(queued.last) || changed
+        if (queued is Trim) return trimNow(queued) || changed
         val write = try {
             // What the producer counted is released with this pass, whatever becomes of the write.
             if (terminalLane) passBytes += heldBytes(queued)
@@ -700,6 +710,24 @@ public class HopiStore(
         if (start.state.isTerminal || kept == null || kept.skippedReason != null || kept.reportedBytes != shed.totalBytes) return write
         return write.copy(requestBody = kept)
     }
+
+    /** Applies a [trimBodies]. Returns true when [buffer] changed. */
+    private fun trimNow(trim: Trim): Boolean {
+        val existing = buffer.binarySearchById(trim.id)
+        if (existing < 0) return false
+        val old = buffer[existing]
+        val request = old.requestBody?.cutTo(trim.maxBytes)
+        val response = old.responseBody?.cutTo(trim.maxBytes)
+        if (request === old.requestBody && response === old.responseBody) return false
+        val cut = old.copy(requestBody = request, responseBody = response)
+        bufferBytes += cut.capturedBytes - old.capturedBytes
+        buffer[existing] = cut
+        return true
+    }
+
+    private fun CapturedBody.cutTo(maxBytes: Int): CapturedBody =
+        if (skippedReason != null || bytes.size <= maxBytes) this
+        else CapturedBody(bytes.copyOf(maxBytes), totalBytes ?: bytes.size.toLong(), truncated = true, contentType, skippedReason = null)
 
     /**
      * Applies a [withdraw]: the entry goes, and so do this pass's events about it, which nobody has

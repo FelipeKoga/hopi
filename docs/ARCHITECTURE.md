@@ -35,7 +35,8 @@ This document is the contract every module is built against. Change it before ch
    *full bodies* (`capture.set`, below), the caps are higher, still bounded: a body up to an
    eighth of the heap (8 to 64 MiB; on iOS a sixteenth of the device's memory, read as a heap),
    the store raised to fit two of them, and the viewer fetches each body as its request ends, so
-   the bytes live on the host, as with a proxy. The last viewer to leave puts the caps back.
+   the bytes live on the host, as with a proxy: its `get` carries `"trim":true`, after which the
+   app cuts its own copy back to the installation's cap. The last viewer to leave puts the caps back.
 4. **No network exposure.** Nothing listens on a routable interface. The agent channel uses
    device-local transports only (details below) and authenticates every connection.
 5. **Secrets are redacted by default** in every outward channel (UI copy, cURL, logs, agent

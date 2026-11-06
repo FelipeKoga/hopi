@@ -18,6 +18,22 @@ public object FullBodies {
     private val current = AtomicInt(0)
     private val listeners = AtomicReference<List<(Int) -> Unit>>(emptyList())
 
+    /**
+     * What a body is cut back to once a viewer fetched it whole (`get` with `trim`): the largest
+     * cap an installation chose, the default one before any did.
+     */
+    public val trimTo: Int get() = trimCap.load()
+
+    private val trimCap = AtomicInt(256 * 1024)
+
+    /** Records an installation's cap for [trimTo]. */
+    public fun installed(maxBodyBytes: Int) {
+        while (true) {
+            val old = trimCap.load()
+            if (maxBodyBytes <= old || trimCap.compareAndSet(old, maxBodyBytes)) return
+        }
+    }
+
     /** The cap a capture uses now, 0 while no viewer holds the mode. */
     public val cap: Int get() = current.load()
 

@@ -477,6 +477,15 @@ class RemoteSessionTest {
         // Nothing selected: every body arrives anyway.
         session.awaitLocal { list -> list.size == 3 && list.all { it.responseBody?.isNotFetched == false } }
         assertTrue(FullBodies.cap > 0, "the app keeps full bodies while the viewer is attached")
+        // A body over the app's cap arrives whole here, and the app cuts its own copy back.
+        val big = "x".repeat(400 * 1024)
+        val id = app.add { completeTx(it, url = "https://api.example.com/big", responseBody = textBody(big, contentType = "text/plain")) }.id
+        val local = session.awaitLocal { list -> list.any { it.id == id && it.responseBody?.isNotFetched == false } }
+        assertEquals(big.length, local.single { it.id == id }.responseBody!!.bytes.size)
+        val deadlineCut = System.nanoTime() + 5_000_000_000
+        while ((app.get(id)?.responseBody?.bytes?.size ?: 0) > FullBodies.trimTo && System.nanoTime() < deadlineCut) Thread.sleep(10)
+        assertEquals(FullBodies.trimTo, app.get(id)!!.responseBody!!.bytes.size)
+        assertTrue(app.get(id)!!.responseBody!!.truncated)
         session.close()
         val deadline = System.nanoTime() + 5_000_000_000
         while (FullBodies.cap != 0 && System.nanoTime() < deadline) Thread.sleep(10)
