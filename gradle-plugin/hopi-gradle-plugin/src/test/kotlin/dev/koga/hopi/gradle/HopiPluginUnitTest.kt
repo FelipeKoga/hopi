@@ -294,8 +294,7 @@ class HopiPluginUnitTest {
     fun theReleaseGuardsFailureSaysWhatToRemove() {
         val text = HopiReleaseGuard.message("freeQa", "qa", listOf("project ':hopi-network'", "project ':hopi-core' (via project ':hopi-network')"), listOf("project ':hopi-network'"))
         assertTrue(text.startsWith("io.github.felipekoga.hopi: variant freeQa is not debuggable"), text)
-        assertTrue("remove project ':hopi-network' from freeQa (" in text, text)
-        assertTrue(text.endsWith("not as implementation or qaImplementation)."), text)
+        assertTrue("declare project ':hopi-network' as debugImplementation, not as implementation or qaImplementation" in text, text)
     }
 
     @Test

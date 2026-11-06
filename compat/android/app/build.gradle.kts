@@ -56,12 +56,14 @@ hopi {
         enabled.set(true)
     }
     perf {
-        enabled.set(true)
         autoStart(HopiMonitor.Frames)
     }
 }
 
 dependencies {
+    // The runtimes, debug only: the network capture and the performance monitors.
+    debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")
+    debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")
     implementation("io.github.felipekoga.hopi:hopi-api:0.1.0")
     implementation("io.github.felipekoga.hopi:hopi-ktor:0.1.0")
     implementation("io.ktor:ktor-client-okhttp:3.3.3")

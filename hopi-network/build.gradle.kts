@@ -120,6 +120,10 @@ kotlin {
             compileOnly(project(":hopi-ktor"))
         }
         androidMain.dependencies {
+            // An app names this runtime itself (debugImplementation): core comes with it, on the
+            // compile classpath too, where the plugin's generated configuration (which extends
+            // core's HopiConfigValues and starts core's tools) needs it.
+            api(project(":hopi-core"))
             implementation(libs.kotlinx.coroutines.core)
             // The app brings its own OkHttp (4.x or 5.x); the lowest supported API is compiled against.
             compileOnly(libs.okhttp)

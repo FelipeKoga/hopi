@@ -79,6 +79,11 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
+        androidMain.dependencies {
+            // An app names this runtime itself (debugImplementation): core comes with it, on the
+            // compile classpath the plugin's generated configuration needs.
+            api(project(":hopi-core"))
+        }
         getByName("androidHostTest").dependencies {
             implementation(libs.kotlin.test)
         }

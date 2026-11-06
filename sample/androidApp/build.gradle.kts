@@ -53,11 +53,13 @@ kotlin {
     compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
-// `-Psample.hopiCapture=false` builds the debug variant as release is built (`hopi { enabled = false }`:
-// no runtime, so the thin Ktor plugin installs nothing, no instrumentation), the control arm of the
-// capture A/B (the benchmark scripts' `nohopi` arm).
+// `-Psample.hopiCapture=false` builds the debug variant as release is built (no runtime declared,
+// so the thin Ktor plugin installs nothing, no instrumentation), the control arm of the capture A/B
+// (the benchmark scripts' `nohopi` arm).
+val hopiCapture: Boolean = providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true).get()
+
 hopi {
-    enabled.set(providers.gradleProperty("sample.hopiCapture").map { it.toBoolean() }.orElse(true))
+    enabled.set(hopiCapture)
     // The CLI and the desktop viewer reach the app through its bridge.
     agentBridge.set(true)
     // Capture's caps, read at build time and preset for the store at start: the giant-body
@@ -66,20 +68,18 @@ hopi {
     // `-Psample.maxTotalBytes`). The defaults are the plugin's, 256 KiB and 16 MiB.
     maxBodyBytes.set(providers.gradleProperty("sample.maxBodyBytes").map { it.toLong() }.orElse(256L * 1024))
     maxTotalBytes.set(providers.gradleProperty("sample.maxTotalBytes").map { it.toLong() }.orElse(16L * 1024 * 1024))
-    // The performance monitors (docs/design/perf-monitors.md): registered for `hopi perf start` and
-    // for the perf lab's and bench's HopiPerf calls, none started, so the app pays nothing until an
-    // agent or a developer starts one. Without it HopiPerf would do nothing in any variant.
-    perf { enabled.set(true) }
 }
 
 dependencies {
-    // Hopi's Ktor plugin comes with the shared module, the thin one in every build: it records only
-    // through the recorder a debug build's network runtime registered. The io.github.felipekoga.hopi plugin adds,
-    // in debug only, the network runtime (hopi-network, whose network tool registers that recorder),
-    // core, whose start registers the runtime behind HopiRules, and, for `perf { enabled }`,
-    // hopi-perf, whose tool registers the runtime behind HopiPerf: release gets no runtime (its
-    // release guard fails a build that resolves one), only hopi-api and the thin hopi-ktor, which
-    // the shared module names in every build.
+    // Hopi's runtimes, debug only, as an app declares them: the network capture (whose tool also
+    // registers the Ktor plugin's recorder) and the performance monitors (registered for `hopi perf
+    // start`, the Perf panel and the perf lab's HopiPerf calls, none started until asked). Release
+    // gets no runtime (its release guard fails a build that resolves one), only hopi-api and the
+    // thin hopi-ktor, which the shared module names in every build.
+    if (hopiCapture) {
+        debugImplementation(project(":hopi-network"))
+        debugImplementation(project(":hopi-perf"))
+    }
     implementation(project(":sample:shared"))
     // The third-party stand-in: its own OkHttp and HttpURLConnection, no Hopi.
     implementation(project(":sample:fakesdk"))

@@ -51,9 +51,9 @@ public abstract class HopiReleaseGuard : DefaultTask() {
     internal companion object {
         fun message(variant: String, buildType: String, runtimes: List<String>, remove: List<String>): String =
             "io.github.felipekoga.hopi: variant $variant is not debuggable, but its runtime classpath holds Hopi's runtime: " +
-                "${runtimes.joinToString()}. Hopi's runtimes belong in debuggable variants only, where this plugin adds them: " +
-                "remove ${remove.joinToString()} from $variant (in this module or the one that brings it: name it for debuggable " +
-                "build types only, as debugImplementation, not as implementation or ${buildType}Implementation)."
+                "${runtimes.joinToString()}. Hopi's runtimes belong in debuggable variants only: declare " +
+                "${remove.joinToString()} as debugImplementation, not as implementation or ${buildType}Implementation " +
+                "(in this module or the one that brings it)."
     }
 }
 
