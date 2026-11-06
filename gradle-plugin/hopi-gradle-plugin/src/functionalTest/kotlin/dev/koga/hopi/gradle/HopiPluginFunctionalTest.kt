@@ -494,7 +494,7 @@ class HopiPluginFunctionalTest {
         assertEquals("true", debugReport["iosMain generated"], "HopiSetup's directory is an iosMain source directory")
         val debugSetup = setup.readText()
         assertTrue("        dev.koga.hopi.start.Hopi.start {\n" in debugSetup, debugSetup)
-        for (line in listOf("agentBridge = true", "maxBodyBytes = 1024L", "redactHeaders(\"X-Api-Key\")", "perf = true", "rules = true")) {
+        for (line in listOf("agentBridge = true", "maxBodyBytes = 1024L", "redactHeaders(\"X-Api-Key\")", "network = true", "perf = true", "rules = true")) {
             assertTrue("            $line\n" in debugSetup, "$line in $debugSetup")
         }
 
@@ -975,7 +975,13 @@ class HopiPluginFunctionalTest {
                 agentBridge.set(true)
                 maxBodyBytes.set(1024L)
                 redactHeaders("X-Api-Key")
-                perf { enabled.set(true) }
+            }
+
+            // The runtimes, declared as an Android app declares them; the plugin applies them to
+            // Debug frameworks only (a list it reads, never resolved here).
+            dependencies {
+                debugImplementation("io.github.felipekoga.hopi:hopi-network:0.0.0")
+                debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.0.0")
             }
 
             // A release check's positive control: the guard of its link passes while it is requested by name.

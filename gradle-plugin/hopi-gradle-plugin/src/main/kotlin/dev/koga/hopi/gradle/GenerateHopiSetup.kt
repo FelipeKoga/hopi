@@ -33,7 +33,10 @@ public abstract class GenerateHopiSetup : DefaultTask() {
     @get:Input public abstract val redactedQueryParameters: ListProperty<String>
     @get:Input public abstract val redactionDisabled: Property<Boolean>
 
-    /** `perf { enabled }`: `HopiStartConfig.perf`. */
+    /** `hopi-network` declared as debugImplementation: `HopiStartConfig.network`. */
+    @get:Input public abstract val network: Property<Boolean>
+
+    /** `hopi-perf` declared as debugImplementation: `HopiStartConfig.perf`. */
     @get:Input public abstract val perf: Property<Boolean>
 
     /** `perf { remoteControl }`: `HopiStartConfig.perfRemoteControl`. */
@@ -82,6 +85,7 @@ public abstract class GenerateHopiSetup : DefaultTask() {
         appendLine("            summaryLog = ${summaryLog.get()}")
         appendLine("            agentBridge = ${agentBridge.get()}")
         appendLine("            rules = ${rules.get()}")
+        appendLine("            network = ${network.get()}")
         appendLine("            perf = ${perf.get()}")
         appendLine("            perfRemoteControl = ${perfRemoteControl.get()}")
         redactedHeaders.get().takeIf { it.isNotEmpty() }?.let { appendLine("            redactHeaders(${kotlinStrings(it)})") }

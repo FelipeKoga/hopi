@@ -47,6 +47,12 @@ public class HopiStartConfig internal constructor() {
     public var rules: Boolean = true
 
     /**
+     * Starts the network capture (on iOS URLSession's, on the JVM the Ktor plugin's recorder). The
+     * Gradle plugin's `HopiSetup` sets it from the module's `debugImplementation` of `hopi-network`.
+     */
+    public var network: Boolean = true
+
+    /**
      * Registers the performance monitors for remote control (`hopi perf start`, the desktop
      * viewer's Perf panel) and for `HopiPerf` from code, and starts none: a monitor costs nothing
      * until it starts. On iOS a `-hopiPerf frames,hangs` launch argument starts those at launch; on

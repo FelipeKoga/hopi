@@ -12,6 +12,7 @@ public final class dev/koga/hopi/start/HopiStartConfig {
 	public final fun getMaxBodyBytes ()J
 	public final fun getMaxEntries ()I
 	public final fun getMaxTotalBytes ()J
+	public final fun getNetwork ()Z
 	public final fun getPerf ()Z
 	public final fun getPerfRemoteControl ()Z
 	public final fun getRules ()Z
@@ -23,6 +24,7 @@ public final class dev/koga/hopi/start/HopiStartConfig {
 	public final fun setMaxBodyBytes (J)V
 	public final fun setMaxEntries (I)V
 	public final fun setMaxTotalBytes (J)V
+	public final fun setNetwork (Z)V
 	public final fun setPerf (Z)V
 	public final fun setPerfRemoteControl (Z)V
 	public final fun setRules (Z)V

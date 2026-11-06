@@ -103,11 +103,10 @@ class HopiPluginUnitTest {
     }
 
     @Test
-    fun networkIsOnByDefault() {
+    fun networkSettingsDefaults() {
         val project = ProjectBuilder.builder().build()
         val extension = project.extensions.create("hopi", HopiExtension::class.java)
         extension.applyDefaults()
-        assertEquals(true, extension.network.enabled.get())
         assertEquals(true, extension.network.okhttp.get())
         assertEquals(true, extension.network.urlConnection.get())
         assertEquals(true, extension.network.rules.get(), "rules on unless refused")
@@ -117,11 +116,10 @@ class HopiPluginUnitTest {
     }
 
     @Test
-    fun perfIsOffByDefault() {
+    fun perfSettingsDefaults() {
         val project = ProjectBuilder.builder().build()
         val extension = project.extensions.create("hopi", HopiExtension::class.java)
         extension.applyDefaults()
-        assertEquals(false, extension.perf.enabled.get())
         assertEquals(emptySet(), extension.perf.autoStart.get())
         assertEquals(250L, extension.perf.hangThresholdMs.get())
         assertEquals(false, extension.perf.hangHeartbeat.get())
@@ -185,6 +183,7 @@ class HopiPluginUnitTest {
             task.redactedHeaders.set(listOf("X-Api-Key", "Quote\"d\\\$x"))
             task.redactedQueryParameters.set(listOf("token"))
             task.redactionDisabled.set(true)
+            task.network.set(true)
             task.perf.set(true)
             task.perfRemoteControl.set(false)
         }.get()

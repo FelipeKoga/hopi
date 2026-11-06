@@ -31,14 +31,18 @@ public abstract class HopiExtension {
     /** Set by the plugin in a KMP module: this Gradle invocation is an iOS Debug build (`IosBuild`). */
     internal var iosDebug: Boolean = false
 
+    /** Set by the plugin in a KMP module: whether its `debugImplementation` declares a Hopi runtime. */
+    internal var iosDeclared: Provider<Boolean>? = null
+
     /**
      * Read-only, for a KMP module's own build logic (a debug-only source set, a build label): true
      * when this Gradle invocation gives the module's iOS compilations `hopi-start` and the generated
      * `HopiSetup.start()` starts Hopi, which is a Debug build (`-Phopi.enabled=true`, or without the
-     * property Xcode's Debug configuration) with [enabled]; false in any other build, and in an
-     * Android application module.
+     * property Xcode's Debug configuration) with [enabled] and a runtime declared as
+     * `debugImplementation`; false in any other build, and in an Android application module.
      */
-    public val iosRuntime: Provider<Boolean> get() = enabled.map { it && iosDebug }
+    public val iosRuntime: Provider<Boolean>
+        get() = iosDeclared?.let { declared -> enabled.zip(declared) { on, any -> on && any && iosDebug } } ?: enabled.map { false }
 
     public abstract val maxEntries: Property<Int>
     public abstract val maxTotalBytes: Property<Long>

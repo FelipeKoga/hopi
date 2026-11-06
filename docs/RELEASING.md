@@ -29,8 +29,8 @@ release workflow (`.github/workflows/`) builds, signs and uploads it, and the ow
 
 ## Each release
 
-1. Set `hopi.version` in `gradle.properties` (`0.1.0`, then `0.1.1`, `0.2.0`, …): the plugin adds
-   the runtimes at that version, so every artifact moves together. Commit and push it, with CI
+1. Set `hopi.version` in `gradle.properties` (`0.1.0`, then `0.1.1`, `0.2.0`, …): the plugin holds
+   every Hopi module of a debuggable build type at that version, so every artifact moves together. Commit and push it, with CI
    green.
 2. Tag the commit `v<hopi.version>`: `git tag v0.1.0` (the workflow refuses a tag that is not
    `v` and `hopi.version`).

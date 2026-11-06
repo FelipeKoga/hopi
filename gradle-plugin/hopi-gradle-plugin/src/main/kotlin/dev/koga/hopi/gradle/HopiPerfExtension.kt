@@ -7,16 +7,12 @@ import org.gradle.api.provider.SetProperty
 public enum class HopiMonitor { Frames, Hangs, Cpu, Memory }
 
 /**
- * `hopi { perf { } }`: Hopi's performance monitors in the debuggable variants. Everything is off
- * by default; [enabled] puts `hopi-perf` in debuggable variants only (the others get nothing: the
- * `HopiPerf` an app calls is `hopi-api`'s, which does nothing there) and its tool in the generated
- * tool list, which registers it for remote control (`hopi perf start`) and for `HopiPerf` at start
- * without any code in the app. Without it, `HopiPerf` does nothing in any variant. A monitor that is
- * off costs nothing.
+ * `hopi { perf { } }`: the settings of the performance monitors, which the app gets by declaring
+ * `debugImplementation("io.github.felipekoga.hopi:hopi-perf:<v>")`. Its tool registers them for
+ * remote control (`hopi perf start`) and for `HopiPerf` at start, none started unless [autoStart]
+ * names it. A monitor that is off costs nothing.
  */
 public abstract class HopiPerfExtension {
-    public abstract val enabled: Property<Boolean>
-
     /** Monitors perf's tool starts at start, before `Application.onCreate`; none by default. */
     public abstract val autoStart: SetProperty<HopiMonitor>
 
@@ -38,7 +34,6 @@ public abstract class HopiPerfExtension {
     }
 
     internal fun applyDefaults() {
-        enabled.convention(false)
         autoStart.convention(emptySet())
         hangThresholdMs.convention(250L)
         hangHeartbeat.convention(false)

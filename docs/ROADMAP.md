@@ -184,8 +184,8 @@ so the app pays no extra cost.
   sessions beyond metadata, WebSocket tasks.
 - **Android, OkHttp and `HttpURLConnection` (built).** The `io.github.felipekoga.hopi` Gradle plugin
   (`gradle-plugin/`) and `hopi-network` (since the runtime-split plan's stage 9; the plugin's
-  release guard fails a release variant that resolves a runtime): one plugin line records
-  every OkHttp call and every `HttpURLConnection` of the app and its dependencies, observe only,
+  release guard fails a release variant that resolves a runtime): the plugin and
+  `debugImplementation` of `hopi-network` record every OkHttp call and every `HttpURLConnection` of the app and its dependencies, observe only,
   debuggable variants only (architecture doc, "Android capture"; design and measurements in
   `docs/design/android-capture.md`).
   Ktor's OkHttp and Android engines defer to it, except a request Ktor itself decodes

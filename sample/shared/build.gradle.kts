@@ -25,7 +25,13 @@ hopi {
     agentBridge.set(true)
     maxBodyBytes.set(providers.gradleProperty("sample.maxBodyBytes").map { it.toLong() }.orElse(256L * 1024))
     maxTotalBytes.set(providers.gradleProperty("sample.maxTotalBytes").map { it.toLong() }.orElse(16L * 1024 * 1024))
-    perf { enabled.set(true) }
+}
+
+// The runtimes, Debug frameworks only (the plugin applies them there), declared as the Android app
+// declares them: the URLSession capture and the performance monitors, none started.
+dependencies {
+    debugImplementation(project(":hopi-network"))
+    debugImplementation(project(":hopi-perf"))
 }
 
 /** The plugin's choice for this invocation: a Debug build, whose iOS framework links Hopi's runtimes. */

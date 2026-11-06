@@ -27,7 +27,7 @@ import org.gradle.language.base.plugins.LifecycleBasePlugin
  *   configuration compiles against. A build type that names none gets nothing from the plugin;
  * - each debuggable variant whose runtime configuration declares a runtime gets the `hopi { }`
  *   block generated into it as the start configuration, its tool list naming the network tool
- *   when `hopi-network` is declared (and `network { enabled }`, the default) and perf's when
+ *   when `hopi-network` is declared and perf's when
  *   `hopi-perf` is; declared means in this module's dependencies (a runtime only another module
  *   brings starts no tool and instruments nothing);
  * - with the network tool, each debuggable variant has OkHttp's `RealCall` and every
@@ -94,14 +94,8 @@ internal object HopiAndroid {
             }
             if (!debuggable) guard(project, variant, variantLifecycleApi)
             if (!real) return@onVariants
-            val network = declares(project, variant, NETWORK) && extension.network.enabled.get()
+            val network = declares(project, variant, NETWORK)
             val perf = declares(project, variant, PERF)
-            if (extension.perf.enabled.get() && !perf) {
-                throw GradleException(
-                    "hopi { perf { enabled = true } } in ${project.path}: on Android the monitors come from their runtime, " +
-                        "debug only: add debugImplementation(\"$GROUP:$PERF:$HOPI_VERSION\") and remove `enabled`",
-                )
-            }
             if (!network && !perf) {
                 project.logger.warn(
                     "io.github.felipekoga.hopi: ${project.path} variant ${variant.name} declares no Hopi runtime, so Hopi does nothing " +
@@ -117,7 +111,7 @@ internal object HopiAndroid {
     /** AGP 8.3's `Component.debuggable`: called from AGP 8.3 on only, so older AGPs never link it. */
     private fun debuggable(variant: ApplicationVariant): Boolean = variant.debuggable
 
-    /** The bytecode transform and its excludes: `network { enabled }`, debuggable variants only. */
+    /** The bytecode transform and its excludes: debuggable variants that declare `hopi-network` only. */
     private fun instrument(network: HopiNetworkExtension, variant: ApplicationVariant) {
         variant.instrumentation.transformClassesWith(HopiClassVisitorFactory::class.java, InstrumentationScope.ALL) { parameters ->
             parameters.okhttp.set(network.okhttp)
@@ -128,7 +122,7 @@ internal object HopiAndroid {
 
     /**
      * The generated start configuration, every debuggable variant: its tool list names the network
-     * tool with `network { enabled }` and perf's with `perf { enabled = true }`, and may be empty.
+     * tool when `hopi-network` is declared and perf's when `hopi-perf` is.
      */
     private fun generateConfig(project: Project, extension: HopiExtension, variant: ApplicationVariant, networkPresent: Boolean, perfPresent: Boolean) {
         val network = extension.network

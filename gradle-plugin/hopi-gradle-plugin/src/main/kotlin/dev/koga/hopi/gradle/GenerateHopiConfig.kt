@@ -13,14 +13,14 @@ import org.gradle.api.tasks.TaskAction
  * Writes the `hopi { }` block into the app as `dev.koga.hopi.android.generated.HopiGeneratedConfig`,
  * a Java subclass of hopi-core's `HopiConfigValues` whose constructor passes the global settings,
  * then the tool list, each tool constructed with its own settings: hopi-network's `NetworkTool`
- * with `network { enabled }` (the default) and hopi-perf's `PerfEntry` with
- * `perf { enabled = true }`, possibly neither. The provider reads it once and hands the list to the
+ * when the variant declares `hopi-network` and hopi-perf's `PerfEntry` when it declares
+ * `hopi-perf`. The provider reads it once and hands the list to the
  * start sequence (docs/design/android-capture.md, "Auto-start"). Every debuggable variant gets it
  * (unless `hopi { enabled = false }`), and only they depend on hopi-core and the runtimes.
  */
 @CacheableTask
 public abstract class GenerateHopiConfig : DefaultTask() {
-    /** `network { enabled }`: the tool list names hopi-network's tool, with the three settings below. */
+    /** `hopi-network` declared: the tool list names its tool, with the three settings below. */
     @get:Input public abstract val networkPresent: Property<Boolean>
 
     @get:Input public abstract val okhttp: Property<Boolean>
@@ -37,7 +37,7 @@ public abstract class GenerateHopiConfig : DefaultTask() {
     @get:Input public abstract val redactedQueryParameters: ListProperty<String>
     @get:Input public abstract val redactionDisabled: Property<Boolean>
 
-    /** `perf { enabled = true }`: the tool list names hopi-perf's tool. */
+    /** `hopi-perf` declared: the tool list names its tool. */
     @get:Input public abstract val perfPresent: Property<Boolean>
 
     /** A bit set, one bit per monitor in `HopiMonitor` order, which `PerfEntry` decodes. */

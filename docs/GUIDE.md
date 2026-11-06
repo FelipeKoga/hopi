@@ -70,10 +70,11 @@ Hopi is published to Maven Central, the Gradle plugin included (it is not on the
 Portal), from its first tagged release on ([`docs/RELEASING.md`](RELEASING.md); until that
 release is out, publish it [from source](#from-source)). Every artifact has the group
 `io.github.felipekoga.hopi` and the version of `hopi.version` in this repository's
-`gradle.properties` (`0.1.0`, the version the Gradle plugin adds the runtimes at); use one version
-for every Hopi artifact. In your app's `settings.gradle.kts`, `mavenCentral()` goes in both
-repository lists, the plugins' (for the plugin and its marker) and the dependencies' (for the
-libraries the plugin adds and those you name):
+`gradle.properties` (`0.1.0`, the plugin's version too); use one version for every Hopi artifact
+(on Android the plugin holds every Hopi module of a debuggable build type at its own version). In
+your app's `settings.gradle.kts`, `mavenCentral()` goes in both repository lists, the plugins' (for
+the plugin and its marker) and the dependencies' (for the libraries you name and, on iOS,
+`hopi-start`, which the plugin adds):
 
 ```kotlin
 pluginManagement {
@@ -100,9 +101,11 @@ plugins {
 }
 ```
 
-and, where your code calls them, the libraries by their coordinates,
-`io.github.felipekoga.hopi:<artifact>:0.1.0` (`hopi-api`, `hopi-ktor`, `hopi-start`;
-[What an app adds](#what-an-app-adds) says which an app names).
+and the libraries by their coordinates, `io.github.felipekoga.hopi:<artifact>:0.1.0` (the runtimes
+`hopi-network` and `hopi-perf` as `debugImplementation`, on Android and in a KMP module for iOS;
+where your code calls them,
+`hopi-api`, `hopi-ktor`, `hopi-start`; [What an app adds](#what-an-app-adds) says which an app
+names).
 
 ### From source
 
@@ -177,8 +180,8 @@ What you add depends on the app; a KMP app with both platforms does the first tw
 
 | App | What it names | See |
 | --- | --- | --- |
-| Android (the application module, with or without KMP) | the `io.github.felipekoga.hopi` Gradle plugin, and nothing else unless its code calls `HopiRules` or `HopiPerf` (`hopi-api`) | [Android](#android-every-okhttp-and-httpurlconnection-request-automatically) |
-| iOS (the framework of a KMP shared module) | the `io.github.felipekoga.hopi` Gradle plugin in the shared module, and `HopiSetup.shared.start()` in Swift, the same in every configuration | [iOS](#ios-every-urlsession-request-automatically) |
+| Android (the application module, with or without KMP) | the `io.github.felipekoga.hopi` Gradle plugin, `hopi-network` as `debugImplementation` and, for the performance monitors, `hopi-perf` likewise; `hopi-api` only if its code calls `HopiRules` or `HopiPerf` | [Android](#android-every-okhttp-and-httpurlconnection-request-automatically) |
+| iOS (the framework of a KMP shared module) | the `io.github.felipekoga.hopi` Gradle plugin in the shared module, `hopi-network` (and optionally `hopi-perf`) as `debugImplementation` there, and `HopiSetup.shared.start()` in Swift, the same in every configuration | [iOS](#ios-every-urlsession-request-automatically) |
 | JVM (Compose Desktop) | `hopi-ktor`, and `hopi-start` where recording is wanted | [JVM](#jvm-compose-desktop-the-ktor-plugins-requests) |
 
 The Ktor client plugin, `hopi-ktor`, is optional on Android and iOS, where the platform capture
@@ -187,17 +190,19 @@ records Ktor's engines without it, and it is what records on the JVM (see
 
 | Artifact | What it is |
 | --- | --- |
-| `io.github.felipekoga.hopi` (Gradle plugin) | Automatic OkHttp and `HttpURLConnection` capture on Android: adds `hopi-core` and `hopi-network` to debug builds, `hopi-perf` with `perf { enabled = true }`, and nothing to release builds, and fails a release (non-debuggable) variant that resolves a runtime |
+| `io.github.felipekoga.hopi` (Gradle plugin) | On Android, adds no runtime: in a debuggable variant that declares `hopi-network` or `hopi-perf` it generates the start configuration with their tools and, with `hopi-network`, rewrites OkHttp and `HttpURLConnection` for automatic capture; it fails a release (non-debuggable) variant that resolves a runtime. In a KMP module it reads the same `debugImplementation` declarations, adds `hopi-start` to Debug frameworks when a runtime is declared, and generates `HopiSetup`, which starts the declared runtimes' tools |
 | `hopi-api` | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS, and on the JVM through `hopi-start`), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. It comes with `hopi-ktor` too. The CLI and the desktop viewer need no dependency for rules or perf |
 | `hopi-start` | `Hopi.start { }`, the iOS and JVM start: URLSession capture on iOS, the Ktor plugin's recorder on the JVM, and the performance monitors, from one call; Debug frameworks and JVM apps that record only |
-| `hopi-ktor` | The Ktor client plugin, the same thin artifact in every build: it installs the recorder a debug build's network runtime registered (Android with the Gradle plugin, the JVM after `Hopi.start`) and nothing elsewhere (a release build, iOS); no `hopi-core`. It brings `hopi-api` |
-| `hopi-network` | The network runtime: automatic OkHttp and `HttpURLConnection` capture on Android, URLSession capture on iOS, and their rules, plus the Ktor plugin's recorder on Android and the JVM: added by the plugin on Android (debug builds only) and by `hopi-start` on iOS and the JVM; never named |
-| `hopi-perf` | The performance monitors (frames, hangs, CPU, memory) behind `HopiPerf`, each off until started: added by the plugin on Android (`perf { enabled = true }`, debug builds only) and by `hopi-start` on iOS and the JVM (CPU and memory there); never named |
+| `hopi-ktor` | The Ktor client plugin, the same thin artifact in every build: it installs the recorder a debug build's network runtime registered (Android with the Gradle plugin and `hopi-network` declared, the JVM after `Hopi.start`) and nothing elsewhere (a release build, iOS); no `hopi-core`. It brings `hopi-api` |
+| `hopi-network` | The network runtime: automatic OkHttp and `HttpURLConnection` capture on Android, URLSession capture on iOS, and their rules, plus the Ktor plugin's recorder on Android and the JVM: named by the app as `debugImplementation` (Android, and a KMP module for iOS, where `hopi-start` brings it to Debug frameworks); brought by `hopi-start` on the JVM |
+| `hopi-perf` | The performance monitors (frames, hangs, CPU, memory) behind `HopiPerf`, each off until started: named by the app as `debugImplementation`, optionally (Android, and a KMP module for iOS, where `hopi-start` brings it to Debug frameworks); brought by `hopi-start` on the JVM (CPU and memory there) |
 
-`hopi-core` (shared by the runtimes, and the runtime behind `HopiRules`; added with them) and
-`hopi-instrument` (the plugin's rewriter) are published too. You never name `hopi-core`,
-`hopi-network` or `hopi-perf`, and the release guards refuse a build that links one where it does
-not belong, whoever named it (your module or a library): the plugin fails an Android release
+`hopi-core` (shared by the runtimes, and the runtime behind `HopiRules`; it comes with them) and
+`hopi-instrument` (the plugin's rewriter) are published too. You never name `hopi-core`; you name
+`hopi-network` and `hopi-perf` as `debugImplementation` only (on Android and in a KMP module for
+iOS), and not at all on the JVM, where `hopi-start` brings them. The
+release guards refuse a build that links a runtime where it does not belong, whoever named it (your
+module or a library): the plugin fails an Android release
 variant whose runtime classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, and
 the iOS release guard a Release framework link whose classpath does. Each KMP artifact has its
 Android, JVM, `iosArm64` and `iosSimulatorArm64` publications with sources and Gradle module
@@ -210,21 +215,32 @@ built from this repository, not published: `./gradlew :hopi-cli:installDist` (se
 
 ## Android: every OkHttp and HttpURLConnection request, automatically
 
-One line in the app module's `build.gradle.kts`:
+The plugin and the runtimes, debug only, in the app module's `build.gradle.kts`, as with
+LeakCanary:
 
 ```kotlin
 plugins {
     id("com.android.application")
     id("io.github.felipekoga.hopi") version "0.1.0"
 }
+
+dependencies {
+    debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")   // network capture and rules
+    debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")      // optional: performance monitors
+}
 ```
 
 (or `id("io.github.felipekoga.hopi") version "0.1.0" apply false` in the root `build.gradle.kts`
-and `id("io.github.felipekoga.hopi")` here.) That is the whole setup. In debuggable variants the
-plugin rewrites, at build time, OkHttp's call class and every `java.net.URL` connection call site
-of your app **and of every library it depends on**, so every OkHttp client (yours, Retrofit's, an
-analytics or ads SDK's, Ktor's OkHttp engine) and every `HttpURLConnection` (Ktor's Android engine
-among them) is recorded, with no client to configure and no code to call: the runtime starts
+and `id("io.github.felipekoga.hopi")` here.) That is the whole setup. The plugin adds no runtime:
+it reads which runtimes the variant's runtime configuration declares (this module's dependencies,
+not what they bring transitively), and in a debuggable variant generates the start configuration
+with their tools; each runtime brings `hopi-core`. A custom debuggable build type needs its own
+`<buildType>Implementation` of the runtimes; a debuggable variant that declares none gets nothing
+from the plugin, and the build prints a warning saying what to add. With `hopi-network`, in
+debuggable variants the plugin rewrites, at build time, OkHttp's call class and every
+`java.net.URL` connection call site of your app **and of every library it depends on**, so every
+OkHttp client (yours, Retrofit's, an analytics or ads SDK's, Ktor's OkHttp engine) and every
+`HttpURLConnection` (Ktor's Android engine among them) is recorded, with no client to configure and no code to call: the runtime starts
 itself from a provider in the debug manifest. Ktor's OkHttp and Android engines are recorded the
 same way, once (`"source":"okhttp"` or `"urlconnection"`), with or without Hopi's Ktor plugin,
 except the requests that plugin records itself (see [The Ktor plugin](#the-ktor-plugin)). It only
@@ -234,11 +250,11 @@ ahead.
 
 Release (non-debuggable) variants are not instrumented at all and get no runtime, so the thin Ktor
 plugin installs nothing there and an Android app needs no `-Phopi.enabled`. `hopi-api` (`HopiRules`,
-`HopiPerf`) and `hopi-ktor` are the same in both; in debuggable variants the plugin holds them
-(`hopi-ktor` with `network { enabled }`) at its own version, that of the `hopi-core`,
-`hopi-network` and `hopi-perf` it adds, whose runtimes implement internal interfaces of `hopi-api`
-and `hopi-ktor` or write to `hopi-api`'s registry. Without the plugin an Android app records
-nothing, the Ktor plugin included: the runtimes start only from the configuration the plugin
+`HopiPerf`) and `hopi-ktor` are the same in both; in debuggable build types the plugin holds every
+Hopi module they resolve (`hopi-api`, `hopi-ktor`, `hopi-core` and the runtimes) strictly at its
+own version, whatever version you typed, since the runtimes implement internal interfaces of
+`hopi-api` and `hopi-ktor` or write to `hopi-api`'s registry. Without the plugin an Android app
+records nothing, the Ktor plugin included: the runtimes start only from the configuration the plugin
 generates, the Ktor plugin's recorder is the network runtime's, and no `hopi-core` comes through
 `hopi-ktor`; `HopiRules` and `HopiPerf` then do nothing, since nothing started to register their
 runtimes.
@@ -247,15 +263,15 @@ Every release variant also gets the release guard, `hopiReleaseGuard<Variant>`, 
 the variant's build (before any compile or dex task of the variant) and fails it when its runtime
 classpath holds `hopi-core`, `hopi-network`, `hopi-perf` or `hopi-start`, as a project or by its
 coordinates, naming each with what brings it (`io.github.felipekoga.hopi:hopi-network:0.1.0 (via project ':sdk')`)
-and saying which to remove (those something other than a runtime brings, not the `hopi-core` a
-runtime brings with it): a module, yours or a library's, that names a runtime other than as
-`debugImplementation`. There is no opt-out. A runtime that reaches a non-debuggable app all the
-same starts nothing: the provider reads `FLAG_DEBUGGABLE` first and writes one notice line.
+and saying which to declare as `debugImplementation` instead of `implementation` or
+`<buildType>Implementation` (those something other than a runtime brings, not the `hopi-core` a
+runtime brings with it), in your module or the one that brings it. There is no opt-out. A runtime
+that reaches a non-debuggable app all the same starts nothing: the provider reads `FLAG_DEBUGGABLE` first and writes one notice line.
 Optional settings:
 
 ```kotlin
 hopi {
-    agentBridge = true                  // let the CLI and the desktop viewer connect (default false)
+    agentBridge = false                 // no bridge for the CLI and the desktop viewer (default true)
     maxBodyBytes = 256L * 1024
     redactHeaders("X-Api-Key")
     network {
@@ -268,13 +284,15 @@ hopi {
 
 The store, redaction, log and bridge settings are the start's, at the top; capture's own are in
 `network { }`, the monitors' in `perf { }` (see
-[Performance monitors](#performance-monitors-frames-hangs-cpu-memory)). `network { enabled = false }`
-leaves the network runtime, the rewrite and the network tool out of every variant, so the Ktor
-plugin records nothing either (its recorder is the network runtime's); a debug build still gets
-`hopi-core` and its provider, which starts the other tools (perf's with `perf { enabled = true }`)
-or none, so `HopiRules` still registers its runtime (no recorder applies its rules) and the bridge
-starts with `agentBridge`. `hopi { enabled = false }` gives no variant anything: no runtime, no
-rewrite, no generated configuration (the release guard still runs).
+[Performance monitors](#performance-monitors-frames-hangs-cpu-memory)). The bridge the CLI and
+the desktop viewer connect to is on by default in debug builds (`agentBridge`), and every
+connection is authenticated. The tools are the runtimes you declare, and nothing else turns one on
+or off: without `hopi-network` there is no rewrite and no network tool, so the Ktor plugin records
+nothing either (its recorder is the network tool's); with only `hopi-perf` the start runs perf's
+tool, registers `HopiRules`' runtime and starts the bridge. `network { }` and `perf { }` hold
+settings only, which apply when their runtime is declared. `hopi { enabled = false }` gives no variant anything: no rewrite, no
+generated configuration (the release guard still runs); the runtimes you declared are still on the
+classpath and start nothing without the generated configuration.
 
 Not recorded: Cronet, WebView, native HTTP stacks, relocated OkHttp copies, code downloaded at
 run time, other processes, and requests made before the app's content providers start. Records
@@ -283,7 +301,8 @@ module, not to a library: it instruments the libraries from there.
 
 ## iOS: every URLSession request, automatically
 
-Two steps, the same in Debug and Release. In the KMP shared module whose framework the app links:
+Two steps, the same in Debug and Release. In the KMP shared module whose framework the app links,
+the plugin and the runtimes, declared as an Android app declares them:
 
 ```kotlin
 // shared/build.gradle.kts
@@ -291,7 +310,15 @@ plugins {
     kotlin("multiplatform")
     id("io.github.felipekoga.hopi")
 }
+
+dependencies {
+    debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")   // URLSession capture and rules
+    debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")      // optional: performance monitors
+}
 ```
+
+A module without an Android target has no `debugImplementation` of its own: the plugin creates it,
+and only reads which runtimes it declares (it never resolves it).
 
 And one line in Swift, first thing, with no `#if`:
 
@@ -321,8 +348,10 @@ framework's Debug and Release binaries link one compilation: the Gradle property
 for `embedAndSignAppleFrameworkForXcode` (`CONFIGURATION` is `Debug` or `Release`, else
 `KOTLIN_FRAMEWORK_BUILD_TYPE`); else no runtime (`./gradlew check`, an XCFramework). So the build
 phase every KMP iOS app already has, `./gradlew :shared:embedAndSignAppleFrameworkForXcode`, needs
-no change. A Debug build gets `hopi-start`, which brings the runtimes (`hopi-network`, `hopi-perf`,
-`hopi-core`), exported from the framework so Swift also sees `Hopi`; every build gets `hopi-api`
+no change. A Debug build of a module that declares a runtime gets `hopi-start`, which brings the
+runtimes and `hopi-core`, exported from the framework so Swift also sees `Hopi`, and `HopiSetup`
+starts the tools of the declared runtimes only; with no runtime declared a Debug build gets no
+`hopi-start` and `start()` does nothing; every build gets `hopi-api`
 (`HopiRules`, `HopiPerf`), as `api` of `commonMain` and exported, so your Swift and shared code call
 it in every configuration (without a runtime it returns `-1`, `false` or an empty list, or does
 nothing). A Debug app without Hopi, for A/B runs: `-Phopi.enabled=false`. A Debug or Release
@@ -347,27 +376,24 @@ Settings, all optional, in the same `hopi { }` block as Android's; `HopiSetup` p
 
 ```kotlin
 hopi {
-    agentBridge = true                  // let the CLI and the desktop viewer connect at start (default false)
+    agentBridge = false                 // no bridge for the CLI and the desktop viewer (default true)
     maxBodyBytes = 256L * 1024          // and maxEntries, maxTotalBytes: the store's caps
     redactHeaders("X-Tenant-Secret")    // added to the defaults (Authorization, Cookie, X-Api-Key…)
     redactQueryParameters("otp")        // added to the defaults (access_token, code, key, signatures…)
     summaryLog = true                   // one NDJSON line per request and perf's lines (the default)
     network { rules = false }           // never read the rule state (default true; see Rules)
-    perf {
-        enabled = true                  // register the performance monitors, none started (default false)
-        remoteControl = false           // refuse the bridge's perf starts and stops (default true)
-    }
+    perf { remoteControl = false }      // refuse the bridge's perf starts and stops (default true)
 }
 ```
 
-With `perf { enabled = true }` the start registers the performance monitors for the CLI, the
-desktop viewer and `HopiPerf`, none started (see
-[Performance monitors](#performance-monitors-frames-hangs-cpu-memory)); without it, as on Android,
-there are none. `hopi { enabled = false }` gives no build `hopi-start`, and `start()` does nothing.
-The rest of the block (`network { enabled, okhttp, urlConnection, excludeClasses }`,
-`perf { autoStart, hangThresholdMs, hangHeartbeat }`) is Android's: iOS always captures URLSession
-and starts monitors at launch with `-hopiPerf frames,hangs`. `hopi.iosRuntime` (a read-only
-`Provider<Boolean>`) tells your own build logic whether this invocation is the Debug one.
+With `hopi-perf` declared the start registers the performance monitors for the CLI, the desktop
+viewer and `HopiPerf`, none started (see
+[Performance monitors](#performance-monitors-frames-hangs-cpu-memory)); without it there are none.
+`hopi { enabled = false }` gives no build `hopi-start`, and `start()` does nothing. The rest of the
+block (`network { okhttp, urlConnection, excludeClasses }`,
+`perf { autoStart, hangThresholdMs, hangHeartbeat }`) is Android's: iOS starts monitors at launch
+with `-hopiPerf frames,hangs`. `hopi.iosRuntime` (a read-only `Provider<Boolean>`) tells your own
+build logic whether this invocation is a Debug one with a runtime declared.
 `hopi-start`'s `Hopi` and `HopiStartConfig` are exported from a Debug framework only, and no
 internal Hopi declaration or type reaches your framework's Swift header.
 
@@ -419,7 +445,7 @@ an alias:
 // src/hopi/kotlin/StartHopi.kt
 import dev.koga.hopi.start.Hopi as HopiStart
 
-fun startHopi() = HopiStart.start { agentBridge = true }   // the same settings as on iOS
+fun startHopi() = HopiStart.start()   // or start { … }, the same settings as on iOS
 
 // src/nohopi/kotlin/StartHopi.kt
 fun startHopi() {}
@@ -433,7 +459,8 @@ fun main() {
 
 It registers the rules runtime (`HopiRules` works from then on, and the start's notice counts the
 rules added before it), the performance monitors (CPU and memory, none started) and the Ktor
-plugin's recorder; with `agentBridge = true` it starts the bridge at once, advertised in
+plugin's recorder (on the JVM the tools are chosen in code: `network = false` or `perf = false` in
+the start's block leaves that one out); with `agentBridge` (the default) it starts the bridge at once, advertised in
 `<java.io.tmpdir>/hopi/<pid>/bridge.json` under the app id of `-Dhopi.appId` (default `jvm`). The
 CLI reads it with `hopi … --bridge-file <path>` and the desktop viewer lists JVM processes with a
 bridge. The JVM writes no start line. Records carry `"source":"ktor"`; other JVM HTTP stacks are not
@@ -443,9 +470,9 @@ recorded.
 
 `hopi-ktor` is the same thin artifact in every build, so it needs no selection: it holds no
 recorder and no `hopi-core`, and installs the recorder a debug build's network runtime registered
-(an Android debuggable variant with the Gradle plugin, a JVM process after `Hopi.start`), or
-nothing (a release build, iOS, a JVM process before `Hopi.start`). Name it where your clients
-install it, in `commonMain` for shared code:
+(an Android debuggable variant with the Gradle plugin and `hopi-network`, a JVM process after
+`Hopi.start`), or nothing (a release build, iOS, a JVM process before `Hopi.start`). Name it
+where your clients install it, in `commonMain` for shared code:
 
 ```kotlin
 commonMain.dependencies {
@@ -495,17 +522,19 @@ makes first: the store is the process's one, with the start's caps (a client's `
 union of every installation's lists, so a client's `unsafeDisableRedaction()` takes effect only
 where the start also disabled redaction; and the summary lines and the bridge start once per
 process: a client's `logSink = Summary`, the default, starts the lines even where the start said
-`summaryLog = false` (`Off` only keeps that client from starting them), and `agentBridge = true`
-requests the bridge, which the start's `agentBridge` usually started already. Invalid caps throw at
+`summaryLog = false` (`Off` only keeps that client from starting them), and the client's
+`agentBridge = true` (default false) requests the bridge, which the start's `agentBridge`, on by
+default, usually started already. Invalid caps throw at
 `install(Hopi)` there. Elsewhere (a release build, iOS, a JVM process before `Hopi.start`) every
 setting is accepted and ignored and the plugin installs nothing.
 
 ## What reaches a release build
 
 Hopi leaves a release build by not being linked, never by `#if DEBUG`. The runtimes (`hopi-core`,
-`hopi-network` and `hopi-perf`) are dependencies of debug builds only: the Gradle plugin adds them
-to debuggable variants and, through `hopi-start`, to an iOS framework's Debug build, and a JVM app
-names `hopi-start` itself where it wants recording (the JVM has no guard). A runtime or
+`hopi-network` and `hopi-perf`) are dependencies of debug builds only: an Android app declares
+them as `debugImplementation`, the Gradle plugin adds them, through `hopi-start`, to an iOS
+framework's Debug build, and a JVM app names `hopi-start` itself where it wants recording (the JVM
+has no guard). A runtime or
 `hopi-start` that reaches a release build all the same, named by your module or by a library,
 fails it in a release guard before anything is linked. An `#if` in Swift would remove nothing the
 framework links, which is how a debug tool linked into every configuration stays in the app
@@ -544,7 +573,7 @@ keeps a runtime off a Release link's classpath, instead of trusting the link to 
 
 Debug builds contain Hopi, as intended: a Debug build you hand to testers (an ad hoc or TestFlight
 build of the Debug configuration, a debuggable APK) records their requests and serves the bridge
-when `agentBridge` is on. Give testers a release build when it must not carry Hopi.
+unless `agentBridge = false`. Give testers a release build when it must not carry Hopi.
 
 ## Log stream and CLI (for AI agents)
 
@@ -571,8 +600,8 @@ xcrun simctl spawn booted log stream --style ndjson --predicate 'subsystem == "d
 ```
 
 The CLI reads the full detail (headers, bodies) from the app's device-local bridge
-(`agentBridge = true`; Android devices and emulators over adb, iOS simulators, iPhones over
-USB). Build it with `./gradlew :hopi-cli:installDist`; the binary is
+(`agentBridge`, on by default in debug builds; Android devices and emulators over adb, iOS
+simulators, iPhones over USB). Build it with `./gradlew :hopi-cli:installDist`; the binary is
 `hopi-cli/build/install/hopi-cli/bin/hopi`.
 
 ```bash
@@ -610,7 +639,7 @@ phone over USB or wireless adb (no code of its own: it is an adb device like an 
 ## Desktop viewer
 
 `hopi-desktop` shows a running app's traffic in a window on your Mac: the list and detail side by
-side, over the same bridge as the CLI (`agentBridge = true`, debug builds). The app
+side, over the same bridge as the CLI (`agentBridge`, on by default in debug builds). The app
 needs nothing new, and a connected viewer costs it what a connected `hopi tail` does. Run it
 from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime):
 
@@ -662,7 +691,7 @@ rule is never applied twice. Rules live in the app's memory: nothing is written 
 is imported from a file, an intent or a launch argument, and restarting the app clears them all.
 `hopi clear` leaves them in place; `hopi rules clear` removes them.
 
-From the CLI (the app needs `agentBridge = true`, like every other command):
+From the CLI (over the bridge, like every other command):
 
 ```bash
 hopi mock add --app <id> --match 'GET */users/*' --status 500 --header 'Content-Type: application/json' --body @err.json
@@ -769,10 +798,12 @@ write); one that is on states its cost in
 measured so far under "As built"). Nothing is persisted or sent anywhere: the data lives in
 bounded rings in memory.
 
-Android, with the `io.github.felipekoga.hopi` plugin: `perf { enabled = true }` adds `hopi-perf` to debug
-builds only and registers it, so the CLI, the desktop viewer and `HopiPerf` can start monitors
-with no other code; without it `HopiPerf` does nothing in any build, since only perf's tool
-registers its runtime and only this block lists that tool. `autoStart` starts some at launch; its
+Android, with the `io.github.felipekoga.hopi` plugin: declare
+`debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")` and the plugin lists perf's
+tool in debug builds, which registers the monitors, so the CLI, the desktop viewer and `HopiPerf`
+can start them with no other code; without it `HopiPerf` does nothing in any build, since only
+perf's tool registers its runtime. `perf { }` holds the monitors' settings only. `autoStart`
+starts some at launch; its
 `HopiMonitor` is the plugin's type, which a Kotlin build script does not import by default
 (`autoStart(HopiMonitor.Hangs)` fails with "Unresolved reference 'HopiMonitor'" without the
 import):
@@ -781,9 +812,7 @@ import):
 import dev.koga.hopi.gradle.HopiMonitor   // first in the build script, before plugins { }
 
 hopi {
-    agentBridge = true
     perf {
-        enabled = true
         autoStart(HopiMonitor.Hangs)   // default: none
         hangThresholdMs = 250          // 100..10 000
         hangHeartbeat = false          // true: keep another tool's Looper printer (wakes main and the watchdog 8x/s each while idle)
@@ -793,8 +822,8 @@ hopi {
 ```
 
 iOS: `HopiSetup.shared.start()` (see [iOS](#ios-every-urlsession-request-automatically)) registers
-the monitors, none started, only with `hopi { perf { enabled = true } }` (off by default, as on
-Android), so the CLI, the desktop viewer and `HopiPerf` can start them with no other code
+the monitors, none started, only when the shared module declares
+`debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")`, as on Android, so the CLI, the desktop viewer and `HopiPerf` can start them with no other code
 (`perf { remoteControl = false }` refuses the bridge's starts and stops); with it,
 `xcrun simctl launch booted <bundle id> -hopiPerf frames,hangs` starts monitors at launch.
 
@@ -813,7 +842,7 @@ Every call does nothing until a debug build's start registers the runtime, as in
 start that registers the runtime writes one notice line with the count, under perf's log (logcat
 tag `HopiPerf`, os_log category `perf`), not under `Hopi` like the rules' one, and an iOS Debug
 binary also writes one line at the first dropped start, in case `HopiSetup.shared.start()` (or
-`hopi { perf { enabled = true } }`) is missing. `screen` keeps its last label for a runtime that
+the `hopi-perf` declaration) is missing. `screen` keeps its last label for a runtime that
 registers later. A block applies only what it sets: a setting left unset keeps the value in force (the plugin's
 `perf { }`, a remote `hopi perf start --hang-ms`), and an out-of-range value writes a notice and
 starts nothing. The agent bridge and the summary log are the start's settings (`hopi { }`,
@@ -909,7 +938,7 @@ diagnostics tab that fires one request of every kind the inspector handles) for 
 ```bash
 python3 sample/devserver/devserver.py           # dev server on 127.0.0.1:8765
 
-# Android (emulator): the io.github.felipekoga.hopi plugin adds the runtimes to every debug build
+# Android (emulator): the sample declares the runtimes as debugImplementation
 ./gradlew :sample:androidApp:installDebug
 adb reverse tcp:8765 tcp:8765
 # the rules self-test on the Ktor plugin, Ktor's OkHttp engine, and the fake SDK's OkHttp and
@@ -965,7 +994,9 @@ the current build no longer does, since the app target weak-links CoreGraphics a
 Each symptom points at the section that covers it.
 
 - **The CLI or the desktop viewer finds no app** (the CLI exits with 2, not reachable): the app
-  serves them over its bridge, which needs `agentBridge = true` and a debug build. See
+  serves them over its bridge, which needs a debug build with a runtime (on Android,
+  `hopi-network` or `hopi-perf` declared as `debugImplementation`) and `agentBridge` left on (the
+  default). See
   [Log stream and CLI](#log-stream-and-cli-for-ai-agents).
 - **A rule command exits with 4**: rules are off or absent in the app's Hopi (`rules = false`). See
   [Rules](#rules-mock-fail-delay-edit).
@@ -980,8 +1011,8 @@ Each symptom points at the section that covers it.
   registered yet. The rule was added before Hopi started (on iOS, call `HopiSetup.shared.start()`
   first; on the JVM, `Hopi.start`), or nothing starts one: a release build, a plain Android host
   unit test, an app that never calls the start. See [Rules](#rules-mock-fail-delay-edit).
-- **`HopiPerf` does nothing**: the monitors need `perf { enabled = true }` and a debug build's
-  start, and a `start` made before then is dropped and counted. See
+- **`HopiPerf` does nothing**: the monitors need their runtime (`debugImplementation` of
+  `hopi-perf`, in the Android app module or the KMP shared module) and a debug build's start, and a `start` made before then is dropped and counted. See
   [Performance monitors](#performance-monitors-frames-hangs-cpu-memory).
 - **`autoStart(HopiMonitor.Hangs)` fails with "Unresolved reference 'HopiMonitor'"**: add
   `import dev.koga.hopi.gradle.HopiMonitor` first in the build script. See
@@ -1016,9 +1047,18 @@ consumer names, at the same version 0.1.0. Maven Local may still hold the artifa
 and a build with `mavenLocal()` resolves any that it still names, so remove them from your build
 scripts. What changed, by the plan's stage:
 
+- 2026-11-05: the app names its runtimes, debug only, as with LeakCanary, on Android and iOS alike.
+  The plugin no longer chooses them: add
+  `debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")` and, for the monitors,
+  `hopi-perf` likewise, in the Android application module and in the KMP shared module whose
+  framework iOS links, and drop `perf { enabled }` and `network { enabled }`, which no longer exist
+  (`network { }` and `perf { }` keep their other settings). A custom debuggable Android build type
+  needs its own `<buildType>Implementation`. On the JVM `Hopi.start { network = false }` and
+  `perf = false` choose the tools in code. `agentBridge` defaults to true in `hopi { }` and
+  `Hopi.start { }`: drop `agentBridge = true`.
 - Stages 5 to 10 (2026-10-28 and 29): no noop twins. Drop every `if (hopiEnabled) X else X-noop`:
-  name `hopi-api`, `hopi-start` and `hopi-ktor` as above; the Gradle plugin adds the runtimes to
-  debuggable variants itself.
+  name `hopi-api`, `hopi-start` and `hopi-ktor` as above; the Gradle plugin added the runtimes to
+  debuggable variants itself (until 2026-11-05, see above).
 - Stage 5 (2026-10-28): no in-app UI. `HopiScreen`, `HopiLauncher` with its floating button, the
   perf HUD and the in-app rules list are gone; the CLI and the desktop viewer are the surfaces.
 - Stages 7 and 8 (2026-10-28 and 29): `HopiRules` and `HopiPerf` are in `hopi-api`, with the same

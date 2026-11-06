@@ -53,7 +53,7 @@ tasks.withType<KotlinCompile>().configureEach {
 
 hopi {
     network {
-        enabled.set(true)
+        rules.set(true)
     }
     perf {
         autoStart(HopiMonitor.Frames)

@@ -27,3 +27,9 @@ kotlin {
         }
     }
 }
+
+// The runtimes, Debug frameworks only, declared as an Android app declares them.
+dependencies {
+    debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")
+    debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")
+}

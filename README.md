@@ -74,7 +74,8 @@ show the module's scope; where the root `build.gradle.kts` declares them with `a
 
 ### Android app
 
-In the application module's `build.gradle.kts`:
+In the application module's `build.gradle.kts`, apply the plugin and declare the runtimes for debug
+builds only, as with LeakCanary:
 
 ```kotlin
 plugins {
@@ -82,20 +83,22 @@ plugins {
     id("io.github.felipekoga.hopi") version "0.1.0"
 }
 
-hopi {
-    agentBridge = true          // let the CLI and the desktop viewer connect (default false)
-    perf { enabled = true }     // register the performance monitors, none started (default false)
+dependencies {
+    debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")   // network capture and rules
+    debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")      // optional: performance monitors
 }
 ```
 
 That is the whole setup. Debug builds record every OkHttp and `HttpURLConnection` request, the
-libraries' included, with no code to call; release builds get no runtime. Add
-`io.github.felipekoga.hopi:hopi-api:0.1.0` only if your code calls `HopiRules` or `HopiPerf`.
+libraries' included, with no code to call, and the CLI and the desktop viewer can connect; release
+builds get no runtime. Add `implementation("io.github.felipekoga.hopi:hopi-api:0.1.0")` only if
+your code calls `HopiRules` or `HopiPerf`.
 More: [Android](docs/GUIDE.md#android-every-okhttp-and-httpurlconnection-request-automatically).
 
 ### KMP app on iOS
 
-In the KMP shared module whose framework the iOS app links:
+In the KMP shared module whose framework the iOS app links, the same two parts: the plugin and the
+runtimes, declared for Debug builds only:
 
 ```kotlin
 plugins {
@@ -103,9 +106,9 @@ plugins {
     id("io.github.felipekoga.hopi") version "0.1.0"
 }
 
-hopi {
-    agentBridge = true
-    perf { enabled = true }
+dependencies {
+    debugImplementation("io.github.felipekoga.hopi:hopi-network:0.1.0")   // URLSession capture and rules
+    debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")      // optional: performance monitors
 }
 ```
 
@@ -118,7 +121,8 @@ HopiSetup.shared.start()
 The plugin generates `HopiSetup`. In a Debug build `start()` records every URLSession request of
 the process, SDKs and Ktor's Darwin engine included; in a Release build it does nothing and the
 framework holds no runtime. The `embedAndSignAppleFrameworkForXcode` build phase needs no change.
-A KMP app on both platforms also applies the plugin to its Android application module, as above.
+A KMP app on both platforms also applies the plugin to its Android application module and declares
+the runtimes there, as above.
 More: [iOS](docs/GUIDE.md#ios-every-urlsession-request-automatically).
 
 ### JVM app with Ktor
@@ -135,7 +139,7 @@ import dev.koga.hopi.ktor.Hopi
 import dev.koga.hopi.start.Hopi as HopiStart
 
 fun main() {
-    HopiStart.start { agentBridge = true }   // first, before any HttpClient is built
+    HopiStart.start()   // first, before any HttpClient is built
     val client = HttpClient(engine) { install(Hopi) }
     // …
 }
@@ -145,13 +149,14 @@ The JVM records the requests of the Ktor clients that install the plugin. It has
 so name `hopi-start` only in the builds that should record; the guide keeps it behind a Gradle
 property: [JVM](docs/GUIDE.md#jvm-compose-desktop-the-ktor-plugins-requests).
 
-### Open the viewer and the CLI
+## See it
 
-Building from this repository is the only way to get them today: neither is published. Both reach
-the app over its bridge, so the app needs a debug build with `agentBridge = true`.
+The desktop viewer and the CLI run on your Mac; they are not dependencies of the app. Both reach a
+debug build over its device-local bridge, which is on by default and authenticates every
+connection. Today they run from a clone of this repository; a packaged distribution is planned.
 
-The desktop viewer: run it from the repository, or build a `.dmg` (unsigned, about 65 MB with its
-own Java runtime). Pick a device, enter the app's id, and connect.
+The desktop viewer: run it, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime).
+Pick a device, enter the app's id, and connect.
 
 ```bash
 ./gradlew :hopi-desktop:run
@@ -191,10 +196,10 @@ Versions between the two columns are not tested. Every caveat (`.set()` before G
 - **No per-client setup.** On Android the Gradle plugin rewrites, at build time and in debuggable
   variants only, OkHttp's call class and every `java.net.URL` connection call site of the app and
   of every library it depends on; on iOS one start records every URLSession request of the process.
-- **No Hopi runtime in release builds.** Only debug builds link the runtimes, never through
-  `#if DEBUG`, and the release guards (Android variants, iOS Release links) fail a release build
-  that would link one. What a release build can hold is the inert `hopi-api` and `hopi-ktor` your
-  code names.
+- **No Hopi runtime in release builds.** Only debug builds link the runtimes (on Android, as
+  `debugImplementation`), never through `#if DEBUG`, and the release guards (Android variants,
+  iOS Release links) fail a release build that would link one. What a release build can hold is
+  the inert `hopi-api` and `hopi-ktor` your code names.
 - **Zero idle cost.** No timers, no polling, no request of its own, and a rule check of one volatile
   read per request while no rule exists; a performance monitor that is off has no thread, listener
   or timer.

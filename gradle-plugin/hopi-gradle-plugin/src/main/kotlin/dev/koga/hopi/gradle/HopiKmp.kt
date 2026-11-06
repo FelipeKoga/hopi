@@ -1,12 +1,15 @@
 package dev.koga.hopi.gradle
 
 import dev.koga.hopi.gradle.HopiModules.API
+import dev.koga.hopi.gradle.HopiModules.NETWORK
+import dev.koga.hopi.gradle.HopiModules.PERF
 import dev.koga.hopi.gradle.HopiModules.START
 import org.gradle.api.Action
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.artifacts.Dependency
+import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.language.base.plugins.LifecycleBasePlugin
@@ -30,9 +33,11 @@ import org.jetbrains.kotlin.konan.target.Family
  * - every build: `hopi-api` (`HopiRules`, `HopiPerf`) as `api` of `commonMain`, exported from
  *   every iOS framework, so Swift and shared code call it in every configuration (without a
  *   runtime they return `-1`, `false` or an empty list, or do nothing);
- * - a Debug build ([HopiExtension.iosRuntime]): `hopi-start` as `api` of `iosMain`, exported from
- *   every iOS framework; it brings the network and perf runtimes and core, which Kotlin/Native
- *   keeps because it names their tools;
+ * - a Debug build ([HopiExtension.iosRuntime]) of a module that declares a runtime as
+ *   `debugImplementation` (`hopi-network`, `hopi-perf`, as an Android app does; the plugin creates
+ *   that configuration in a module without an Android target): `hopi-start` as `api` of `iosMain`,
+ *   exported from every iOS framework; it brings the runtimes and core, and the generated
+ *   `HopiSetup` starts the tools of the declared ones;
  * - every build: `HopiSetup` generated into `iosMain` ([GenerateHopiSetup]): in a Debug build its
  *   `start()` runs `Hopi.start` with the `hopi { }` block, in any other it does nothing, so Swift
  *   calls `HopiSetup.shared.start()` the same way in every configuration;
@@ -43,6 +48,8 @@ import org.jetbrains.kotlin.konan.target.Family
  * JVM targets and CocoaPods' configuration property are not handled.
  */
 internal object HopiKmp {
+    private const val DEBUG_IMPLEMENTATION = "debugImplementation"
+
     /** The task the guard of [releaseCheckLink] exempts while it is requested by name. */
     private const val RELEASE_CHECK = "verifyIosReleaseExcludesCapture"
 
@@ -52,6 +59,21 @@ internal object HopiKmp {
     fun configure(project: Project, extension: HopiExtension) {
         val kotlin = project.extensions.getByType(KotlinMultiplatformExtension::class.java)
         extension.iosDebug = IosBuild.debug(project.providers)
+        // The runtimes the module declares, as an Android app does: debugImplementation, which a
+        // module without an Android target gets from the plugin, as a list to read, never resolved.
+        val declared = project.configurations.findByName(DEBUG_IMPLEMENTATION) ?: project.configurations.create(DEBUG_IMPLEMENTATION) {
+            it.isCanBeResolved = false
+            it.isCanBeConsumed = false
+            it.description = "Hopi's runtimes for the iOS Debug frameworks (io.github.felipekoga.hopi)."
+        }
+        fun declares(module: String): Provider<Boolean> = project.provider {
+            declared.dependencies.any { dependency ->
+                dependency.name == module && (dependency.group == HopiModules.GROUP || dependency is ProjectDependency)
+            }
+        }
+        val network = declares(NETWORK)
+        val perf = declares(PERF)
+        extension.iosDeclared = network.zip(perf) { n, p -> n || p }
         val start: Provider<List<Dependency>> = extension.iosRuntime.map { on ->
             if (on) listOf(HopiModules.dependency(project, START)) else emptyList()
         }
@@ -67,7 +89,8 @@ internal object HopiKmp {
             task.redactedHeaders.set(extension.redactedHeaders)
             task.redactedQueryParameters.set(extension.redactedQueryParameters)
             task.redactionDisabled.set(extension.redactionDisabled)
-            task.perf.set(extension.perf.enabled)
+            task.network.set(network)
+            task.perf.set(perf)
             task.perfRemoteControl.set(extension.perf.remoteControl)
             task.outputDirectory.set(project.layout.buildDirectory.dir("generated/hopi/iosMain/kotlin"))
         }

@@ -4,16 +4,10 @@ import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 
 /**
- * `hopi { network { } }`: automatic OkHttp and `HttpURLConnection` capture in the debuggable
- * variants (docs/design/android-capture.md), on by default. [enabled] false leaves `hopi-network`,
- * the bytecode transform and the network tool out of every variant; the start configuration is
- * still generated, so core's provider still starts the other tools (`perf { enabled = true }`), or
- * none, and `HopiRules` works for the Ktor plugin.
+ * `hopi { network { } }`: the settings of the network capture, which the app gets by declaring
+ * `debugImplementation("io.github.felipekoga.hopi:hopi-network:<v>")` (docs/design/android-capture.md).
  */
 public abstract class HopiNetworkExtension {
-    /** False: no `hopi-network`, no transform and no network tool in the generated tool list. */
-    public abstract val enabled: Property<Boolean>
-
     /** Rewrites OkHttp's `RealCall`, so every OkHttp call is recorded. */
     public abstract val okhttp: Property<Boolean>
 
@@ -35,7 +29,6 @@ public abstract class HopiNetworkExtension {
     }
 
     internal fun applyDefaults() {
-        enabled.convention(true)
         okhttp.convention(true)
         urlConnection.convention(true)
         rules.convention(true)
