@@ -273,8 +273,9 @@ private fun RuleRow(rule: RemoteRule, enabled: Boolean, onToggle: (Boolean) -> U
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            ChromeButton("Update", onClick = onUpdate, enabled = enabled)
-            ChromeButton("Remove", onClick = onRemove, enabled = enabled)
+            // Icon buttons, so the match keeps the row's width; the tooltip and screen readers name them.
+            ToolbarIconButton(TopBarIcons.Edit, "Update", onClick = onUpdate, enabled = enabled)
+            ToolbarIconButton(TopBarIcons.Trash, "Remove", onClick = onRemove, enabled = enabled)
         }
         // The same text as `action  ·  hits  ·  label`: exhausted in the warning amber, inactive in red.
         val hits = buildAnnotatedString {

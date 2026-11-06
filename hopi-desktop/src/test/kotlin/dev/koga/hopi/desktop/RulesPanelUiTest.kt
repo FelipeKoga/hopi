@@ -140,7 +140,7 @@ class RulesPanelUiTest {
         onNodeWithText("Cancel").performClick()
 
         // Rows in the order the app added them: the existing rule first.
-        onAllNodes(hasText("Remove", substring = false)).onFirst().performClick()
+        onAllNodes(hasContentDescription("Remove", substring = false)).onFirst().performClick()
         waitForText("Rule #$existing removed")
         assertEquals(listOf(mock.id), RuleEngine.list().map { it.id })
 

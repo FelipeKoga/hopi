@@ -345,7 +345,10 @@ private fun PerfNote(text: String) {
     BasicText(text, Modifier.padding(12.dp), style = HopiDesktopType.body.copy(color = hopiDesktopColors.textMuted))
 }
 
-/** Frames per second as bars, the janky ones of each second drawn over them in the error red. */
+/**
+ * Frames per second as bars in the success green, whatever the accent (a neutral accent would make
+ * them grey), the janky ones of each second drawn over them in the error red.
+ */
 @Composable
 private fun FramesChart(frames: List<RemoteFrameSecond>, modifier: Modifier = Modifier) {
     val colors = hopiDesktopColors
@@ -360,7 +363,7 @@ private fun FramesChart(frames: List<RemoteFrameSecond>, modifier: Modifier = Mo
             val x = size.width - (end - second.second + 1) * slot
             if (x < 0) continue
             val h = (second.frames / top * size.height).toFloat()
-            drawRect(colors.textFaint, Offset(x, size.height - h), Size(maxOf(1f, slot - 1f), h))
+            drawRect(colors.success.fg, Offset(x, size.height - h), Size(maxOf(1f, slot - 1f), h))
             if (second.janky > 0) {
                 val j = maxOf(2f, (second.janky / top * size.height).toFloat())
                 drawRect(colors.error.fg, Offset(x, size.height - j), Size(maxOf(1f, slot - 1f), j))
@@ -369,7 +372,11 @@ private fun FramesChart(frames: List<RemoteFrameSecond>, modifier: Modifier = Mo
     }
 }
 
-/** Lines over time in [color] (the first solid, the next dashed), scaled to their maximum or [floor]; [markers] as amber vertical ticks. */
+/**
+ * Lines over time in [color] (the first solid over a faint fill, the next dashed), 2 dp wide,
+ * scaled to their maximum or [floor]; [markers] as amber vertical ticks. Each chart has a hue of
+ * its own (CPU info blue, memory violet), never the accent's.
+ */
 @Composable
 private fun LineChart(lines: List<List<Pair<Long, Double>>>, markers: List<Long>, floor: Double, color: Color, modifier: Modifier = Modifier) {
     val colors = hopiDesktopColors
@@ -391,10 +398,19 @@ private fun LineChart(lines: List<List<Pair<Long, Double>>>, markers: List<Long>
             if (visible.isEmpty()) return@forEachIndexed
             val path = Path()
             visible.forEachIndexed { i, (t, v) -> if (i == 0) path.moveTo(x(t), y(v)) else path.lineTo(x(t), y(v)) }
+            if (index == 0 && visible.size > 1) {
+                val area = Path().apply {
+                    addPath(path)
+                    lineTo(x(visible.last().first), size.height)
+                    lineTo(x(visible.first().first), size.height)
+                    close()
+                }
+                drawPath(area, color.copy(alpha = 0.14f))
+            }
             drawPath(
                 path,
                 color,
-                style = Stroke(width = 1.5f, pathEffect = if (index == 0) null else PathEffect.dashPathEffect(floatArrayOf(4f, 3f))),
+                style = Stroke(width = 2.dp.toPx(), pathEffect = if (index == 0) null else PathEffect.dashPathEffect(floatArrayOf(6f, 4f))),
             )
         }
     }

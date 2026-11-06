@@ -1,5 +1,7 @@
 package dev.koga.hopi.ui.detail
 
+import dev.koga.hopi.ui.component.GroupPosition
+import dev.koga.hopi.ui.component.GroupedAction
 import dev.koga.hopi.ui.component.pressScale
 import dev.koga.hopi.ui.theme.HopiMotion
 import androidx.compose.runtime.getValue
@@ -132,11 +134,19 @@ internal fun TransactionDetailPane(
             model == null -> Unit
             else -> {
                 val responseText = model.response.body as? BodyView.Text
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 13.dp)) {
-                    // A summary has no headers or body (yet, or ever): its cURL would be wrong, not just short.
-                    ActionButton(HopiIcons.Terminal, DetailTags.COPY_CURL, actions.copyCurl, enabled = !model.loading && !model.gone)
-                    ActionButton(HopiIcons.Link, DetailTags.COPY_URL, actions.copyUrl)
-                    ActionButton(HopiIcons.Copy, DetailTags.COPY_BODY, actions.copyBody, enabled = responseText != null)
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // M3 Expressive's connected button group: the three copies as one control, each
+                    // segment named in full for screen readers and tests ("Copy cURL").
+                    Row(Modifier.padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        // A summary has no headers or body (yet, or ever): its cURL would be wrong, not just short.
+                        GroupedAction(HopiIcons.Terminal, "cURL", DetailTags.COPY_CURL, actions.copyCurl, GroupPosition.First, enabled = !model.loading && !model.gone)
+                        GroupedAction(HopiIcons.Link, "URL", DetailTags.COPY_URL, actions.copyUrl, GroupPosition.Middle)
+                        GroupedAction(HopiIcons.Copy, "Body", DetailTags.COPY_BODY, actions.copyBody, GroupPosition.Last, enabled = responseText != null)
+                    }
+                    Spacer(Modifier.width(6.dp))
                     actions.share?.let { ActionButton(HopiIcons.Share, DetailTags.SHARE, it) }
                     actions.rules?.let { rules ->
                         rules.mock?.let { ActionButton(HopiIcons.Mock, DetailTags.MOCK, it.run, enabled = it.refusal == null) }

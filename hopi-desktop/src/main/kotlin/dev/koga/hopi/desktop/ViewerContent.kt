@@ -206,17 +206,11 @@ private fun StatusBar(viewer: Viewer, status: ViewerStatus) {
     val session by viewer.session.collectAsState()
     val notice by viewer.notice.collectAsState()
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // A filled dot only when connected, a ring otherwise; its hue is the connection's state.
+        // The connection's dot is the top bar's; this line says what it means in words.
         val tone = statusTone(status, colors)
-        Box(
-            Modifier.size(8.dp)
-                .background(if (status is ViewerStatus.Connected) tone.fg else Color.Transparent, CircleShape)
-                .border(1.5.dp, tone.fg, CircleShape),
-        )
-        Spacer(Modifier.width(8.dp))
         BasicText(
             statusText(status),
             modifier = Modifier.weight(1f).testTag(ViewerTags.STATUS),

@@ -163,14 +163,14 @@ class HopiPanesUiTest {
         onNodeWithText("Loading headers…").assertIsDisplayed()
         assertFalse(exists("No response body") || exists("Not captured", substring = true))
         // cURL would lack the headers and body still on the app's side.
-        onNodeWithText(DetailTags.COPY_CURL).assertIsNotEnabled()
+        onNodeWithContentDescription(DetailTags.COPY_CURL).assertIsNotEnabled()
 
         // The detail arrives (the request connection's `get`): it replaces the summary in place.
         submitAll(full)
         waitForText("\"name\": \"Ada\"", substring = true)
         assertFalse(exists("Loading body…"))
         onNodeWithText("Content-Type").assertIsDisplayed()
-        onNodeWithText(DetailTags.COPY_CURL).assertIsEnabled()
+        onNodeWithContentDescription(DetailTags.COPY_CURL).assertIsEnabled()
     }
 
     @Test
@@ -332,7 +332,7 @@ class HopiPanesUiTest {
         waitForText("/r20")
         val top = onNodeWithText("/r20").getBoundsInRoot().top
         onNodeWithText("/r20").performClick()
-        waitForText(DetailTags.COPY_URL)
+        waitUntil(timeoutMillis = 5_000) { existsDescription(DetailTags.COPY_URL) }
         waitForIdle()
 
         // Requests arrive while the detail covers the list.
@@ -502,7 +502,7 @@ class HopiPanesUiTest {
         }
         openResponseOf("/big")
         waitForText("\"name\": \"user 0\"", substring = true)
-        onNodeWithText(DetailTags.COPY_BODY).performClick()
+        onNodeWithContentDescription(DetailTags.COPY_BODY).performClick()
         waitForText("Response body copied (first 100k characters)")
         val copied = assertNotNull(clipboard.clip).text
         assertEquals(100_000, copied.length)
@@ -521,10 +521,10 @@ class HopiPanesUiTest {
         }
         waitForText("/a")
         onNodeWithText("/a").performClick()
-        waitForText(DetailTags.COPY_CURL)
-        onNodeWithText(DetailTags.COPY_CURL).performClick()
+        waitUntil(timeoutMillis = 5_000) { existsDescription(DetailTags.COPY_CURL) }
+        onNodeWithContentDescription(DetailTags.COPY_CURL).performClick()
         waitForText("cURL could not be copied")
-        onNodeWithText(DetailTags.COPY_URL).assertIsDisplayed()
+        onNodeWithContentDescription(DetailTags.COPY_URL).assertIsDisplayed()
     }
 
     @Test
@@ -553,8 +553,8 @@ class HopiPanesUiTest {
         assertTrue(badge.right - badge.left > 44.dp && badge.bottom - badge.top > 26.dp, "the badge kept its 44 x 26 dp at 3x: $badge")
         assertNotClipped("Hopi", "2xx", ListTags.SEARCH)
         onNodeWithText("/a").performClick()
-        waitForText(DetailTags.COPY_CURL)
-        assertNotClipped("GET 200", DetailTags.COPY_CURL, "Overview", "Response")
+        waitUntil(timeoutMillis = 5_000) { existsDescription(DetailTags.COPY_CURL) }
+        assertNotClipped("GET 200", "cURL", "Overview", "Response")
     }
 
     private fun SemanticsNodeInteractionsProvider.assertNotClipped(vararg texts: String) {
@@ -626,11 +626,11 @@ class HopiPanesUiTest {
         }
         waitForText("/items?otp=t-123")
         onNodeWithText("/items?otp=t-123").performClick()
-        waitForText(DetailTags.COPY_URL)
+        waitUntil(timeoutMillis = 5_000) { existsDescription(DetailTags.COPY_URL) }
 
         // A second client installs the plugin with `otp` redacted, and no request follows yet.
         store.includeRedaction(Redactor.create(queryParameters = listOf("otp")))
-        onNodeWithText(DetailTags.COPY_URL).performClick()
+        onNodeWithContentDescription(DetailTags.COPY_URL).performClick()
         waitForText("URL copied")
         assertEquals("https://api.example.com/items?otp=${Redactor.REDACTED}", assertNotNull(clipboard.clip).text)
     }

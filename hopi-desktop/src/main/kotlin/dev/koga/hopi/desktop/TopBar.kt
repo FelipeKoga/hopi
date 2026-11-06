@@ -1,5 +1,6 @@
 package dev.koga.hopi.desktop
 
+import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.MutableTransitionState
@@ -399,7 +400,14 @@ private fun deviceLabel(device: Device): String = listOfNotNull(platformLabel(de
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ToolbarIconButton(icon: ImageVector, description: String, onClick: () -> Unit, selected: Boolean? = null, modifier: Modifier = Modifier) {
+internal fun ToolbarIconButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    selected: Boolean? = null,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
     val colors = hopiDesktopColors
     val source = remember { MutableInteractionSource() }
     val on = selected == true
@@ -421,7 +429,8 @@ internal fun ToolbarIconButton(icon: ImageVector, description: String, onClick: 
             Modifier
                 .size(48.dp)
                 .semantics { contentDescription = description; if (selected != null) this.selected = on }
-                .clickable(interactionSource = source, indication = null, role = if (selected == null) Role.Button else Role.Switch, onClick = onClick),
+                .alpha(if (enabled) 1f else 0.38f)
+                .clickable(interactionSource = source, indication = null, enabled = enabled, role = if (selected == null) Role.Button else Role.Switch, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -453,6 +462,12 @@ internal object TopBarIcons {
 
     /** activity. */
     val Perf by lazy { icon("Perf", "M22 12h-4l-3 9L9 3l-3 9H2") }
+
+    /** pencil. */
+    val Edit by lazy { icon("Edit", "M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z", "M15 5l4 4") }
+
+    /** trash-2. */
+    val Trash by lazy { icon("Trash", "M3 6h18", "M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6", "M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2") }
 
     /** contrast. */
     val Theme by lazy { icon("Theme", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0", "M12 18a6 6 0 0 0 0-12v12z") }

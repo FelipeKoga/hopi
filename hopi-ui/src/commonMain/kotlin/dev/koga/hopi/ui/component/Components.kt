@@ -188,6 +188,60 @@ internal fun ActionButton(
     }
 }
 
+/** Where a segment sits in a connected button group: its outer corners round, its inner ones small. */
+internal enum class GroupPosition { First, Middle, Last }
+
+/**
+ * One segment of M3 Expressive's connected button group: a tonal 40 dp segment with an icon and a
+ * [label]; its corners morph toward round while pressed. [description], the label in full ("Copy
+ * cURL" for "cURL"), is its content description.
+ */
+@Composable
+internal fun GroupedAction(
+    vector: ImageVector,
+    label: String,
+    description: String,
+    onClick: () -> Unit,
+    position: GroupPosition,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val colors = LocalHopiColors.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val inner by animateDpAsState(if (pressed) 20.dp else 6.dp, HopiMotion.fastSpatial(), label = "segment")
+    val outer = 20.dp
+    val shape = RoundedCornerShape(
+        topStart = if (position == GroupPosition.First) outer else inner,
+        bottomStart = if (position == GroupPosition.First) outer else inner,
+        topEnd = if (position == GroupPosition.Last) outer else inner,
+        bottomEnd = if (position == GroupPosition.Last) outer else inner,
+    )
+    Row(
+        modifier = modifier
+            .heightIn(min = TouchTarget)
+            .alpha(if (enabled) 1f else 0.5f)
+            .semantics { contentDescription = description }
+            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier
+                .pressScale(source)
+                .heightIn(min = 40.dp)
+                .clip(shape)
+                .background(colors.secondaryContainer)
+                .indication(source, LocalIndication.current)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(vector, colors.onSecondaryContainer, size = 18.dp)
+            Spacer(Modifier.width(8.dp))
+            BasicText(label, style = HopiType.label.copy(color = colors.onSecondaryContainer), maxLines = 1)
+        }
+    }
+}
+
 @Composable
 internal fun HairlineDivider(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(LocalHopiColors.current.border))

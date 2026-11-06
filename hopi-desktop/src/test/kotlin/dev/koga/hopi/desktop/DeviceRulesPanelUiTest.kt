@@ -518,7 +518,7 @@ class DeviceRulesPanelUiTest {
     private fun ComposeUiTest.panelButton(label: String): SemanticsNodeInteraction = onNode(hasText(label) and hasAnyAncestor(hasTestTag(RulesTags.PANEL)))
 
     private fun ComposeUiTest.rowButton(label: String, row: Int): SemanticsNodeInteraction =
-        onAllNodes(hasText(label) and hasAnyAncestor(hasTestTag(RulesTags.PANEL)))[row]
+        onAllNodes(hasContentDescription(label) and hasAnyAncestor(hasTestTag(RulesTags.PANEL)))[row]
 
     /** Saves the open form and returns the new rule's id from the panel's message. */
     private fun ComposeUiTest.save(panel: RulesPanelState): Long {

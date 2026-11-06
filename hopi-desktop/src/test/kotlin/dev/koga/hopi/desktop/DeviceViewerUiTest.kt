@@ -1,5 +1,7 @@
 package dev.koga.hopi.desktop
 
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -136,8 +138,8 @@ class DeviceViewerUiTest {
         val echo = txs().first { it.url.endsWith("/echo") }
         onAllNodes(hasText("/echo", substring = true)).onFirst().performClick()
         waitUntil(timeoutMillis = 30_000) { session.store.value.get(echo.id)?.requestBody?.isNotFetched == false }
-        waitUntil(timeoutMillis = 30_000) { onAllNodes(hasText("Copy cURL")).fetchSemanticsNodes().isNotEmpty() }
-        onNodeWithText("Copy cURL").performClick()
+        waitUntil(timeoutMillis = 30_000) { onAllNodes(hasContentDescription("Copy cURL")).fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithContentDescription("Copy cURL").performClick()
         waitUntil(timeoutMillis = 15_000) { clipboard.text != null }
         val curl = clipboard.text!!
         val auth = Regex("-H '(?i:authorization): ([^']*)'").find(curl)?.groupValues?.get(1)
