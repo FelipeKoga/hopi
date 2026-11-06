@@ -6,6 +6,7 @@ import dev.koga.hopi.ktor.HopiConfig
 import dev.koga.hopi.ktor.HopiLogSink
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -20,7 +21,10 @@ class HopiConfigDefaultsTest {
         assertEquals(HopiStore.DEFAULT_MAX_ENTRIES, config.maxEntries)
         assertEquals(HopiStore.DEFAULT_MAX_TOTAL_BYTES, config.maxTotalBytes)
         assertEquals(start.maxBodyBytes, config.maxBodyBytes)
-        assertEquals(start.agentBridge, config.agentBridge)
+        // The start serves the bridge by default; a Ktor client only requests it when asked, since
+        // the start (Android's provider, Hopi.start) already did.
+        assertTrue(start.agentBridge)
+        assertFalse(config.agentBridge)
         assertEquals(HopiLogSink.Summary, config.logSink)
         assertTrue(config.rules)
     }

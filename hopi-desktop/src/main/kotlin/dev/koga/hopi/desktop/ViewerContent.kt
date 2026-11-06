@@ -269,7 +269,7 @@ private fun Placeholder() {
         BasicText("Not connected", style = HopiDesktopType.title.copy(color = colors.text))
         Spacer(Modifier.height(6.dp))
         BasicText(
-            "Pick a device, enter the app's id and connect. The app needs agentBridge = true in a debug build.",
+            "Pick a device, enter the app's id and connect. Any debug build with Hopi serves it (unless agentBridge = false).",
             style = HopiDesktopType.body.copy(color = colors.textMuted),
         )
     }

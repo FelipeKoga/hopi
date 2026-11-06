@@ -32,7 +32,7 @@ public data class StartConfig(
      */
     val summaryLog: Boolean = true,
     /** Starts the device-local agent bridge at start, before any request. */
-    val agentBridge: Boolean = false,
+    val agentBridge: Boolean = true,
 )
 
 /** A tool [HopiStart.start] started: its name, the note it returned, and its start's duration on the caller's thread. */

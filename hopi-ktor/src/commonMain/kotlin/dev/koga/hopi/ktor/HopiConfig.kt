@@ -59,7 +59,7 @@ public class HopiConfig {
      */
     public var logSink: HopiLogSink = HopiLogSink.Summary
 
-    /** Requests the device-local agent bridge (once per process; the start's `agentBridge` usually did). */
+    /** Requests the device-local agent bridge (once per process; the start's `agentBridge` usually did, and is on by default there). */
     public var agentBridge: Boolean = false
 
     /**

@@ -33,8 +33,8 @@ public class HopiStartConfig internal constructor() {
      */
     public var summaryLog: Boolean = true
 
-    /** Starts the device-local agent bridge at start, before any request, so the CLI and the desktop viewer can connect. */
-    public var agentBridge: Boolean = false
+    /** Starts the device-local agent bridge at start, before any request, so the CLI and the desktop viewer can connect; on by default. */
+    public var agentBridge: Boolean = true
 
     /**
      * Applies Hopi rules (mock, delay, fail, request edit) to URLSession requests on iOS, and to the

@@ -24,7 +24,7 @@ public object AndroidCapture {
         val redactedQueryParameters: List<String> = emptyList(),
         val redactionDisabled: Boolean = false,
         val summaryLog: Boolean = true,
-        val agentBridge: Boolean = false,
+        val agentBridge: Boolean = true,
         /** Whether the interceptor and the wrappers apply rules (docs/design/rules.md, "Configuration switch"). */
         val rules: Boolean = true,
     )

@@ -50,6 +50,11 @@ public abstract class HopiExtension {
      * this says).
      */
     public abstract val summaryLog: Property<Boolean>
+
+    /**
+     * The device-local bridge the CLI and the desktop viewer connect to, in debug builds only; on
+     * by default (it authenticates every connection, and a release build has no runtime to serve it).
+     */
     public abstract val agentBridge: Property<Boolean>
     public abstract val redactedHeaders: ListProperty<String>
     public abstract val redactedQueryParameters: ListProperty<String>
@@ -92,7 +97,7 @@ public abstract class HopiExtension {
         maxTotalBytes.convention(16L * 1024 * 1024)
         maxBodyBytes.convention(256L * 1024)
         summaryLog.convention(true)
-        agentBridge.convention(false)
+        agentBridge.convention(true)
         redactionDisabled.convention(false)
         network.applyDefaults()
         perf.applyDefaults()
