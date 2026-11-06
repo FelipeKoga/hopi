@@ -14,10 +14,14 @@ release workflow (`.github/workflows/`) builds, signs and uploads it, and the ow
 3. Generate a user token (Account, Generate User Token). The portal shows its username and password
    once; the next step asks for both. It is not the account's password.
 4. `brew install gnupg` (and `gh`, signed in with `gh auth login`, if it is not yet).
-5. Run `scripts/release-secrets.sh`. It generates the signing key (RSA 4096, no expiry; it asks for
+5. Create the `release` environment (repository Settings, Environments, New environment): add
+   yourself as a required reviewer, and under Deployment branches and tags allow only the tag
+   pattern `v*`. Its secrets are readable by the release job alone, and only once you approve
+   the run: a pushed tag waits for you before anything is built, signed or uploaded.
+6. Run `scripts/release-secrets.sh`. It generates the signing key (RSA 4096, no expiry; it asks for
    the user ID, default `koga (Hopi release signing)`, with no email unless you type one), sends
    the public key to keyserver.ubuntu.com and keys.openpgp.org, where Maven Central looks it up,
-   asks for the token, and sets the repository's four secrets: `SIGNING_KEY`,
+   asks for the token, and sets the `release` environment's four secrets: `SIGNING_KEY`,
    `SIGNING_KEY_PASSWORD`, `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD`. The key stays in
    your keyring (`~/.gnupg`) with its revocation certificate in `~/.gnupg/openpgp-revocs.d`; the
    passphrase is only in the secret. Run again with another user ID, it makes a new key and
@@ -30,7 +34,10 @@ release workflow (`.github/workflows/`) builds, signs and uploads it, and the ow
    green.
 2. Tag the commit `v<hopi.version>`: `git tag v0.1.0` (the workflow refuses a tag that is not
    `v` and `hopi.version`).
-3. Push the tag: `git push origin v0.1.0`. The release workflow runs the release build,
+3. Push the tag: `git push origin v0.1.0`, then approve the run (Actions, the Release run,
+   Review deployments): it waits for you. The release workflow first runs the release guards on
+   the tagged commit (`verifyReleaseHasNoRuntime`, `verifyIosReleaseExcludesCapture`, the plugin's
+   functional tests), with no cache, then the release build,
    `./gradlew --no-configuration-cache checkPublication -Phopi.release=true`, signed with
    `SIGNING_KEY`, then `scripts/central-release.sh`, which uploads
    `build/central/hopi-<hopi.version>-bundle.zip` and waits until the portal has validated it

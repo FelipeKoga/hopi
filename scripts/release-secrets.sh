@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prepares Hopi's Maven Central releases, once, on the owner's Mac (docs/RELEASING.md): generates
 # the release signing key, sends its public half to the keyservers Maven Central reads, and stores
-# the four secrets the release workflow uses in the GitHub repository FelipeKoga/hopi:
+# the four secrets the release workflow uses in the GitHub repository FelipeKoga/hopi, in its
+# `release` environment (create it first, docs/RELEASING.md):
 #
 #   SIGNING_KEY              the ASCII-armored secret key (the release build's signingInMemoryKey)
 #   SIGNING_KEY_PASSWORD     its passphrase, generated here (signingInMemoryKeyPassword)
@@ -82,7 +83,7 @@ put() {
     if [ -n "$offline" ]; then
         (umask 077 && printf '%s' "$2" > "$offline/$1")
     else
-        printf '%s' "$2" | gh secret set "$1" -R "$repo"
+        printf '%s' "$2" | gh secret set "$1" -R "$repo" --env release
     fi
     echo "Set $1" >&2
 }

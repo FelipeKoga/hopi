@@ -33,6 +33,10 @@ jobs:
   release:
     # As in ci.yml: xcode-27 unless the repository variable HOPI_RUNNER names another runner.
     runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    # The signing key and the Central token belong in this environment's secrets, not the
+    # repository's: give it a required reviewer and limit it to v* tags (docs/RELEASING.md), so no
+    # other workflow or branch reads them and no tag publishes without a person approving.
+    environment: release
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,21 +62,19 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # No cache: a build that signs starts from nothing another workflow run could have written.
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-      - name: Read the Kotlin version
-        id: kotlin
-        run: |
-          version=$(sed -n 's/^kotlin = "\([^"]*\)".*/\1/p' gradle/libs.versions.toml | head -n 1)
-          [ -n "$version" ] || { echo "::error file=gradle/libs.versions.toml::no kotlin version"; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Cache Kotlin/Native (~/.konan)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
+          cache-disabled: true
       # The Xcode whose clang compiles the Objective-C objects inside the published iOS klibs.
       - name: Show the Xcode
         run: xcodebuild -version
+      # What a release must never lose, on the tagged commit itself, before anything is signed: a
+      # release build of the sample links no runtime (Android, iOS), and the plugin's own tests.
+      - name: Check the release guards
+        run: |
+          ./gradlew --no-configuration-cache :sample:androidApp:verifyReleaseHasNoRuntime \
+            :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest
       # With hopi.release=true the build signs every artifact (and fails without a key) and
       # :checkPublication also asserts Central's rules.
       - name: Build, sign and check the publication
