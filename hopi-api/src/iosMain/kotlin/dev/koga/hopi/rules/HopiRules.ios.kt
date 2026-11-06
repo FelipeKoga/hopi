@@ -14,7 +14,7 @@ internal val ruleDroppedNoticeLines: Int
 /**
  * A Debug binary's first dropped rule writes one line to the system log through `NSLog` (the
  * unified log, and the console of `simctl launch --console-pty`): an app that forgot
- * `HopiSetup.shared.start()`, or calls `HopiRules` before it, would otherwise see its rules do
+ * `Hopi.shared.start()`, or calls `HopiRules` before it, would otherwise see its rules do
  * nothing and never learn why. A Release binary writes nothing, since there no runtime is the
  * normal case.
  */
@@ -27,4 +27,4 @@ internal actual fun ruleDroppedWithoutRuntime() {
 
 /** A notice line of the summary log's form, ASCII; no match in it, since a match can carry a secret. */
 private const val DROPPED_NOTICE =
-    """{"hopi":1,"notice":"HopiRules: no Hopi runtime is registered, so rules added now are dropped (each call returns -1); call HopiSetup.shared.start() first thing"}"""
+    """{"hopi":1,"notice":"HopiRules: no Hopi runtime is registered, so rules added now are dropped (each call returns -1); call Hopi.shared.start() first thing"}"""

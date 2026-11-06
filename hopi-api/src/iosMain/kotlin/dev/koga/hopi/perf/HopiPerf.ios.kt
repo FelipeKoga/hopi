@@ -14,7 +14,7 @@ internal val perfStartDroppedNoticeLines: Int
 /**
  * A Debug binary's first dropped start writes one line to the system log through `NSLog` (the
  * unified log, and the console of `simctl launch --console-pty`): an app that forgot
- * `HopiSetup.shared.start()`, calls `HopiPerf.start` before it, or was built without
+ * `Hopi.shared.start()`, calls `HopiPerf.start` before it, or was built without
  * `hopi { perf { enabled = true } }`, would otherwise see its monitors never start and never learn
  * why. A Release binary writes nothing, since there no runtime is the normal case.
  */
@@ -27,4 +27,4 @@ internal actual fun perfStartDroppedWithoutRuntime() {
 
 /** A notice line of the summary log's form, ASCII; no monitor list, the same line for every start. */
 private const val DROPPED_NOTICE =
-    """{"hopi":1,"notice":"HopiPerf: no Hopi runtime is registered, so monitors started now do not start (each start is dropped); call HopiSetup.shared.start() first thing, with hopi { perf { enabled = true } }"}"""
+    """{"hopi":1,"notice":"HopiPerf: no Hopi runtime is registered, so monitors started now do not start (each start is dropped); call Hopi.shared.start() first thing, with hopi { perf { enabled = true } }"}"""

@@ -11,13 +11,13 @@ plugins {
     alias(libs.plugins.compose.multiplatform)
     // Hopi's whole iOS setup (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project"):
     // hopi-api in every build, exported; hopi-start, which brings the runtimes, in a Debug build
-    // only (-Phopi.enabled, else Xcode's configuration), exported; the generated HopiSetup Swift
+    // only (-Phopi.enabled, else Xcode's configuration), exported; the generated Hopi Swift
     // calls in every configuration; the iOS release guard before every Release link. The thin
     // hopi-ktor is in every build and installs nothing in a Release framework.
     id("io.github.felipekoga.hopi")
 }
 
-// The start's settings, which HopiSetup passes to Hopi.start in a Debug build: the Android app's
+// The start's settings, which Hopi passes to Hopi.start in a Debug build: the Android app's
 // (sample/androidApp). The CLI and the desktop viewer reach the app through its bridge; the
 // giant-body measurements set the caps at build time (`-Psample.maxBodyBytes=8388608`, through the
 // Xcode build phase's SAMPLE_GRADLE_ARGS); the monitors are registered, none started.

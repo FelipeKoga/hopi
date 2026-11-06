@@ -115,10 +115,10 @@ dependencies {
 Then one line in Swift, first thing at launch, the same in every configuration and with no `#if`:
 
 ```swift
-HopiSetup.shared.start()
+Hopi.shared.start()
 ```
 
-The plugin generates `HopiSetup`. In a Debug build `start()` records every URLSession request of
+The plugin generates `Hopi`. In a Debug build `start()` records every URLSession request of
 the process, SDKs and Ktor's Darwin engine included; in a Release build it does nothing and the
 framework holds no runtime. The `embedAndSignAppleFrameworkForXcode` build phase needs no change.
 A KMP app on both platforms also applies the plugin to its Android application module and declares

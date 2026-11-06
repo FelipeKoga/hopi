@@ -289,7 +289,7 @@ so the app pays no extra cost.
 ### Gradle plugin on KMP modules
 Done (the runtime-split plan's O8, 2026-11-03): `io.github.felipekoga.hopi` in a KMP shared module adds
 `hopi-api` to every build and `hopi-start` to a Debug one (`-Phopi.enabled`, else Xcode's
-`CONFIGURATION` as the Kotlin plugin reads it), generates `HopiSetup` for Swift's one call and
+`CONFIGURATION` as the Kotlin plugin reads it), generates `Hopi` for Swift's one call and
 applies the iOS release guard itself. Left: CocoaPods' configuration property
 (`kotlin.native.cocoapods.configuration`) and JVM targets, which the plugin does not handle.
 

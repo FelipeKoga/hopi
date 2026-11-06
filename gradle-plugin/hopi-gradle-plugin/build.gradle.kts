@@ -52,7 +52,7 @@ gradlePlugin {
             displayName = "Hopi"
             description = "Hopi's runtimes in the debuggable variants of an Android app (OkHttp and HttpURLConnection capture, " +
                 "the performance monitors) and in the Debug iOS frameworks of a Kotlin Multiplatform module (with a generated " +
-                "HopiSetup for Swift), and a build that fails when one reaches a release build."
+                "Hopi for Swift), and a build that fails when one reaches a release build."
         }
     }
 }

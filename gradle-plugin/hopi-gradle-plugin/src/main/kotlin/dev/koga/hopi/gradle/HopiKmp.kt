@@ -37,10 +37,10 @@ import org.jetbrains.kotlin.konan.target.Family
  *   `debugImplementation` (`hopi-network`, `hopi-perf`, as an Android app does; the plugin creates
  *   that configuration in a module without an Android target): `hopi-start` as `api` of `iosMain`,
  *   exported from every iOS framework; it brings the runtimes and core, and the generated
- *   `HopiSetup` starts the tools of the declared ones;
- * - every build: `HopiSetup` generated into `iosMain` ([GenerateHopiSetup]): in a Debug build its
+ *   `Hopi` starts the tools of the declared ones;
+ * - every build: `Hopi` generated into `iosMain` ([GenerateHopiSetup]): in a Debug build its
  *   `start()` runs `Hopi.start` with the `hopi { }` block, in any other it does nothing, so Swift
- *   calls `HopiSetup.shared.start()` the same way in every configuration;
+ *   calls `Hopi.shared.start()` the same way in every configuration;
  * - every Release binary of a Kotlin/Native target: the iOS release guard before its link
  *   ([HopiIosReleaseGuard]), whatever `enabled` says.
  *
@@ -78,7 +78,7 @@ internal object HopiKmp {
             if (on) listOf(HopiModules.dependency(project, START)) else emptyList()
         }
         val generate = project.tasks.register("generateHopiSetup", GenerateHopiSetup::class.java) { task ->
-            task.description = "Generates HopiSetup, which starts Hopi with the hopi { } block in a Debug build and does nothing in any other."
+            task.description = "Generates Hopi, which starts Hopi with the hopi { } block in a Debug build and does nothing in any other."
             task.runtime.set(extension.iosRuntime)
             task.maxEntries.set(extension.maxEntries)
             task.maxTotalBytes.set(extension.maxTotalBytes)

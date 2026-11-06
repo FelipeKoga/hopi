@@ -193,7 +193,7 @@ class HopiPluginUnitTest {
     fun theDebugSetupStartsHopiWithTheBlock() {
         val source = setupTask(runtime = true).render()
         assertTrue("package dev.koga.hopi.setup\n" in source, source)
-        assertTrue("public object HopiSetup {" in source, source)
+        assertTrue("public object Hopi {" in source, source)
         assertTrue("    public fun start() {\n        dev.koga.hopi.start.Hopi.start {\n" in source, source)
         for (line in listOf(
             "maxEntries = 42", "maxTotalBytes = 4096L", "maxBodyBytes = 1024L", "summaryLog = false", "agentBridge = true",
@@ -207,7 +207,7 @@ class HopiPluginUnitTest {
     @Test
     fun theReleaseSetupDoesNothingAndNamesNoHopiType() {
         val source = setupTask(runtime = false).render()
-        assertTrue("public object HopiSetup {" in source, source)
+        assertTrue("public object Hopi {" in source, source)
         assertTrue("    public fun start() {\n    }\n" in source, source)
         assertFalse("dev.koga.hopi.start" in source, source)
         assertFalse("agentBridge" in source, source)

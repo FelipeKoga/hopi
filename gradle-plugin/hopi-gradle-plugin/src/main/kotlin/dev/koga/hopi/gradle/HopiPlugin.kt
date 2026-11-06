@@ -16,7 +16,7 @@ import org.gradle.util.GradleVersion
  *   release guard;
  * - a Kotlin Multiplatform module (`org.jetbrains.kotlin.multiplatform`; [HopiKmp]) whose iOS
  *   framework an app links: `hopi-api` in every build, `hopi-start` (which brings the runtimes) in
- *   a Debug build only, a generated `HopiSetup` that Swift calls the same way in every
+ *   a Debug build only, a generated `Hopi` that Swift calls the same way in every
  *   configuration, and the iOS release guard before every Release link.
  *
  * Each path's code is a class of its own, loaded only once its Gradle plugin is applied, so this

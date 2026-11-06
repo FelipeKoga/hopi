@@ -48,7 +48,7 @@ public class HopiStartConfig internal constructor() {
 
     /**
      * Starts the network capture (on iOS URLSession's, on the JVM the Ktor plugin's recorder). The
-     * Gradle plugin's `HopiSetup` sets it from the module's `debugImplementation` of `hopi-network`.
+     * Gradle plugin's `Hopi` sets it from the module's `debugImplementation` of `hopi-network`.
      */
     public var network: Boolean = true
 

@@ -67,7 +67,7 @@ targets:
         shell: /bin/sh
         script: |
           # Kotlin's standard build phase, nothing of Hopi's: the io.github.felipekoga.hopi plugin reads Xcode's
-          # CONFIGURATION, so Debug links Hopi's runtimes and hopi-start (HopiSetup.shared.start()
+          # CONFIGURATION, so Debug links Hopi's runtimes and hopi-start (Hopi.shared.start()
           # starts Hopi), any other configuration no runtime, only hopi-api and the thin Ktor
           # plugin, and the plugin's iOS release guard fails a Release link that would hold one
           # (docs/ARCHITECTURE.md, "Selecting the runtimes in a KMP project"). SAMPLE_GRADLE_ARGS,
@@ -80,7 +80,7 @@ targets:
           # Word splitting on purpose: one argument per Gradle flag.
           ./gradlew :sample:shared:embedAndSignAppleFrameworkForXcode ${SAMPLE_GRADLE_ARGS:-}
   # Swift concurrency's URLSession APIs under automatic capture (Kotlin/Native cannot call them):
-  # hosted by the app, so they run in its process, after its HopiSetup.shared.start().
+  # hosted by the app, so they run in its process, after its Hopi.shared.start().
   iosAppCaptureTests:
     type: bundle.unit-test
     platform: iOS

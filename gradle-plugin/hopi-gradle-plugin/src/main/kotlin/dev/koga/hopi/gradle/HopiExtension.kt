@@ -14,7 +14,7 @@ import org.gradle.api.tasks.Nested
  * client's installation makes the start's first; capture's own settings are in [network], the
  * monitors' in [perf].
  *
- * In a KMP module the generated `HopiSetup` passes the top settings, `network { rules }`,
+ * In a KMP module the generated `Hopi` passes the top settings, `network { rules }`,
  * `perf { enabled }` (so iOS registers the monitors only with `perf { enabled = true }`, as Android
  * does) and `perf { remoteControl }` to `Hopi.start`; the others are Android's (iOS always captures
  * URLSession, and starts monitors at launch with `-hopiPerf`).
@@ -22,7 +22,7 @@ import org.gradle.api.tasks.Nested
 public abstract class HopiExtension {
     /**
      * False: no variant gets a runtime, a transform or a generated class, and in a KMP module no
-     * build gets `hopi-start` and `HopiSetup.start()` does nothing. The release guards still run on
+     * build gets `hopi-start` and `Hopi.start()` does nothing. The release guards still run on
      * every non-debuggable variant and every iOS Release link: they refuse a runtime whatever this
      * says.
      */
@@ -37,7 +37,7 @@ public abstract class HopiExtension {
     /**
      * Read-only, for a KMP module's own build logic (a debug-only source set, a build label): true
      * when this Gradle invocation gives the module's iOS compilations `hopi-start` and the generated
-     * `HopiSetup.start()` starts Hopi, which is a Debug build (`-Phopi.enabled=true`, or without the
+     * `Hopi.start()` starts Hopi, which is a Debug build (`-Phopi.enabled=true`, or without the
      * property Xcode's Debug configuration) with [enabled] and a runtime declared as
      * `debugImplementation`; false in any other build, and in an Android application module.
      */

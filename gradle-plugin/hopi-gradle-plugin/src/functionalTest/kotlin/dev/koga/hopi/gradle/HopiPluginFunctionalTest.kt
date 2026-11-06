@@ -38,7 +38,7 @@ import org.gradle.testkit.runner.TaskOutcome
  * module names, as a consumer of Maven Local does. A runtime that reaches a release variant fails
  * the build in the release guard, before any dex task. In an iOS-only Kotlin Multiplatform module
  * of a build with no AGP, the Gradle invocation's Xcode configuration (or `-Phopi.enabled`) decides
- * whether the iOS compilations and frameworks get `hopi-start` and what the generated `HopiSetup`
+ * whether the iOS compilations and frameworks get `hopi-start` and what the generated `Hopi`
  * does, and every Release link gets the iOS release guard. A KMP module whose Kotlin plugin is
  * declared below the plugin's scope fails with the same-scope rule.
  *
@@ -467,8 +467,8 @@ class HopiPluginFunctionalTest {
      * runtime-split plan's O8). The Gradle invocation decides: Xcode's `CONFIGURATION=Debug` gives
      * every iOS compilation `hopi-start` (with the core it brings, here a stand-in project, as the
      * plugin takes a project of that name over the coordinates) and every framework exports it with
-     * `hopi-api`, and `HopiSetup` starts Hopi with the `hopi { }` block; `CONFIGURATION=Release`
-     * gives `hopi-api` alone and a `HopiSetup` that does nothing, and configures again, since the
+     * `hopi-api`, and `Hopi` starts Hopi with the `hopi { }` block; `CONFIGURATION=Release`
+     * gives `hopi-api` alone and a `Hopi` that does nothing, and configures again, since the
      * configuration cache keeps the variable as an input (a second Debug run reuses its entry).
      * Every Release link, and no Debug link, depends on its iOS release guard, which passes in the
      * Release build and fails with `-Phopi.enabled=true`, naming what it found, unless the release
@@ -478,7 +478,7 @@ class HopiPluginFunctionalTest {
     @Test
     fun aKmpModuleGetsHopiStartInADebugBuildOnly() {
         val project = kmpFixture()
-        val setup = project.resolve("shared/build/generated/hopi/iosMain/kotlin/dev/koga/hopi/setup/HopiSetup.kt")
+        val setup = project.resolve("shared/build/generated/hopi/iosMain/kotlin/dev/koga/hopi/setup/Hopi.kt")
         val tasks = arrayOf(":shared:hopiReport", ":shared:generateHopiSetup")
         val guard = ":shared:hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64"
 
@@ -491,7 +491,7 @@ class HopiPluginFunctionalTest {
         }
         assertEquals("", debugReport["link debugFramework"], "a Debug link has no guard")
         assertEquals("hopiReleaseGuardLinkReleaseFrameworkIosSimulatorArm64", debugReport["link releaseFramework"])
-        assertEquals("true", debugReport["iosMain generated"], "HopiSetup's directory is an iosMain source directory")
+        assertEquals("true", debugReport["iosMain generated"], "Hopi's directory is an iosMain source directory")
         val debugSetup = setup.readText()
         assertTrue("        dev.koga.hopi.start.Hopi.start {\n" in debugSetup, debugSetup)
         for (line in listOf("agentBridge = true", "maxBodyBytes = 1024L", "redactHeaders(\"X-Api-Key\")", "network = true", "perf = true", "rules = true")) {
