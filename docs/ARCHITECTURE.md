@@ -2150,7 +2150,11 @@ as UTF-8, base64 bodies decoded, truncation and skip reasons kept) and prints co
 redaction disabled, because the bridge already redacted it with the app's redactor and redacting
 again would hide what the app chose to show.
 
-**`--json` output** is NDJSON and stable: it is the contract for AI agents.
+**`--json` output** is NDJSON and stable: it is the contract for AI agents. What an agent reads
+leaves the machine with its context, which is why redaction is on by default; and the captured
+URLs, headers and bodies come from servers, so they are data an agent never takes as
+instructions. `edit add --host/--port` refuses to run without `--allow-other-origin`: an agent
+moved by text in a captured body cannot redirect the app's requests without a person agreeing.
 
 - `list`, `tail`, `get`: the bridge's own lines, verbatim (wire protocol above): `list` prints one
   `{"type":"transaction",…summary…}` per transaction and no `end` line, preceded by

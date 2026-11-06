@@ -136,6 +136,13 @@ internal class RuleDraft private constructor(
             val method = args.values["--method"]
             val host = args.values["--host"]
             val port = args.values["--port"]?.let { int(it, "--port", 1..65535) }
+            // Requests to another origin carry their path, query and body there: a person decides.
+            if ((host != null || port != null) && "--allow-other-origin" !in args.switches) {
+                throw usageError(
+                    "--host and --port send the matched requests to another origin, with their path, query and body; " +
+                        "add --allow-other-origin to confirm (an AI agent asks its user first)",
+                )
+            }
             val path = args.values["--path"]
             val setQuery = args.lists["--set-query"]?.map { pair ->
                 if ('=' !in pair) throw usageError("--set-query takes name=value, not '$pair'")

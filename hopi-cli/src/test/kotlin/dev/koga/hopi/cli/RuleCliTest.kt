@@ -108,6 +108,9 @@ class RuleCliTest {
         assertTrue("0..120s" in draftError("delay", "add", "--match", "/a", "--before-request", "121s"))
         assertTrue("needs --before-request" in draftError("delay", "add", "--match", "/a"))
         assertTrue("at least one" in draftError("edit", "add", "--match", "/a"))
+        assertTrue("--allow-other-origin" in draftError("edit", "add", "--match", "/a", "--host", "staging.example.com"))
+        assertTrue("--allow-other-origin" in draftError("edit", "add", "--match", "/a", "--port", "8443"))
+        RuleDraft.rule(parse("edit", "add", "--match", "/a", "--host", "staging.example.com", "--allow-other-origin", "--app", "a.b")) { it.encodeToByteArray() }
         assertTrue("--source" in draftError("fail", "add", "--match", "/a", "--with", "reset", "--source", "cronet"))
         assertEquals(1500, RuleDraft.duration("1.5s", "--x"))
         assertEquals(250, RuleDraft.duration("250ms", "--x"))

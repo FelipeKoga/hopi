@@ -25,7 +25,7 @@ internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<S
     EditAdd(
         "edit add",
         Ids.NONE,
-        RULE_FLAGS + REQUEST_EDIT_FLAGS + setOf("--status", "--set-response-header", "--add-response-header", "--remove-response-header", "--response-body"),
+        RULE_FLAGS + REQUEST_EDIT_FLAGS + setOf("--allow-other-origin", "--status", "--set-response-header", "--add-response-header", "--remove-response-header", "--response-body"),
     ),
     RulesLs("rules ls", Ids.NONE, TARGET_FLAGS + "--json"),
     RulesRm("rules rm", Ids.MANY, TARGET_FLAGS + "--json"),
@@ -63,7 +63,7 @@ internal val REPEATABLE: Set<String> = setOf(
 
 /** Flags without a value. */
 private val SWITCHES = setOf(
-    "--json", "--disabled", "--frames", "--hangs", "--cpu", "--memory", "--no-expiry", "--threads", "--pss", "--samples", "--fps",
+    "--json", "--disabled", "--allow-other-origin", "--frames", "--hangs", "--cpu", "--memory", "--no-expiry", "--threads", "--pss", "--samples", "--fps",
 )
 
 /** `perf start` and `perf stop`: one switch per monitor, named as on the wire. */
@@ -213,7 +213,7 @@ internal val USAGE_TEXT: String = """
     |  mock add  --match M --status N [--header 'K: V']... [--body B] [--from <id>] [--delay D]
     |  fail add  --match M --with timeout|reset|unknown-host|cancel [--after D]
     |  delay add --match M [--before-request D] [--before-response D]
-    |  edit add  --match M [--method X] [--host H] [--port N] [--path P] [--set-query k=v]...
+    |  edit add  --match M [--method X] [--host H --port N --allow-other-origin] [--path P] [--set-query k=v]...
     |            [--remove-query k]... [--set-header 'K: V']... [--add-header 'K: V']...
     |            [--remove-header K]... [--body B] [--status N] [--set-response-header 'K: V']...
     |            [--add-response-header 'K: V']... [--remove-response-header K]... [--response-body B]
@@ -223,6 +223,8 @@ internal val USAGE_TEXT: String = """
     |  in a host * matches any run, in a path * one segment and ** any; ?page=2&debug&!trace adds
     |  query predicates. Every add also takes --query, --match-header 'K: glob', --times N,
     |  --priority N, --source ktor,okhttp,urlconnection,urlsession, --label TEXT and --disabled.
+    |  --host and --port send the matched requests elsewhere (credentials stay behind): they need
+    |  --allow-other-origin, which an AI agent adds only once its user has agreed.
     |  B is @file, @- (stdin) or the text itself. D is a duration: 500ms, 2s (at most 120s).
     |
     |Performance (the app needs hopi-perf; every monitor is off until started):
