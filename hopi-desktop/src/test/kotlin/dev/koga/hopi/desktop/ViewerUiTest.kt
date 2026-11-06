@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.KeyInjectionScope
@@ -122,6 +125,30 @@ class ViewerUiTest {
     }
 
     @Test
+    fun aJsonResponseShowsInColorsAndOpensFullSizeWithASearch() = runComposeUiTest {
+        val app = FakeApp(root.resolve("5151")).also { closeables += it }
+        val orders = (1..8).joinToString(",") { n -> """{"id":${1000 + n},"total":${n * 12.5},"status":"${if (n % 3 == 0) "refunded" else "paid"}","gift":${n % 2 == 0}}""" }
+        val json = """{"user":{"id":42,"name":"Ada Lovelace","email":"ada@example.com","verified":true,"roles":["admin","editor"],"manager":null},"orders":[$orders],"next":"/users/42/orders?page=2"}"""
+        app.add { completeTx(it, url = "https://api.example.com/users/42", responseBody = textBody(json)) }
+        viewer()
+        waitForText("JVM 5151")
+        onNodeWithTag(ViewerTags.APP_FIELD).performTextInput(APP)
+        onNodeWithTag(ViewerTags.CONNECT).performClick()
+        waitForText("/users/42")
+        onNodeWithText("/users/42", substring = true).performClick()
+        waitForText("Response")
+        onNodeWithText("Response").performClick()
+        waitForText("Ada Lovelace")
+        screenshot("viewer-response.png")
+
+        onNodeWithContentDescription("Expand body").performClick()
+        waitUntil(timeoutMillis = 15_000) { onAllNodes(hasContentDescription("Search in body")).fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithContentDescription("Search in body").performTextInput("refunded")
+        waitForText("1 of 2")
+        screenshotAll("viewer-body-search.png")
+    }
+
+    @Test
     fun theStatusBarFollowsTheAppStoppingAndStartingAgain() = runComposeUiTest {
         val directory = root.resolve("7")
         val first = FakeApp(directory)
@@ -160,6 +187,16 @@ class ViewerUiTest {
         assertFalse(connected.sameAs(updated.copy(app = "dev.koga.other")))
         assertFalse(connected.sameAs(Target(AndroidDevice("emulator-5556", "device", "Pixel", emptyList()), "dev.koga.sample")))
         assertFalse(connected.sameAs(null))
+    }
+
+    /** [screenshot] with every root drawn over the window's (a dialog is a root of its own). */
+    private fun ComposeUiTest.screenshotAll(name: String) {
+        val directory = System.getProperty("hopi.desktop.screenshots") ?: return
+        val roots = onAllNodes(isRoot()).fetchSemanticsNodes().indices.map { onAllNodes(isRoot())[it].captureToImage().toAwtImage() }
+        val image = java.awt.image.BufferedImage(roots[0].width, roots[0].height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        image.createGraphics().apply { roots.forEach { drawImage(it, 0, 0, null) }; dispose() }
+        Files.createDirectories(Paths.get(directory))
+        ImageIO.write(image, "png", Paths.get(directory, name).toFile())
     }
 
     /** Writes the composed window content where the build's test task says (build/reports/screenshots). */

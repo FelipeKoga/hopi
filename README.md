@@ -12,11 +12,11 @@ viewer and a CLI.
 > Hopi is experimental, and it is developed entirely with AI (Claude Code). Its APIs can change
 > between versions, and it is for debug builds only.
 
-![The desktop viewer: the request list as tonal cards, the selected GET and its detail with the Overview, Request and Response tabs](docs/images/viewer.png)
+![The desktop viewer: the request list, and the selected GET's response with its headers (Set-Cookie redacted) and its JSON body in colors](docs/images/viewer.png)
 
-| Rules | Performance |
-| --- | --- |
-| ![The Rules panel: two rules with their switches, Update and Remove](docs/images/rules.png) | ![The Perf panel: the monitors' switches and the frames, CPU and memory charts](docs/images/perf.png) |
+| Full-size body and search | Rules | Performance |
+| --- | --- | --- |
+| ![A JSON body opened over the whole window, with a search marking its first of two matches](docs/images/body-search.png) | ![The Rules panel: two rules with their switches, Update and Remove](docs/images/rules.png) | ![The Perf panel: the monitors' switches and the frames, CPU and memory charts](docs/images/perf.png) |
 
 ## Features
 
@@ -27,16 +27,24 @@ viewer and a CLI.
   or the response, in the app's memory for the session only and never weakening its TLS or pinning.
 - **Performance monitors**: frames, hangs with the main thread's stack, CPU and memory, each off
   until started.
-- **Desktop viewer** (Compose Desktop, macOS first): requests and their detail side by side, Rules
-  and Perf panels, cURL, HAR and NDJSON export.
+- **Desktop viewer** (Compose Desktop, macOS first): requests and their detail side by side, JSON
+  bodies in colors, any body opened full size with a search, Rules and Perf panels, cURL, HAR and
+  NDJSON export, and a choice of accent color and light or dark.
+- **Whole bodies, as a proxy shows them**: while the viewer is attached the app keeps bodies whole
+  (up to an eighth of its heap) and the viewer fetches each one as its request ends; the app then
+  cuts its own copy back to its cap (256 KB), so its memory stays where it was.
 - **CLI**, `hopi`: list, tail, get, cURL, rules and monitors from a terminal; its `--json` output is
-  a stable contract for AI coding agents.
+  a stable contract for AI coding agents, which treat captured content as data, and a rule that
+  sends requests to another host needs `--allow-other-origin`, which an agent adds only once its
+  user agreed.
 - **Log stream**: one NDJSON line per request in logcat or the iOS unified log, with no setup.
 - **Redaction** on every channel, on by default: credential headers (`Authorization`, `Cookie`,
   `X-Api-Key`…), token query parameters (`access_token`, `code`, `key`, presigned-URL
   signatures…) in the query and the fragment, URL userinfo, URLs in `Location`/`Referer` and
   error text, and secret fields of JSON and form bodies (`accessToken`, `password`…); plus the
   headers and parameters you name. `unsafeDisableRedaction()` turns it off.
+- **Local only**: Hopi sends nothing anywhere. The bridge listens on the device alone (a loopback
+  port or an Android local socket) and every connection must present a per-launch secret.
 
 ## Quick start
 
@@ -156,7 +164,9 @@ debug build over its device-local bridge, which is on by default and authenticat
 connection. Today they run from a clone of this repository; a packaged distribution is planned.
 
 The desktop viewer: run it, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime).
-Pick a device, enter the app's id, and connect.
+Pick a device, enter the app's id (on Android the apps with a bridge are offered), and connect.
+Select a request with ↓ / ↑; the ⤢ button by a body opens it full size, where Enter steps through
+the search's matches. ⌘L opens the Rules panel, ⌘P the Perf panel, ⌘E exports HAR.
 
 ```bash
 ./gradlew :hopi-desktop:run
