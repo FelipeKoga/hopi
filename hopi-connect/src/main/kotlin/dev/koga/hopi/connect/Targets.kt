@@ -231,6 +231,7 @@ public class Targets(private val environment: HostEnvironment) {
             none = "no Android device is ready: start an emulator or connect a phone (adb devices)",
         )
         val socketName = "hopi.$app"
+        val unreachable = "app not running or agentBridge = false: nothing serves localabstract:$socketName on $serial"
         // The hook is registered before the forward exists, so a SIGINT right after adb printed the
         // port still removes it; it does nothing until the port is known.
         val port = AtomicInteger(0)
@@ -247,12 +248,20 @@ public class Targets(private val environment: HostEnvironment) {
             environment.shutdownHooks.remove(hook)
             throw e
         }
+        // The key is the connection's first line, so it is read before connecting. No file, no bridge.
+        val secrets = try {
+            adb.readProof(serial, app) ?: throw notReachable(unreachable)
+        } catch (e: Throwable) {
+            remove()
+            environment.shutdownHooks.remove(hook)
+            throw e
+        }
         return BridgeEndpoint(
             port = port.get(),
-            token = null,
+            token = secrets.key,
             platform = Platform.Android,
             app = app,
-            unreachableMessage = "app not running or agentBridge = false: nothing serves localabstract:$socketName on $serial",
+            unreachableMessage = unreachable,
             transportLost = {
                 if (adb.hasForward(serial, port.get()) == false) {
                     "adb lost its connection to $serial and dropped the forward; the app may still be running: run the command again"
@@ -260,9 +269,8 @@ public class Targets(private val environment: HostEnvironment) {
                     null
                 }
             },
-            // Read only once hello arrived, so an app that is not running still reads as not running.
             proof = ProofCheck(
-                expected = { adb.readProof(serial, app) },
+                expected = { secrets.proof },
                 mismatch = "localabstract:$socketName on $serial is not $app's bridge (its hello lacks the proof $app wrote): " +
                     "another app may hold the socket name; if $app just restarted, run the command again",
             ),

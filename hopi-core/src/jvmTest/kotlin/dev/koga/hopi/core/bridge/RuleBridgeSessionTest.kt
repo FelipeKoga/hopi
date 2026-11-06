@@ -80,7 +80,7 @@ class RuleBridgeSessionTest {
     @Test
     fun writeCommandsNeedHelloFirstOnTheSameConnection() {
         val client = serve()
-        for (line in listOf(addLine("{\"fail\":\"reset\"}"), "{\"cmd\":\"rules.list\"}", "{\"cmd\":\"rules.clear\"}", "{\"cmd\":\"blob.put\",\"blob\":1,\"offset\":0,\"data\":\"\"}")) {
+        for (line in listOf(addLine("{\"fail\":\"reset\"}"), "{\"cmd\":\"rules.list\"}", "{\"cmd\":\"rules.clear\"}", "{\"cmd\":\"clear\"}", "{\"cmd\":\"blob.put\",\"blob\":1,\"offset\":0,\"data\":\"\"}")) {
             assertError(BridgeError.BAD_REQUEST, client.request(line), "hello first")
         }
         assertSame(RuleState.EMPTY, RuleEngine.state)

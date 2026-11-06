@@ -33,6 +33,12 @@ public class BridgeToken private constructor(private val value: String) {
         /** A fresh token from the OS CSPRNG, as lowercase hex. */
         public fun generate(): BridgeToken = fromBytes(secureRandomBytes(BYTES))
 
+        /** The token [hex] (64 lowercase hex characters), as a client read it (tests). */
+        public fun of(hex: String): BridgeToken {
+            require(hex.length == BYTES * 2 && hex.all { it in HEX }) { "a bridge token is ${BYTES * 2} lowercase hex characters" }
+            return BridgeToken(hex)
+        }
+
         internal fun fromBytes(bytes: ByteArray): BridgeToken {
             require(bytes.size >= 16) { "a bridge token needs at least 128 bits" }
             val out = StringBuilder(bytes.size * 2)

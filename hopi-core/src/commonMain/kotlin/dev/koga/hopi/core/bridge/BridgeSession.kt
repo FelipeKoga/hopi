@@ -227,6 +227,12 @@ public class BridgeSession(
                         }
                     }
                     command is BridgeCommand.Perf -> servePerf(command)
+                    command is BridgeCommand.Clear -> {
+                        // `through`: the last id the clear covers, so a host viewer clears exactly those
+                        // (its tail may already hold transactions started after it).
+                        val through = store.clear()
+                        reply(JsonWriter().beginObject().field("type", "ok").field("through", through).endObject().toString())
+                    }
                     !RuleEngine.rulesAvailable -> reply(error(BridgeError.UNSUPPORTED, "rules are off in this app (rules = false)"))
                     else -> serveRules(command)
                 }
@@ -260,12 +266,6 @@ public class BridgeSession(
                     while (true) {
                         if (reader.readLine() == BridgeLine.End) return
                     }
-                }
-                BridgeCommand.Clear -> {
-                    // `through`: the last id the clear covers, so a host viewer clears exactly those
-                    // (its tail may already hold transactions started after it).
-                    val through = store.clear()
-                    reply(JsonWriter().beginObject().field("type", "ok").field("through", through).endObject().toString())
                 }
                 else -> serveRules(command)
             }

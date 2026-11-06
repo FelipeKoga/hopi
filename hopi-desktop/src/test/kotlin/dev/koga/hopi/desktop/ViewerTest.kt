@@ -351,6 +351,8 @@ private class ScriptedAdb : AutoCloseable {
                 bridgeListings.incrementAndGet()
                 ProcessResult(0, "Num RefCount Protocol Flags Type St Inode Path\n0: 00000002 0 00010000 0001 01 81 @hopi.$APP\n", "")
             }
+            // The app's proof file: its proof, then the key a client sends first.
+            "run-as" in args -> ProcessResult(0, "${"5e".repeat(32)}\n${"a7".repeat(32)}\n", "")
             "--remove" in args -> {
                 removed += args.last().removePrefix("tcp:").toInt()
                 ProcessResult(0, "", "")

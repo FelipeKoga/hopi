@@ -24,7 +24,10 @@ public sealed interface BridgeCommand {
     /** [rules]: also send `{"type":"rules","rev":N}` whenever the rule set changes. */
     public data class Tail(public val since: Long, public val rules: Boolean = false) : BridgeCommand
 
-    public data object Clear : BridgeCommand
+    /** Drops every record: a write, so only after `hello` on the same connection. */
+    public data object Clear : BridgeCommand {
+        override val isWrite: Boolean get() = true
+    }
 
     /** [rule] is the rule object, parsed by `RuleJson.parseRule` against the session's blobs. */
     public data class RulesAdd(public val rule: Map<String, Any?>) : BridgeCommand {

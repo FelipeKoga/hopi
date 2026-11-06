@@ -199,11 +199,13 @@ class RuleClientTest {
     @Test
     fun aSquatterWithoutTheProofReceivesHelloAndNothingElse() {
         val peer = scripted("""{"type":"hello","protocol":1,"app":"$APP","platform":"android","count":0,"dropped":0,"rules":true}""")
-        val endpoint = BridgeEndpoint(peer.port, token = null, Platform.Android, APP, "nothing", proof = ProofCheck({ "the-proof" }, "not the app's bridge"))
+        val key = "a7".repeat(32)
+        val endpoint = BridgeEndpoint(peer.port, token = key, Platform.Android, APP, "nothing", proof = ProofCheck({ "the-proof" }, "not the app's bridge"))
         BridgeClient.connect(endpoint, 5_000).use { client ->
             assertEquals(ExitCode.NOT_REACHABLE, assertFailsWith<CliException> { client.handshake(null) }.exitCode)
         }
-        assertEquals(listOf("""{"cmd":"hello"}"""), peer.lines())
+        // It gets the key, which opens nothing without the proof it cannot show.
+        assertEquals(listOf(key, """{"cmd":"hello"}"""), peer.lines())
     }
 
     @Test

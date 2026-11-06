@@ -7,6 +7,7 @@ import dev.koga.hopi.connect.ProcessResult
 import dev.koga.hopi.connect.ProcessRunner
 import dev.koga.hopi.core.bridge.AgentBridgeServer
 import dev.koga.hopi.core.bridge.BridgeInfo
+import dev.koga.hopi.core.bridge.BridgeToken
 import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
@@ -67,10 +68,13 @@ class DeviceFlowTest {
         return transaction
     }
 
-    /** A token-less bridge, as an Android app serves it behind adb's forward; [proof] goes in its hello. */
-    private fun androidBridge(app: String = APP, proof: String? = PROOF): Int {
+    /**
+     * A bridge as an Android app serves it behind adb's forward: [key] its first line, [proof] in its
+     * hello. A squatter has neither (null).
+     */
+    private fun androidBridge(app: String = APP, proof: String? = PROOF, key: BridgeToken? = BridgeToken.of(KEY)): Int {
         val listener = LoopbackListener()
-        val server = AgentBridgeServer(listener, store, BridgeInfo(app, "android", proof), token = null)
+        val server = AgentBridgeServer(listener, store, BridgeInfo(app, "android", proof), token = key)
         server.start()
         closeables += AutoCloseable { server.close() }
         return listener.port
@@ -79,7 +83,7 @@ class DeviceFlowTest {
     private class Adb(
         private val devices: String,
         private val forwardList: () -> ProcessResult = { ProcessResult(1, "", "unexpected") },
-        private val proof: () -> ProcessResult = { ok(PROOF) },
+        private val proof: () -> ProcessResult = { ok("$PROOF\n$KEY\n") },
         private val remove: () -> ProcessResult = { ok() },
         private val forwardPort: () -> ProcessResult,
     ) {
@@ -118,7 +122,7 @@ class DeviceFlowTest {
         assertEquals(listOf(listOf("-s", "emulator-5554", "exec-out", "run-as", APP, "cat", "cache/hopi/$APP.proof")), adb.proofReads)
         assertEquals(1, hooks.added.size)
         assertEquals(emptyList(), hooks.active, "the shutdown hook outlived the command")
-        assertFalse(PROOF in run.stdout || PROOF in run.stderr, "the proof leaked")
+        assertFalse(PROOF in run.stdout || PROOF in run.stderr || KEY in run.stdout || KEY in run.stderr, "a secret leaked")
     }
 
     @Test
@@ -126,13 +130,13 @@ class DeviceFlowTest {
         record()
         val impostor = "hopi: localabstract:hopi.$APP on emulator-5554 is not $APP's bridge"
         // Another app bound the name first and answers hello with the right app id, but no proof.
-        val squatter = androidBridge(proof = null)
+        val squatter = androidBridge(proof = null, key = null)
         val missing = android("list", "--app", APP, "--json", adb = Adb(fixture("adb-devices.txt")) { ok("$squatter\n") })
         assertEquals(ExitCode.NOT_REACHABLE, missing.exitCode, missing.toString())
         assertEquals("", missing.stdout, "a squatter's transactions reached stdout")
         assertTrue(missing.stderr.startsWith(impostor), missing.stderr)
 
-        val guessed = androidBridge(proof = "0".repeat(64))
+        val guessed = androidBridge(proof = "0".repeat(64), key = null)
         val clearAdb = Adb(fixture("adb-devices.txt")) { ok("$guessed\n") }
         val wrong = android("clear", "--app", APP, adb = clearAdb)
         assertEquals(ExitCode.NOT_REACHABLE, wrong.exitCode, wrong.toString())
@@ -157,6 +161,22 @@ class DeviceFlowTest {
                 "(another app may hold the socket name)\n",
             run.stderr,
         )
+    }
+
+    @Test
+    fun androidNeedsTheKeyAndSaysNotRunningWithoutTheFile() {
+        record()
+        // A bridge whose key the client does not have (the file holds another): closed before any byte.
+        val port = androidBridge(key = BridgeToken.of("c3".repeat(32)))
+        val run = android("list", "--app", APP, "--json", adb = Adb(fixture("adb-devices.txt")) { ok("$port\n") })
+        assertEquals(ExitCode.NOT_REACHABLE, run.exitCode, run.toString())
+        assertEquals("", run.stdout)
+        // No file: the bridge is not running; the forward is removed.
+        val absent = Adb(fixture("adb-devices.txt"), proof = { ProcessResult(1, "cat: cache/hopi/$APP.proof: No such file or directory\n", "") }) { ok("1\n") }
+        val none = android("list", "--app", APP, adb = absent)
+        assertEquals(ExitCode.NOT_REACHABLE, none.exitCode, none.toString())
+        assertTrue(none.stderr.startsWith("hopi: app not running or agentBridge = false"), none.stderr)
+        assertEquals(absent.forwards.size, absent.removals.size)
     }
 
     @Test
@@ -238,7 +258,7 @@ class DeviceFlowTest {
         )
         assertEquals(1, adb.removals.size)
         assertEquals(emptyList(), hooks.active)
-        assertEquals(emptyList(), adb.proofReads, "the proof is read only once a hello arrived")
+        assertEquals(1, adb.proofReads.size, "the key is read before connecting")
     }
 
     /** Runs `tail` until its first line, then closes the bridge; returns the exit code and stderr. */
@@ -586,6 +606,7 @@ class DeviceFlowTest {
         const val UDID = "90E767A1-5F25-4E8E-B1B2-D1A8F53295FA"
         const val IPHONE = "00008140-001A2B3C4D5E801E"
         val PROOF = "5e".repeat(32)
+        val KEY = "a7".repeat(32)
         val ADB: Path = Paths.get("/sdk/platform-tools/adb")
     }
 }

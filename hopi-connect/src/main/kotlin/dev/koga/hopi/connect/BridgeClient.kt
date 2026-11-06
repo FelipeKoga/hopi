@@ -59,7 +59,10 @@ public class BridgeClient private constructor(
         request?.let { lines.append(it).append('\n') }
         write(lines)
         val hello = next() ?: throw notReachable(endpoint.unreachableMessage)
-        if (hello.type != "hello") throw notReachable("unexpected first reply from the bridge: ${hello.type?.let(::visible)}")
+        if (hello.type != "hello") {
+            // On Android a peer that is not the app's bridge (a squatter, an old bridge) answers the key line first.
+            throw notReachable(endpoint.proof?.mismatch ?: "unexpected first reply from the bridge: ${hello.type?.let(::visible)}")
+        }
         val protocol = hello.json.long("protocol")
         if (protocol != PROTOCOL) throw notReachable("the bridge speaks protocol $protocol; this CLI speaks $PROTOCOL")
         val platform = hello.json.str("platform")

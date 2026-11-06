@@ -1750,7 +1750,7 @@ when the app holds fewer bytes of that body than its size (truncated, or skipped
 The app runs a bridge server; the host CLI connects to it.
 
 - **Android:** `LocalServerSocket` on the abstract name `hopi.<process name>` (the
-  applicationId for the main process, see below). No TCP listener, no token.
+  applicationId for the main process, see below). No TCP listener; a key as the first line.
   Each accepted connection's peer uid (`LocalSocket.peerCredentials.uid`) must be the shell uid
   (2000, i.e. `adbd` forwarding) or the app's own uid; anything else is closed before any byte.
   (`adb root` makes adbd uid 0, which is refused.) On an API 35 emulator another app cannot even
@@ -1758,6 +1758,16 @@ reach the socket: SELinux denies `connectto` between `untrusted_app` domains of 
 categories (`avc: denied { connectto } … tclass=unix_stream_socket`, the caller sees
 `IOException: Permission denied`), so the uid check is the second layer, not the only one. The CLI runs
   `adb forward tcp:0 localabstract:hopi.<applicationId>` (adb binds host loopback) and connects.
+  **adbd forwards anyone.** Every connection through the forward reaches the app as uid 2000,
+  whatever opened it on the host: another user's process, or a web page that posts to
+  `127.0.0.1:<port>` (a blind cross-protocol request, whose lines would otherwise be parsed one by
+  one). So, as on the token transports, the first line must be a key: the proof file (below) holds
+  two lines, the proof `hello` shows and the key, both fresh per start; the CLI reads both with
+  `run-as` before connecting and sends the key first, and a wrong, missing or other first line
+  closes the connection before any byte is sent. A squatter that receives the key gains nothing:
+  the key opens only this start's bridge, which a squatter's bind kept from starting, and the proof
+  it would have to show stays in the app's private storage. No file means no bridge: the CLI
+  reports the app as not running.
   **The name is not owned.** Abstract socket names have no owner and no permissions: any app may
   bind `hopi.<applicationId>` while the app is stopped, and adbd (not an `untrusted_app`)
   reaches it like the real bridge, so `hello.app` alone authenticates nothing. The app therefore
@@ -1899,7 +1909,7 @@ Client to app:
 {"cmd":"list","since":0,"limit":100}  // → {"type":"transaction",...summary...}* then {"type":"end"}
 {"cmd":"get","id":42}                 // → {"type":"transaction",...full detail, bodies as text or base64...}
 {"cmd":"tail","since":0}              // → summaries since `since`, then live events until disconnect
-{"cmd":"clear"}                       // → {"type":"ok","through":N}
+{"cmd":"clear"}                       // → {"type":"ok","through":N}; a write: after hello, as the rule commands
 ```
 
 Perf commands (docs/design/perf-monitors.md, "Bridge"; see "Performance monitors" above), after

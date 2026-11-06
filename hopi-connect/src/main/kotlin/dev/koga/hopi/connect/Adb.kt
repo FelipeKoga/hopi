@@ -91,6 +91,14 @@ private const val MAX_TRACK_FRAME = 0xffff
 private val WHITESPACE = Regex("\\s+")
 private val PROOF = Regex("[0-9a-f]{64}")
 
+/** The proof file: the proof `hello` shows, then the key a client sends first. */
+private val PROOF_FILE = Regex("([0-9a-f]{64})\\n([0-9a-f]{64})")
+
+/** What the app's bridge wrote to its private storage; never printed. */
+public class BridgeSecrets(public val proof: String, public val key: String) {
+    override fun toString(): String = "BridgeSecrets(<redacted>)"
+}
+
 /** adb, located once; every call names the program by its absolute path. */
 internal class Adb(private val path: Path, private val processes: ProcessRunner) {
     fun devices(): List<AdbDevice> {
@@ -135,16 +143,18 @@ internal class Adb(private val path: Path, private val processes: ProcessRunner)
     }
 
     /**
-     * The proof the bridge of process [app] wrote to its app's private storage, read as that app
+     * The secrets the bridge of process [app] wrote to its app's private storage (null when there
+     * is no file: the bridge is not running), read as that app
      * with `run-as` (debuggable builds only). adbd runs the arguments through the device's shell,
      * so only validated values reach it: the package (the process name up to `:`) and a fixed path
      * around the process name, both matching the `--app` pattern. Never printed.
      */
-    fun readProof(serial: String, app: String): String {
+    fun readProof(serial: String, app: String): BridgeSecrets? {
         val packageName = app.substringBefore(':')
         val result = run("-s", serial, "exec-out", "run-as", packageName, "cat", "cache/hopi/$app.proof")
-        val proof = result.stdout.trim()
-        if (result.exitCode == 0 && PROOF.matches(proof)) return proof
+        PROOF_FILE.matchEntire(result.stdout.trim())?.takeIf { result.exitCode == 0 }?.let { return BridgeSecrets(it.groupValues[1], it.groupValues[2]) }
+        // The app deletes the file when its bridge stops, and never wrote one if it never started.
+        if ("No such file" in result.stdout || "No such file" in result.stderr) return null
         // Whatever went wrong, a proof-like value is never echoed into the message.
         val reason = visible(firstLine(result.stdout.takeUnless { PROOF.containsMatchIn(it) }.orEmpty() + "\n" + result.stderr))
         throw notReachable(

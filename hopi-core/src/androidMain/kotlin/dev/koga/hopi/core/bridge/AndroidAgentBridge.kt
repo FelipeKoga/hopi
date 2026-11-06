@@ -16,9 +16,11 @@ import kotlin.concurrent.thread
 
 /**
  * `LocalServerSocket` on the abstract name `hopi.<process name>`: no TCP listener, and the
- * kernel reports each peer's uid, so no token is needed. Only the shell uid (adbd forwarding the
- * CLI's `adb forward`) and the app's own uid are served; anything else is closed unread. The
- * name itself is not owned by anyone, so `hello` carries a proof (see [BridgeInfo.proof]).
+ * kernel reports each peer's uid. Only the shell uid (adbd forwarding the CLI's `adb forward`) and
+ * the app's own uid are served; anything else is closed unread. adbd forwards whatever reaches the
+ * forward's port on the host, so a connection also sends the key of the proof file first, as a
+ * token transport's token. The name itself is not owned by anyone, so `hello` carries the file's
+ * proof (see [BridgeInfo.proof]).
  */
 private class AndroidListener(private val socket: LocalServerSocket) : BridgeListener {
     private val ownUid = Process.myUid()
@@ -110,7 +112,8 @@ internal actual fun startBridgeThread(name: String, body: () -> Unit) {
 }
 
 /**
- * `<cache dir>/hopi/<process name>.proof`. The framework sets `java.io.tmpdir` to the app's
+ * `<cache dir>/hopi/<process name>.proof`: two lines, the proof `hello` shows, then the key a
+ * client sends first, each 64 lowercase hex characters. The framework sets `java.io.tmpdir` to the app's
  * cache dir before `Application.onCreate`, so core needs no `Context`; the CLI reads the file as
  * `cache/hopi/<process name>.proof` relative to the package's data dir with `run-as`.
  */
@@ -120,7 +123,7 @@ private fun proofFile(processName: String): File {
 }
 
 /** Written to a temporary file (owner-only, in an owner-only directory) and renamed into place. */
-private fun writeProofFile(file: File, proof: String) {
+private fun writeProofFile(file: File, contents: String) {
     val directory = checkNotNull(file.parentFile)
     if (!directory.isDirectory && !directory.mkdirs()) throw IOException("cannot create $directory")
     directory.setReadable(false, false)
@@ -134,7 +137,7 @@ private fun writeProofFile(file: File, proof: String) {
         temp.setReadable(false, false)
         temp.setWritable(false, false)
         if (!temp.setReadable(true, true) || !temp.setWritable(true, true)) throw IOException("cannot restrict $temp")
-        temp.writeBytes(proof.encodeToByteArray())
+        temp.writeBytes(contents.encodeToByteArray())
         if (!temp.renameTo(file)) throw IOException("cannot rename $temp")
     } catch (e: Throwable) {
         temp.delete()
@@ -163,14 +166,19 @@ internal actual fun startPlatformAgentBridge(store: HopiStore) {
                 return@startBridgeThread
             }
             try {
-                // A fresh secret per start, so a file left by an earlier run never matches this one.
+                // Fresh secrets per start, so a file left by an earlier run never matches this one.
+                // The key is the client's first line, as a token transport's token: adbd forwards
+                // anything on the host that reaches the forward's port (another user's process, a
+                // web page's request to localhost), and the uid check cannot tell them from the CLI.
+                // The proof answers in hello: a squatter that got the key still cannot show it.
+                val key = BridgeToken.generate()
                 val proof = StringBuilder(BridgeToken.BYTES * 2).also(BridgeToken.generate()::writeTo).toString()
-                writeProofFile(file, proof)
+                writeProofFile(file, proof + "\n" + StringBuilder(BridgeToken.BYTES * 2).also(key::writeTo) + "\n")
                 AgentBridgeServer(
                     AndroidListener(socket),
                     store,
                     BridgeInfo(processName, "android", proof),
-                    token = null,
+                    token = key,
                     onStop = { file.delete() },
                 )
             } catch (e: Exception) {

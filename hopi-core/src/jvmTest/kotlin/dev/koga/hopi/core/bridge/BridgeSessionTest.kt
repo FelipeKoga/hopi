@@ -205,6 +205,8 @@ class BridgeSessionTest {
         for (id in 1L..2L) store.submit(complete(store.nextId()))
         store.awaitIds(1, 2)
         val client = serve(store)
+        // A write: hello first on the same connection.
+        assertEquals(2L, fields(client.request("{\"cmd\":\"hello\"}"))["count"])
         // The consumer applies a clear later; the replies right after it must already reflect it.
         val gate = pauseStore()
         // `through`: the last id it covers, which a host viewer clears up to.
