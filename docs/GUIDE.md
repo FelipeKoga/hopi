@@ -349,8 +349,8 @@ Settings, all optional, in the same `hopi { }` block as Android's; `HopiSetup` p
 hopi {
     agentBridge = true                  // let the CLI and the desktop viewer connect at start (default false)
     maxBodyBytes = 256L * 1024          // and maxEntries, maxTotalBytes: the store's caps
-    redactHeaders("X-Api-Key")          // Authorization, Cookie, Set-Cookie… are redacted already
-    redactQueryParameters("token")
+    redactHeaders("X-Tenant-Secret")    // added to the defaults (Authorization, Cookie, X-Api-Key…)
+    redactQueryParameters("otp")        // added to the defaults (access_token, code, key, signatures…)
     summaryLog = true                   // one NDJSON line per request and perf's lines (the default)
     network { rules = false }           // never read the rule state (default true; see Rules)
     perf {
@@ -480,8 +480,8 @@ import dev.koga.hopi.ktor.HopiLogSink
 
 val client = HttpClient(engine) {
     install(Hopi) {
-        redactHeaders("X-Api-Key")           // added to the start's; Authorization, Cookie, Set-Cookie… are redacted already
-        redactQueryParameters("token")
+        redactHeaders("X-Tenant-Secret")     // added to the start's; Authorization, Cookie, X-Api-Key… are redacted already
+        redactQueryParameters("otp")
         maxBodyBytes = 256L * 1024           // this client's body cap (clamped to half the store's)
         rules = true                         // rules apply to the requests this plugin records (default; the network tool's rules too)
         logSink = HopiLogSink.Summary        // the default: one NDJSON line per request

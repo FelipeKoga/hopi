@@ -32,8 +32,10 @@ viewer and a CLI.
 - **CLI**, `hopi`: list, tail, get, cURL, rules and monitors from a terminal; its `--json` output is
   a stable contract for AI coding agents.
 - **Log stream**: one NDJSON line per request in logcat or the iOS unified log, with no setup.
-- **Redaction** on every channel: `Authorization`, `Proxy-Authorization`, `Cookie` and
-  `Set-Cookie` by default, plus the headers and query parameters you name.
+- **Redaction** on every channel, on by default: credential headers (`Authorization`, `Cookie`,
+  `X-Api-Key`…), token query parameters (`access_token`, `code`, `key`, presigned-URL
+  signatures…) in the query and the fragment, URL userinfo, and URLs in `Location`/`Referer` and
+  error text; plus the headers and parameters you name. `unsafeDisableRedaction()` turns it off.
 
 ## Quick start
 

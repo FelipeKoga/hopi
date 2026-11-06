@@ -35,9 +35,16 @@ This document is the contract every module is built against. Change it before ch
 4. **No network exposure.** Nothing listens on a routable interface. The agent channel uses
    device-local transports only (details below) and authenticates every connection.
 5. **Secrets are redacted by default** in every outward channel (UI copy, cURL, logs, agent
-   channel): `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, the userinfo of a URL
-   (`https://user:password@host` becomes `https://<redacted>@host`), plus user-configured headers
-   and query parameters. Opting out is explicit.
+   channel): the credential headers of `Redactor.DEFAULT_HEADERS` (`Authorization`,
+   `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`,
+   `X-Amz-Security-Token`, `X-CSRF-Token`…), the token parameters of
+   `Redactor.DEFAULT_QUERY_PARAMETERS` (`access_token`, `refresh_token`, `id_token`, `token`,
+   `code`, `api_key`, `key`, `client_secret`, `password`, `sig`, `X-Amz-Signature`,
+   `X-Amz-Credential`…) in the query and in the fragment (`#access_token=…`, `#/route?token=…`),
+   the userinfo of a URL (`https://user:password@host` becomes `https://<redacted>@host`), the
+   URLs in `Location`, `Content-Location` and `Referer`, every `scheme://…` quoted in an error's
+   text, plus user-configured headers and query parameters. Opting out is explicit
+   (`unsafeDisableRedaction()`, which turns all of it off) and logs a notice.
 6. English everywhere: code, comments, docs, commits.
 
 ## Modules

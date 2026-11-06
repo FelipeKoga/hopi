@@ -575,7 +575,7 @@ class HopiPanesUiTest {
     @Test
     fun anOpenDetailFollowsARedactorThatGrew() = runComposeUiTest {
         submitAll(
-            pending(1, url = "https://api.example.com/keyed", headers = listOf("X-Api-Key" to "k-123"))
+            pending(1, url = "https://api.example.com/keyed", headers = listOf("X-Tenant-Key" to "k-123"))
                 .completed(200, emptyList(), null, 5, null),
         )
         setContent { OnePane() }
@@ -585,8 +585,8 @@ class HopiPanesUiTest {
         onNodeWithText("Request").performClick()
         waitForText("k-123")
 
-        // A second client installs the plugin with X-Api-Key redacted, then makes a request.
-        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Api-Key")))
+        // A second client installs the plugin with X-Tenant-Key redacted, then makes a request.
+        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Tenant-Key")))
         submitAll(complete(2, url = "https://api.example.com/other"))
         waitForText(Redactor.REDACTED)
         assertFalse(exists("k-123"), "the open detail still shows a header the store now redacts")
@@ -595,43 +595,43 @@ class HopiPanesUiTest {
     @Test
     fun anOpenDetailAndTheListFollowARedactorThatGrewBeforeAnyOtherRequest() = runComposeUiTest {
         submitAll(
-            pending(1, url = "https://api.example.com/keyed?token=t-123", headers = listOf("X-Api-Key" to "k-123"))
+            pending(1, url = "https://api.example.com/keyed?otp=t-123", headers = listOf("X-Tenant-Key" to "k-123"))
                 .completed(200, emptyList(), null, 5, null),
         )
         setContent { OnePane() }
-        waitForText("/keyed?token=t-123")
-        onNodeWithText("/keyed?token=t-123").performClick()
+        waitForText("/keyed?otp=t-123")
+        onNodeWithText("/keyed?otp=t-123").performClick()
         waitForText("Request")
         onNodeWithText("Request").performClick()
         waitForText("k-123")
 
         // A second client installs the plugin with more redacted, and no request follows.
-        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Api-Key"), queryParameters = listOf("token")))
+        store.includeRedaction(Redactor.create(extraHeaders = listOf("X-Tenant-Key"), queryParameters = listOf("otp")))
         waitUntil(timeoutMillis = 5_000) { !exists("k-123") }
         assertTrue(exists(Redactor.REDACTED, substring = true))
 
         onNodeWithContentDescription(DetailTags.BACK).performClick()
-        waitForText("/keyed?token=${Redactor.REDACTED}")
+        waitForText("/keyed?otp=${Redactor.REDACTED}")
         assertFalse(exists("t-123", substring = true), "the list still shows a query value the store now redacts")
     }
 
     @Suppress("DEPRECATION")
     @Test
     fun copyUrlUsesTheRedactorInForceWhenItRuns() = runComposeUiTest {
-        submitAll(complete(1, url = "https://api.example.com/items?token=t-123"))
+        submitAll(complete(1, url = "https://api.example.com/items?otp=t-123"))
         val clipboard = FakeClipboard()
         setContent {
             CompositionLocalProvider(LocalClipboardManager provides clipboard) { OnePane() }
         }
-        waitForText("/items?token=t-123")
-        onNodeWithText("/items?token=t-123").performClick()
+        waitForText("/items?otp=t-123")
+        onNodeWithText("/items?otp=t-123").performClick()
         waitForText(DetailTags.COPY_URL)
 
-        // A second client installs the plugin with `token` redacted, and no request follows yet.
-        store.includeRedaction(Redactor.create(queryParameters = listOf("token")))
+        // A second client installs the plugin with `otp` redacted, and no request follows yet.
+        store.includeRedaction(Redactor.create(queryParameters = listOf("otp")))
         onNodeWithText(DetailTags.COPY_URL).performClick()
         waitForText("URL copied")
-        assertEquals("https://api.example.com/items?token=${Redactor.REDACTED}", assertNotNull(clipboard.clip).text)
+        assertEquals("https://api.example.com/items?otp=${Redactor.REDACTED}", assertNotNull(clipboard.clip).text)
     }
 
     @Test

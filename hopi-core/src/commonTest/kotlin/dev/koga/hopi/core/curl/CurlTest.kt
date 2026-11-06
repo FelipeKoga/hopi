@@ -86,7 +86,7 @@ class CurlTest {
             toCurl(tx, redactor),
         )
         assertEquals(
-            "curl -X GET 'https://h/?token=abc&x=1' -H 'Authorization: <redacted>' -H 'X-Api-Key: k'",
+            "curl -X GET 'https://h/?token=<redacted>&x=1' -H 'Authorization: <redacted>' -H 'X-Api-Key: <redacted>'",
             toCurl(tx),
         )
         assertEquals(

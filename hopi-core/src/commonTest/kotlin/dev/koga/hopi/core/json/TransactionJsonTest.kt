@@ -34,7 +34,7 @@ class TransactionJsonTest {
         assertEquals(
             "{\"hopi\":1,\"id\":42,\"method\":\"GET\",\"url\":\"https://api.example.com/users?page=2\"," +
                 "\"code\":200,\"ms\":7,\"reqBytes\":0,\"resBytes\":0,\"state\":\"complete\",\"source\":\"urlsession\"," +
-                "\"finalUrl\":\"https://api.example.com/final?token=abc\"}",
+                "\"finalUrl\":\"https://api.example.com/final?token=<redacted>\"}",
             TransactionJson.summaryLogLine(tx, Redactor.Default),
         )
         val detail = TransactionJson.bridgeDetail(tx, Redactor.create(queryParameters = listOf("token")))
@@ -105,7 +105,7 @@ class TransactionJsonTest {
 
     @Test
     fun aSmallerBudgetCutsTheUrlAndKeepsTheLineParseable() {
-        val url = "https://bucket.s3.amazonaws.com/key?X-Amz-Signature=" + "f".repeat(1500)
+        val url = "https://bucket.s3.amazonaws.com/key?X-Amz-Expires=" + "f".repeat(1500)
         val line = TransactionJson.summaryLogLine(pending(1, url = url), Redactor.Default, maxBytes = 1000)
         val bytes = line.encodeToByteArray().size
         assertTrue(bytes in 900..1000, "bytes=$bytes")

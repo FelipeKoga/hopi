@@ -4,7 +4,9 @@ import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * Replaces secret header values and query parameter values with [REDACTED]. Header and parameter
- * names match case-insensitively; parameter names are percent-decoded before matching.
+ * names match case-insensitively; parameter names are percent-decoded before matching. On by
+ * default, with [DEFAULT_HEADERS] and [DEFAULT_QUERY_PARAMETERS]; only [Disabled] (the configs'
+ * `unsafeDisableRedaction()`) turns it off.
  */
 @HopiInternalApi
 public class Redactor private constructor(
@@ -18,23 +20,62 @@ public class Redactor private constructor(
     /** The lowercased header names [isRedactedHeader] answers true for; empty when disabled. */
     public val redactedHeaderNames: Set<String> get() = if (enabled) headerNames else emptySet()
 
-    public fun headerValue(name: String, value: String): String =
-        if (isRedactedHeader(name)) REDACTED else value
+    /** [REDACTED] for a redacted header; a header that carries a URL (`Location`, `Referer`…) gets [url]. */
+    public fun headerValue(name: String, value: String): String = when {
+        !enabled -> value
+        isRedactedHeader(name) -> REDACTED
+        name.lowercase() in URL_HEADERS -> url(value)
+        else -> value
+    }
 
     /** The value of the (decoded) query parameter [name], or [REDACTED] when the parameter is redacted. */
     public fun queryValue(name: String, value: String): String =
         if (enabled && name.lowercase() in queryParameterNames) REDACTED else value
 
     public fun headers(headers: List<Pair<String, String>>): List<Pair<String, String>> {
-        if (!enabled || headers.none { isRedactedHeader(it.first) }) return headers
-        return headers.map { (name, value) -> if (isRedactedHeader(name)) name to REDACTED else name to value }
+        if (!enabled) return headers
+        var changed = false
+        val result = headers.map { header ->
+            val value = headerValue(header.first, header.second)
+            if (value == header.second) header else { changed = true; header.first to value }
+        }
+        return if (changed) result else headers
     }
 
-    /** [text] (an error message, say) with every occurrence of [url] replaced by its redacted form. */
+    /**
+     * [text] (an error message, say) with every occurrence of [url] replaced by its redacted form,
+     * and every other `scheme://…` in it (a redirect's URL an engine quotes) redacted too.
+     */
     public fun textMentioning(text: String, url: String): String {
-        if (!enabled || url.isEmpty() || !text.contains(url)) return text
-        val redacted = url(url)
-        return if (redacted === url) text else text.replace(url, redacted)
+        if (!enabled) return text
+        val known = if (url.isNotEmpty() && text.contains(url)) {
+            val redacted = url(url)
+            if (redacted === url) text else text.replace(url, redacted)
+        } else {
+            text
+        }
+        return redactEmbeddedUrls(known)
+    }
+
+    /** Each `scheme://…` in [text], up to a space, a quote or an angle bracket, through [url]. */
+    private fun redactEmbeddedUrls(text: String): String {
+        var schemeSeparator = text.indexOf("://")
+        if (schemeSeparator < 0) return text
+        val out = StringBuilder(text.length)
+        var cursor = 0
+        while (schemeSeparator >= 0) {
+            var start = schemeSeparator
+            while (start > cursor && isSchemeChar(text[start - 1])) start--
+            var end = schemeSeparator + 3
+            while (end < text.length && !isUrlEnd(text[end])) end++
+            // Punctuation that closes the sentence or a bracket around the URL is not part of it.
+            while (end > schemeSeparator + 3 && text[end - 1] in TRAILING_PUNCTUATION) end--
+            out.append(text, cursor, start).append(url(text.substring(start, end)))
+            cursor = end
+            schemeSeparator = text.indexOf("://", maxOf(end, schemeSeparator + 3))
+        }
+        out.append(text, cursor, text.length)
+        return out.toString()
     }
 
     /** Redacts what either redacts: disabled only when both are disabled. */
@@ -60,37 +101,76 @@ public class Redactor private constructor(
         return if (queryParameterNames.isEmpty()) masked else redactQuery(masked)
     }
 
+    /** The values of the redacted parameters in [url]'s query and in its fragment (`#access_token=…`). */
     private fun redactQuery(url: String): String {
-        val queryStart = url.indexOf('?')
-        if (queryStart < 0) return url
-        val fragmentStart = url.indexOf('#', queryStart + 1).let { if (it < 0) url.length else it }
-        var out: StringBuilder? = null
-        var partStart = queryStart + 1
-        while (partStart <= fragmentStart) {
-            val partEnd = url.indexOf('&', partStart).let { if (it < 0 || it > fragmentStart) fragmentStart else it }
-            val equals = url.indexOf('=', partStart).let { if (it < 0 || it > partEnd) -1 else it }
-            if (equals >= 0 && equals + 1 < partEnd &&
-                percentDecode(url, partStart, equals).lowercase() in queryParameterNames
-            ) {
-                val builder = out ?: StringBuilder(url.length).also { it.append(url, 0, partStart) }
-                builder.append(url, partStart, equals + 1).append(REDACTED)
-                out = builder
-            } else {
-                out?.append(url, partStart, partEnd)
+        val fragmentStart = url.indexOf('#')
+        // A `?` after the `#` belongs to the fragment.
+        val queryStart = url.indexOf('?').let { if (it < 0 || (fragmentStart in 0 until it)) -1 else it }
+        if (queryStart < 0 && fragmentStart < 0) return url
+        val out = StringBuilder(url.length)
+        var changed = false
+        var cursor = 0
+        fun redactParameters(start: Int, end: Int) {
+            out.append(url, cursor, start)
+            var partStart = start
+            while (partStart <= end) {
+                // `&` separates parameters, and `;` too (`?a=1;token=…`).
+                var partEnd = partStart
+                while (partEnd < end && url[partEnd] != '&' && url[partEnd] != ';') partEnd++
+                val equals = url.indexOf('=', partStart).let { if (it < 0 || it > partEnd) -1 else it }
+                if (equals >= 0 && equals + 1 < partEnd &&
+                    percentDecode(url, partStart, equals).lowercase().removeSuffix("[]") in queryParameterNames
+                ) {
+                    out.append(url, partStart, equals + 1).append(REDACTED)
+                    changed = true
+                } else {
+                    out.append(url, partStart, partEnd)
+                }
+                if (partEnd < end) out.append(url[partEnd])
+                partStart = partEnd + 1
             }
-            out?.let { if (partEnd < fragmentStart) it.append('&') }
-            partStart = partEnd + 1
+            cursor = end
         }
-        val result = out ?: return url
-        result.append(url, fragmentStart, url.length)
-        return result.toString()
+        if (queryStart >= 0) redactParameters(queryStart + 1, if (fragmentStart < 0) url.length else fragmentStart)
+        // A hash route's parameters (`#/route?token=…`) follow its own `?`.
+        if (fragmentStart >= 0) redactParameters(url.indexOf('?', fragmentStart).let { if (it < 0) fragmentStart else it } + 1, url.length)
+        if (!changed) return url
+        out.append(url, cursor, url.length)
+        return out.toString()
     }
 
     public companion object {
         public const val REDACTED: String = "<redacted>"
 
-        public val DEFAULT_HEADERS: List<String> =
-            listOf("Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie")
+        /** The credential headers redacted unless redaction is disabled. */
+        public val DEFAULT_HEADERS: List<String> = listOf(
+            "Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie",
+            "X-Api-Key", "Api-Key", "X-Auth-Token", "X-Access-Token", "X-Refresh-Token", "X-Session-Token",
+            "X-Amz-Security-Token", "X-Goog-Api-Key", "X-CSRF-Token", "X-XSRF-Token",
+        )
+
+        /**
+         * The query (and fragment) parameters redacted unless redaction is disabled: OAuth's tokens
+         * and code, API keys, passwords, and the signatures and credentials of presigned URLs.
+         */
+        public val DEFAULT_QUERY_PARAMETERS: List<String> = listOf(
+            "access_token", "refresh_token", "id_token", "token", "code", "auth", "authorization",
+            "api_key", "apikey", "key", "client_secret", "secret", "password", "passwd",
+            "session", "sessionid", "sig", "signature",
+            "X-Amz-Signature", "X-Amz-Credential", "X-Amz-Security-Token",
+            "X-Goog-Signature", "X-Goog-Credential",
+        )
+
+        /** Headers whose value is a URL, redacted with [url]. */
+        private val URL_HEADERS = setOf("location", "content-location", "referer")
+
+        private const val TRAILING_PUNCTUATION = ".,;:)]}"
+
+        private fun isSchemeChar(c: Char): Boolean =
+            c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '+' || c == '-' || c == '.'
+
+        private fun isUrlEnd(c: Char): Boolean =
+            c.isWhitespace() || c == '"' || c == '\'' || c == '<' || c == '>' || c == '`'
 
         public val Default: Redactor = create()
 
@@ -108,7 +188,7 @@ public class Redactor private constructor(
             return Redactor(
                 enabled = true,
                 headerNames = headers,
-                queryParameterNames = queryParameters.mapTo(HashSet()) { it.lowercase() },
+                queryParameterNames = (DEFAULT_QUERY_PARAMETERS + queryParameters).mapTo(HashSet()) { it.trim().lowercase() },
             )
         }
 
