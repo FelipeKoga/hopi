@@ -17,7 +17,6 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.prefs.Preferences
 
 /**
  * The desktop viewer. One window views one app; the menu repeats the window's shortcuts without
@@ -26,7 +25,7 @@ import java.util.prefs.Preferences
 public fun main() {
     // The native menu bar on macOS, with the app's name.
     System.setProperty("apple.awt.application.name", "Hopi")
-    val viewer = Viewer(Targets(HostEnvironment()), prefs = Preferences.userRoot().node("dev/koga/hopi/desktop"))
+    val viewer = Viewer(Targets(HostEnvironment()))
     // SIGTERM and SIGINT too: the adb tracking subprocesses would otherwise outlive the viewer.
     Runtime.getRuntime().addShutdownHook(Thread(viewer::close, "hopi-desktop-shutdown"))
     viewer.start()

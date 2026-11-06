@@ -251,7 +251,7 @@ private fun formatBody(body: CapturedBody, side: String): BodyView {
     val notice = if (body.truncated) {
         "Truncated: showing the first ${formatBytes(body.bytes.size.toLong())}" +
             (body.totalBytes?.let { " of ${formatBytes(it)}" } ?: "") +
-            ". The app kept no more: with Full bodies on, repeat the request to see it whole."
+            ". The app kept no more: it ended before the viewer was attached, or it is over the whole-body limit."
     } else {
         null
     }

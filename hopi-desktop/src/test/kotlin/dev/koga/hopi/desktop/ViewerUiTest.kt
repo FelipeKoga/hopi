@@ -1,5 +1,6 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.connect.RemoteSession
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
@@ -57,8 +58,8 @@ class ViewerUiTest {
     private fun KeyInjectionScope.command(key: Key) = withKeyDown(if (IS_MAC) Key.MetaLeft else Key.CtrlLeft) { pressKey(key) }
 
     private fun ComposeUiTest.viewer(exportTo: Path = root.resolve("export.har")): Viewer {
-        // Bodies on demand, as with full bodies off: this test checks what crosses only when opened.
-        val viewer = Viewer(jvmOnlyTargets(), jvmBridgeRoot = root).also { closeables += it; it.setFullBodies(false) }
+        // Bodies on demand (a session without full bodies, as the CLI's): what crosses only when opened.
+        val viewer = Viewer(jvmOnlyTargets(), jvmBridgeRoot = root, newSession = { RemoteSession(it) }).also { closeables += it }
         viewer.start()
         setContent {
             // The test window's own size (1024 x 768): wide enough for list and detail side by side.

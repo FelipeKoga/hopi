@@ -72,7 +72,6 @@ internal object ViewerTags {
     const val CONNECT = "viewer-connect"
     const val STATUS = "viewer-status"
     const val COUNTS = "viewer-counts"
-    const val FULL_BODIES = "Full bodies"
 }
 
 /**
@@ -239,12 +238,6 @@ private fun TargetBar(viewer: Viewer, status: ViewerStatus, theme: ThemeSettings
                 modifier = Modifier.testTag(ViewerTags.CONNECT),
             )
             ChromeButton("Refresh", onClick = viewer::refresh)
-            val fullBodies by viewer.fullBodies.collectAsState()
-            // Whole bodies while connected, as a proxy shows them; the app's cap when off.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                BasicText("Full bodies", style = HopiDesktopType.label.copy(color = colors.textMuted))
-                ChromeSwitch(fullBodies, ViewerTags.FULL_BODIES, viewer::setFullBodies)
-            }
             ThemeButton(theme)
         }
         val bridges = (selected as? AndroidDevice)?.bridges.orEmpty()
