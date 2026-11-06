@@ -1,6 +1,7 @@
 package dev.koga.hopi.core.bridge
 
 import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.concurrent.WakeSignal
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.json.TransactionJson
@@ -166,6 +167,9 @@ public class BridgeSession(
             }
         } finally {
             detachViewer?.invoke()
+            // A viewer that went away no longer fetches the bodies: the caps go back at once.
+            fullBodiesRelease?.invoke()
+            fullBodiesRelease = null
             if (!writerStarted) {
                 tailJob.cancel()
                 connection.shutdown()
@@ -196,6 +200,10 @@ public class BridgeSession(
 
     // Reader thread only: whether `hello` was answered on this connection, and the staged blobs.
     private var helloSeen = false
+
+    /** Gives back the full-bodies mode this connection holds (`capture.set`); null when it holds none. */
+    @kotlin.concurrent.Volatile
+    private var fullBodiesRelease: (() -> Unit)? = null
     private val blobs = HashMap<Long, Blob>()
 
     private suspend fun readLoop(reader: BridgeLineReader) {
@@ -227,6 +235,20 @@ public class BridgeSession(
                         }
                     }
                     command is BridgeCommand.Perf -> servePerf(command)
+                    command is BridgeCommand.CaptureSet -> {
+                        if (command.fullBodies) {
+                            if (fullBodiesRelease == null) fullBodiesRelease = FullBodies.acquire(store)
+                        } else {
+                            fullBodiesRelease?.invoke()
+                            fullBodiesRelease = null
+                        }
+                        reply(
+                            JsonWriter().beginObject().field("type", "capture")
+                                .field("fullBodies", fullBodiesRelease != null)
+                                .field("maxBodyBytes", FullBodies.cap.toLong())
+                                .endObject().toString(),
+                        )
+                    }
                     command is BridgeCommand.Clear -> {
                         // `through`: the last id the clear covers, so a host viewer clears exactly those
                         // (its tail may already hold transactions started after it).
@@ -793,6 +815,8 @@ public class BridgeSession(
         .field("dropped", store.droppedTerminalWrites.value)
         // Whether the rule commands work here; absent on an older app, which a host reads as false.
         .field("rules", RuleEngine.rulesAvailable)
+        // Whether `capture.set` works here (full bodies); absent on an older app.
+        .field("fullBodies", true)
         // Whether the perf commands work here, and may start and stop monitors (docs/design/perf-monitors.md).
         .also { writer ->
             val perf = PerfHook.controller

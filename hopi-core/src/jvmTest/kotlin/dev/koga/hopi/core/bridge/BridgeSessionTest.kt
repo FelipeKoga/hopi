@@ -1,5 +1,6 @@
 package dev.koga.hopi.core.bridge
 
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.complete
 import dev.koga.hopi.core.json.TransactionJson
 import dev.koga.hopi.core.json.parseFlatJsonObject
@@ -104,7 +105,7 @@ class BridgeSessionTest {
         store.awaitIds(1)
         val f = fields(serve(store).request("{\"cmd\":\"hello\"}"))
         assertEquals(
-            mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 3L, "rules" to true, "perf" to false, "perfControl" to false),
+            mapOf("type" to "hello", "protocol" to 1L, "app" to "dev.koga.sample", "platform" to "jvm", "count" to 1L, "dropped" to 3L, "rules" to true, "fullBodies" to true, "perf" to false, "perfControl" to false),
             f,
         )
     }
@@ -542,5 +543,30 @@ class BridgeSessionTest {
         assertEquals((1L..total).toList(), List(total) { fields(client.nextLine())["id"] })
         assertNull(client.nextLineOrEnd())
         assertEquals(1, client.closeCount)
+    }
+
+    @Test
+    fun captureSetHoldsFullBodiesWhileItsConnectionLasts() {
+        val store = store()
+        try {
+            val client = serve(store)
+            assertError(BridgeError.BAD_REQUEST, client.request("""{"cmd":"capture.set","fullBodies":true}"""))
+            assertEquals(true, fields(client.request("""{"cmd":"hello"}"""))["fullBodies"])
+            val on = fields(client.request("""{"cmd":"capture.set","fullBodies":true}"""))
+            assertEquals("capture", on["type"])
+            assertEquals(true, on["fullBodies"])
+            assertTrue(FullBodies.cap >= 8 * 1024 * 1024, "cap ${FullBodies.cap}")
+            assertEquals(FullBodies.cap, FullBodies.bodyCap(256 * 1024))
+            assertTrue(store.maxTotalBytes > store.baseMaxTotalBytes)
+            // The client goes away: the caps go back.
+            client.endInput()
+            val deadline = System.nanoTime() + 5_000_000_000
+            while (FullBodies.cap != 0 && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals(0, FullBodies.cap)
+            assertEquals(256 * 1024, FullBodies.bodyCap(256 * 1024))
+            assertEquals(store.baseMaxTotalBytes, store.maxTotalBytes)
+        } finally {
+            FullBodies.resetForTests(store)
+        }
     }
 }

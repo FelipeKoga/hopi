@@ -1,5 +1,6 @@
 package dev.koga.hopi.connect
 
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.bridge.BridgeSession
 import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.json.TransactionJson
@@ -466,6 +467,20 @@ class RemoteSessionTest {
             Thread.sleep(10)
         }
         return false
+    }
+
+    @Test
+    fun fullBodiesFetchEveryEndedBodyAtOnceAndEndWithTheSession() {
+        val app = startApp()
+        val session = RemoteSession(::endpoint, fullBodies = { true }).also { sessions += it }.connected()
+        (1..3).forEach { n -> app.add { completeTx(it, url = "https://api.example.com/$n", responseBody = textBody("""{"n":$n}""")) } }
+        // Nothing selected: every body arrives anyway.
+        session.awaitLocal { list -> list.size == 3 && list.all { it.responseBody?.isNotFetched == false } }
+        assertTrue(FullBodies.cap > 0, "the app keeps full bodies while the viewer is attached")
+        session.close()
+        val deadline = System.nanoTime() + 5_000_000_000
+        while (FullBodies.cap != 0 && System.nanoTime() < deadline) Thread.sleep(10)
+        assertEquals(0, FullBodies.cap)
     }
 }
 

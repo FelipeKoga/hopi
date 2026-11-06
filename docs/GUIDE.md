@@ -621,8 +621,13 @@ from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java 
 
 Pick a device (adb devices and emulators, booted iOS simulators, iPhones on USB, JVM processes
 with a bridge), enter the app's id (on Android the bridges listening on the device are offered),
-and connect. Only the selected request's headers and bodies are fetched from the app, so a giant
-body never crosses unless you open it. When the app restarts, or adb resets, the viewer
+and connect. With **Full bodies** on (the switch in the top bar, on by default and remembered),
+the app keeps whole bodies while the viewer is attached, up to an eighth of its heap (8 to 64 MB),
+and the viewer fetches each one as its request ends, as a proxy would show it; off, the app keeps
+its cap (`maxBodyBytes`, 256 KB by default) and only the selected request's headers and bodies are
+fetched, so a giant body never crosses unless you open it. A JSON body is shown in colors; the ⤢
+button opens it over the whole window, with a search (Enter, ⇧Enter step through the matches, Esc
+closes it). When the app restarts, or adb resets, the viewer
 reconnects by itself; on an iPhone over USB nothing on the Mac sees the app restart, so press ⌘R
 once it runs.
 

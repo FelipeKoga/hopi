@@ -46,6 +46,9 @@ typedef void (*hopi_us_callback)(hopi_us_handle handle);
  */
 int32_t hopi_us_start(int64_t max_body_bytes, hopi_us_callback on_started, hopi_us_callback on_finished);
 
+/** The cap for bodies captured from now on (full bodies while a host viewer holds them). */
+void hopi_us_set_max_body_bytes(int64_t max_body_bytes);
+
 /** Whether this OS passes the self-check for the byte path (side-effect free). */
 bool hopi_us_self_check(void);
 

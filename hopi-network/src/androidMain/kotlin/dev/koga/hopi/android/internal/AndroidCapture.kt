@@ -1,6 +1,7 @@
 package dev.koga.hopi.android.internal
 
 import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.capture.CaptureInstallation
 import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.log.emitPlatformLogLine
@@ -82,7 +83,10 @@ public object AndroidCapture {
      * (docs/design/android-capture.md, "Threading"). A failure while building drops that record,
      * never reaching the app.
      */
-    public class Target(public val store: HopiStore, public val maxBodyBytes: Int)
+    public class Target(public val store: HopiStore, private val baseMaxBodyBytes: Int) {
+        /** The cap for a capture that starts now: the installation's, or full bodies' while a viewer holds them. */
+        public val maxBodyBytes: Int get() = FullBodies.bodyCap(baseMaxBodyBytes)
+    }
 
     private val installed: Target by lazy {
         val s = checkNotNull(settings) { "capture is not started" }

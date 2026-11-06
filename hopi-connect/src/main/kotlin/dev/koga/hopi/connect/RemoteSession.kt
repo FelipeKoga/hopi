@@ -76,6 +76,12 @@ public class RemoteSession(
     private val newStore: () -> HopiStore = { HopiStore(DEFAULT_MAX_ENTRIES, DEFAULT_MAX_TOTAL_BYTES) },
     private val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * Full bodies, as a proxy shows them: asked for at each connect (`capture.set` on the tail
+     * connection, so the app keeps it exactly while this viewer is attached), and each body is
+     * fetched as soon as its request ends, so it is here even after the app evicted it.
+     */
+    private val fullBodies: () -> Boolean = { false },
 ) : AutoCloseable {
     private val _store = MutableStateFlow(mirrorStore())
     private val _state = MutableStateFlow<RemoteState>(RemoteState.Idle)
@@ -167,8 +173,10 @@ public class RemoteSession(
             // Never sent before this connection's `hello` was verified (RuleClient checks `rules`).
             val rules = if (hello.json.bool("rules") == true) RuleClient(request) else null
             val perfClient = if (hello.json.bool("perf") == true) PerfClient(request) else null
-            tail = openTail(endpoint, since, rules != null)
-            val next = Link(endpoint, request, tail, rules)
+            // An app whose hello does not offer it never gets the command (it would answer an error).
+            val full = fullBodies() && hello.json.bool("fullBodies") == true
+            tail = openTail(endpoint, since, rules != null, full)
+            val next = Link(endpoint, request, tail, rules, full)
             synchronized(lock) {
                 if (closed) throw CliException(ExitCode.NOT_REACHABLE, "the session was closed")
                 link = next
@@ -387,13 +395,17 @@ public class RemoteSession(
         _store.value.close()
     }
 
-    /** [rules]: ask for rules notices, only of an app whose `hello` said `"rules":true`. */
-    private fun openTail(endpoint: BridgeEndpoint, since: Long, rules: Boolean): BridgeClient {
+    /**
+     * [rules]: ask for rules notices, only of an app whose `hello` said `"rules":true`. [full]: full
+     * bodies for as long as this connection lasts, asked for before the tail starts.
+     */
+    private fun openTail(endpoint: BridgeEndpoint, since: Long, rules: Boolean, full: Boolean): BridgeClient {
         val tail = BridgeClient.connect(endpoint, readTimeoutMs)
         try {
             val request = BridgeClient.request("tail").field("since", since)
             if (rules) request.field("rules", true)
-            tail.handshake(request.endObject().toString())
+            val lines = request.endObject().toString()
+            tail.handshake(if (full) BridgeClient.request("capture.set").field("fullBodies", true).endObject().toString() + "\n" + lines else lines)
             tail.waitForever()
             return tail
         } catch (e: Throwable) {
@@ -415,7 +427,7 @@ public class RemoteSession(
                 val since = e.since ?: synchronized(lock) { resumeSince() }
                 current.tail.close()
                 try {
-                    current.tail = openTail(current.endpoint, since, current.rules != null)
+                    current.tail = openTail(current.endpoint, since, current.rules != null, current.full)
                 } catch (again: CliException) {
                     lost(current, again.message.orEmpty())
                     return
@@ -434,12 +446,15 @@ public class RemoteSession(
                 "transaction" -> onSummary(current, reply)
                 "notice" -> reply.json.long("dropped")?.let { _dropped.value = it }
                 "rules" -> if (synchronized(lock) { link === current }) relistSoon()
+                // capture.set's answer, before the tail's backlog: nothing to do.
+                "capture" -> Unit
             }
         }
     }
 
     private fun onSummary(current: Link, reply: Reply) {
         var refetch = false
+        var prefetch = false
         synchronized(lock) {
             if (link !== current) return
             val store = _store.value
@@ -459,8 +474,25 @@ public class RemoteSession(
             if (transaction.state.isTerminal) pending -= id else pending += id
             if (id > highestSeen) highestSeen = id
             submit(store, transaction)
+            prefetch = current.full && transaction.state.isTerminal && !refetch
         }
         if (refetch) fetchSelectedSoon()
+        if (prefetch) prefetchSoon(reply.json.long("id") ?: return)
+    }
+
+    /**
+     * Full bodies: [id]'s detail is fetched at once, in the order the requests ended, so its body
+     * is here before the app's store evicts it. Behind a selection's fetch on the same thread.
+     */
+    private fun prefetchSoon(id: Long) {
+        try {
+            requests.execute {
+                if (synchronized(lock) { fetched[id]?.isTerminal == true }) return@execute
+                fetchNow(id)
+            }
+        } catch (_: RejectedExecutionException) {
+            // Closed.
+        }
     }
 
     private fun fetchSelectedSoon() {
@@ -659,7 +691,14 @@ public class RemoteSession(
     }
 
     /** [rules] is null for an app without rules: nothing but `get` and `clear` is sent to it. */
-    private class Link(val endpoint: BridgeEndpoint, val request: BridgeClient, @Volatile var tail: BridgeClient, val rules: RuleClient?)
+    private class Link(
+        val endpoint: BridgeEndpoint,
+        val request: BridgeClient,
+        @Volatile var tail: BridgeClient,
+        val rules: RuleClient?,
+        /** Full bodies held on [tail]: every ended request's detail is fetched at once. */
+        val full: Boolean = false,
+    )
 
     public companion object {
         /** Larger than an app's store: the desktop keeps a longer history of one process. */

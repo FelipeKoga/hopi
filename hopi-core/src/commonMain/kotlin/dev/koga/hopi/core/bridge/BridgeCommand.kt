@@ -24,6 +24,14 @@ public sealed interface BridgeCommand {
     /** [rules]: also send `{"type":"rules","rev":N}` whenever the rule set changes. */
     public data class Tail(public val since: Long, public val rules: Boolean = false) : BridgeCommand
 
+    /**
+     * Full bodies on or off for as long as this connection lasts ([dev.koga.hopi.core.capture.FullBodies]):
+     * a host viewer that fetches every body at once holds it on its tail connection.
+     */
+    public data class CaptureSet(public val fullBodies: Boolean) : BridgeCommand {
+        override val isWrite: Boolean get() = true
+    }
+
     /** Drops every record: a write, so only after `hello` on the same connection. */
     public data object Clear : BridgeCommand {
         override val isWrite: Boolean get() = true
@@ -141,6 +149,7 @@ public sealed interface BridgeCommand {
                     rules = flag(fields, "rules") ?: return invalid("rules"),
                 )
                 "clear" -> Clear
+                "capture.set" -> CaptureSet(flag(fields, "fullBodies") ?: return invalid("fullBodies"))
                 "rules.add" -> RulesAdd(fields["rule"] as? Map<String, Any?> ?: return BridgeParseResult.Invalid("missing \"rule\" object"))
                 "rules.list" -> RulesList
                 "rules.update" -> RulesUpdate(requiredId(fields) ?: return idError(fields), fields)

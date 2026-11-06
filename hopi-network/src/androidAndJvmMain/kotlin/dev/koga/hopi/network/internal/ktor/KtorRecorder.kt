@@ -1,5 +1,6 @@
 package dev.koga.hopi.network.internal.ktor
 
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.capture.CaptureInstallation
 import dev.koga.hopi.core.capture.PlatformCapture
 import dev.koga.hopi.core.model.CapturedBody
@@ -111,10 +112,13 @@ internal object KtorRecorder {
 private class Recorder(
     private val client: HttpClient,
     private val store: HopiStore,
-    private val maxBodyBytes: Int,
+    private val baseMaxBodyBytes: Int,
     private val engineClassName: String?,
     private val rules: Boolean,
 ) {
+    /** The cap for a capture that starts now: the installation's, or full bodies' while a viewer holds them. */
+    private val maxBodyBytes: Int get() = FullBodies.bodyCap(baseMaxBodyBytes)
+
     suspend fun send(context: MonitoringHook.Context, request: HttpRequestBuilder, content: Any) {
         if (content !is OutgoingContent) return
         // One record per request: the platform recorder has this one. Without an exchange in the

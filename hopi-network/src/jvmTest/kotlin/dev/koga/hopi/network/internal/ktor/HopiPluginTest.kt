@@ -1,5 +1,7 @@
 package dev.koga.hopi.network.internal.ktor
 
+import io.ktor.client.statement.bodyAsBytes
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.bridge.AgentBridgeHook
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.json.TransactionJson
@@ -706,5 +708,25 @@ class HopiPluginTest {
     private fun readChannelContent(bytes: ByteArray) = object : OutgoingContent.ReadChannelContent() {
         override val contentLength = bytes.size.toLong()
         override fun readFrom(): ByteReadChannel = ByteReadChannel(bytes)
+    }
+
+    @Test
+    fun aResponseIsKeptWholeWhileAViewerHoldsFullBodies() = runBlocking<Unit> {
+        TestStore().use { t ->
+            val payload = asciiBytes(50_000, seed = 5)
+            val client = mockClient(t.store, { maxBodyBytes = 1024 }) { respond(payload) }
+            val release = FullBodies.acquire(t.store)
+            try {
+                assertContentEquals(payload, client.get("https://api.example.com/whole").bodyAsBytes())
+            } finally {
+                release()
+            }
+            assertContentEquals(payload, client.get("https://api.example.com/cut").bodyAsBytes())
+            val (whole, cut) = t.awaitTerminal(2)
+            assertContentEquals(payload, whole.responseBody!!.bytes)
+            assertFalse(whole.responseBody!!.truncated)
+            assertEquals(1024, cut.responseBody!!.bytes.size)
+            assertTrue(cut.responseBody!!.truncated)
+        }
     }
 }

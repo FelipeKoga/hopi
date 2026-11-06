@@ -15,6 +15,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.prefs.Preferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -76,9 +77,31 @@ internal sealed interface ViewerStatus {
 internal class Viewer(
     private val targets: Targets,
     private val jvmBridgeRoot: Path? = defaultJvmBridgeRoot(),
-    private val newSession: (open: () -> BridgeEndpoint) -> RemoteSession = { RemoteSession(it) },
+    /** Where [fullBodies] is kept between runs; null keeps it for this run only (tests). */
+    private val prefs: Preferences? = null,
+    /** Null: a [RemoteSession] that asks for [fullBodies] at each connect. */
+    newSession: ((open: () -> BridgeEndpoint) -> RemoteSession)? = null,
     private val settleDelaysMs: List<Long> = ANDROID_SETTLE_DELAYS_MS,
 ) : AutoCloseable {
+    private val _fullBodies = MutableStateFlow(prefs?.getBoolean(FULL_BODIES, true) ?: true)
+
+    /**
+     * Whether the app keeps bodies whole while this viewer is attached, and the viewer fetches each
+     * one as its request ends (the app's own cap otherwise). On by default.
+     */
+    val fullBodies: StateFlow<Boolean> = _fullBodies.asStateFlow()
+
+    private val newSession: (open: () -> BridgeEndpoint) -> RemoteSession =
+        newSession ?: { open -> RemoteSession(open, fullBodies = { _fullBodies.value }) }
+
+    /** Sets [fullBodies], kept between runs; the target is connected again so the app hears it. */
+    fun setFullBodies(on: Boolean) {
+        if (_fullBodies.value == on) return
+        _fullBodies.value = on
+        prefs?.putBoolean(FULL_BODIES, on)
+        if (_status.value != ViewerStatus.Idle) reconnect()
+    }
+
     private val worker = ScheduledThreadPoolExecutor(1) { Thread(it, "hopi-desktop-connect").apply { isDaemon = true } }.apply {
         removeOnCancelPolicy = true
     }
@@ -468,5 +491,7 @@ internal class Viewer(
          * delays (cumulative: 0.3, 1, 2.5 and 5.5 s after the first). Empty turns them off.
          */
         val ANDROID_SETTLE_DELAYS_MS: List<Long> = listOf(300, 700, 1_500, 3_000)
+
+        private const val FULL_BODIES = "capture.fullBodies"
     }
 }

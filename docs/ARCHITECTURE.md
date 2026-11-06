@@ -31,7 +31,11 @@ This document is the contract every module is built against. Change it before ch
    the app needs, and never buffers an unbounded stream. Formatting (JSON pretty-print, cURL,
    NDJSON) happens lazily, off the request path, and only when something is actually looking.
 3. **Bounded memory.** The store is a ring buffer bounded by both entry count and total captured
-   bytes. Bodies are capped per transaction and marked truncated.
+   bytes. Bodies are capped per transaction and marked truncated. While a host viewer holds
+   *full bodies* (`capture.set`, below), the caps are higher, still bounded: a body up to an
+   eighth of the heap (8 to 64 MiB; on iOS a sixteenth of the device's memory, read as a heap),
+   the store raised to fit two of them, and the viewer fetches each body as its request ends, so
+   the bytes live on the host, as with a proxy. The last viewer to leave puts the caps back.
 4. **No network exposure.** Nothing listens on a routable interface. The agent channel uses
    device-local transports only (details below) and authenticates every connection.
 5. **Secrets are redacted by default** in every outward channel (UI copy, cURL, logs, agent
@@ -1910,6 +1914,7 @@ Client to app:
 {"cmd":"get","id":42}                 // → {"type":"transaction",...full detail, bodies as text or base64...}
 {"cmd":"tail","since":0}              // → summaries since `since`, then live events until disconnect
 {"cmd":"clear"}                       // → {"type":"ok","through":N}; a write: after hello, as the rule commands
+{"cmd":"capture.set","fullBodies":true} // → {"type":"capture","fullBodies":true,"maxBodyBytes":N}; after hello; held until this connection ends ("fullBodies":true in hello)
 ```
 
 Perf commands (docs/design/perf-monitors.md, "Bridge"; see "Performance monitors" above), after

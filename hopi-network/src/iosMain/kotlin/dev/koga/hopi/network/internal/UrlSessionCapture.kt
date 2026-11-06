@@ -1,6 +1,7 @@
 package dev.koga.hopi.network.internal
 
 import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.body.ResponseSkip
 import dev.koga.hopi.core.capture.CaptureInstallation
 import dev.koga.hopi.core.json.JsonWriter
@@ -20,6 +21,7 @@ import dev.koga.hopi.network.internal.urlsession.HOPI_US_RESPONSE_CAPTURED
 import dev.koga.hopi.network.internal.urlsession.HOPI_US_RESPONSE_DOWNLOAD
 import dev.koga.hopi.network.internal.urlsession.HOPI_US_RESPONSE_NOT_OBSERVABLE
 import dev.koga.hopi.network.internal.urlsession.hopi_us_bytes_sent
+import dev.koga.hopi.network.internal.urlsession.hopi_us_set_max_body_bytes
 import dev.koga.hopi.network.internal.urlsession.hopi_us_cancelled
 import dev.koga.hopi.network.internal.urlsession.hopi_us_copy_request_body
 import dev.koga.hopi.network.internal.urlsession.hopi_us_copy_response
@@ -94,7 +96,10 @@ public object UrlSessionCapture {
     private val first = AtomicReference<Settings?>(null)
     private val target = AtomicReference<Target?>(null)
 
-    private class Target(val store: HopiStore, val maxBodyBytes: Int)
+    private class Target(val store: HopiStore, val baseMaxBodyBytes: Int) {
+        /** The cap for a capture that starts now: the installation's, or full bodies' while a viewer holds them. */
+        val maxBodyBytes: Int get() = FullBodies.bodyCap(baseMaxBodyBytes)
+    }
 
     // Each task's pending record by store id, reused by its terminal one. Touched on the serial
     // capture queue only, so it needs no lock; an entry lives as long as its task runs.
@@ -134,6 +139,8 @@ public object UrlSessionCapture {
         )
         target.store(Target(installed.store, installed.maxBodyBytes))
         val result = hopi_us_start(installed.maxBodyBytes.toLong(), staticCFunction(::captureStarted), staticCFunction(::captureFinished))
+        // The native side keeps response bodies up to its own copy of the cap.
+        FullBodies.addListener { hopi_us_set_max_body_bytes(FullBodies.bodyCap(installed.maxBodyBytes).toLong()) }
         val started = when (result) {
             HOPI_US_BYTE_PATH -> Mode.Bytes
             HOPI_US_ALREADY_STARTED -> mode

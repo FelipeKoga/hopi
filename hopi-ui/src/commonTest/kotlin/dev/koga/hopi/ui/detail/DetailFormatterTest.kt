@@ -121,7 +121,7 @@ class DetailFormatterTest {
     fun truncationSkipAndBinaryAreExplained() = runTest {
         val formatter = DetailFormatter()
         val truncated = formatter.bodyView(textBody("{\"a\":", truncated = true, total = 4_096), "response")
-        assertEquals("Truncated: showing the first 5 B of 4.0 KB", truncated.notice)
+        assertEquals("Truncated: showing the first 5 B of 4.0 KB. The app kept no more: with Full bodies on, repeat the request to see it whole.", truncated.notice)
 
         val skipped = formatter.bodyView(CapturedBody.skipped("binary content-type", "image/png", 2_048), "response")
         assertIs<BodyView.Skipped>(skipped)

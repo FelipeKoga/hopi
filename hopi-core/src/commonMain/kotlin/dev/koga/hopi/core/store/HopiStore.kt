@@ -56,7 +56,8 @@ import kotlinx.coroutines.launch
 @HopiInternalApi
 public class HopiStore(
     public val maxEntries: Int = DEFAULT_MAX_ENTRIES,
-    public val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
+    /** The byte cap the store is built with ([baseMaxTotalBytes]); [raiseByteCap] may raise it for a while. */
+    maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
     scope: CoroutineScope? = null,
     channelCapacity: Int = DEFAULT_CHANNEL_CAPACITY,
     eventBufferCapacity: Int = DEFAULT_EVENT_BUFFER_CAPACITY,
@@ -77,6 +78,25 @@ public class HopiStore(
 
     private val lastId = AtomicLong(0)
     private val clearedThrough = AtomicLong(0)
+
+    /** The byte cap the store was built with. */
+    public val baseMaxTotalBytes: Long = maxTotalBytes
+
+    private val byteCap = AtomicLong(maxTotalBytes)
+
+    /**
+     * The bytes of bodies the store keeps: [baseMaxTotalBytes], or more while a host viewer asked
+     * for full bodies ([raiseByteCap]). Read on every pass, so a lowered cap evicts on the next one.
+     */
+    public val maxTotalBytes: Long get() = byteCap.load()
+
+    /**
+     * Keeps up to [bytes] of bodies (full bodies, while a host viewer that fetches each one at once
+     * is attached); null, or less than [baseMaxTotalBytes], goes back to it.
+     */
+    public fun raiseByteCap(bytes: Long?) {
+        byteCap.store(maxOf(baseMaxTotalBytes, bytes ?: 0L))
+    }
 
     /** Pending writes: an [HttpTransaction] or a [DeferredRecord] (or [Deferred]) that builds one. */
     private val writes = Channel<Any>(channelCapacity, BufferOverflow.DROP_OLDEST)
@@ -127,7 +147,7 @@ public class HopiStore(
      * bytes off once the pass is published, so the events it holds until then are counted too.
      */
     private val queuedBytes = AtomicLong(0)
-    private val wakeAtQueuedBytes = maxOf(1L, maxTotalBytes / 2)
+    private val wakeAtQueuedBytes: Long get() = maxOf(1L, maxTotalBytes / 2)
 
     /**
      * Thread mode: callers of [awaitApplied] not yet taken by a pass. The consumer takes them before
@@ -148,7 +168,7 @@ public class HopiStore(
      * quarter stays for older entries, while a body at the plugin's largest cap (half the store)
      * keeps a request or response of its own. Read by the consumer, so declared before it starts.
      */
-    private val maxEntryBytes: Long = maxOf(1L, maxTotalBytes - maxTotalBytes / 4)
+    private val maxEntryBytes: Long get() = maxOf(1L, maxTotalBytes - maxTotalBytes / 4)
 
     /**
      * The most events one consumer pass can publish at once (its first write plus a full drain of

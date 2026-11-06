@@ -250,7 +250,8 @@ private fun formatBody(body: CapturedBody, side: String): BodyView {
     if (body.bytes.isEmpty()) return BodyView.None(if (body.truncated) "Nothing captured" else "Empty $side body")
     val notice = if (body.truncated) {
         "Truncated: showing the first ${formatBytes(body.bytes.size.toLong())}" +
-            (body.totalBytes?.let { " of ${formatBytes(it)}" } ?: "")
+            (body.totalBytes?.let { " of ${formatBytes(it)}" } ?: "") +
+            ". The app kept no more: with Full bodies on, repeat the request to see it whole."
     } else {
         null
     }

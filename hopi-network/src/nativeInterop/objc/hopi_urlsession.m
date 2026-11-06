@@ -827,7 +827,7 @@ static void hopi_us_on_data(id connection, id data) {
     }
     int64_t length = (int64_t)chunk.length;
     state->_totalBytes += length;
-    int64_t room = state->_captureBody ? gMaxBodyBytes - state->_keptBytes : 0;
+    int64_t room = state->_captureBody ? __atomic_load_n(&gMaxBodyBytes, __ATOMIC_RELAXED) - state->_keptBytes : 0;
     if (room >= length) {
         [state->_chunks addObject:chunk];
         state->_keptBytes += length;
@@ -1298,9 +1298,10 @@ static void hopi_us_install_uploads(void) {
         NSData *bytes = argument;
         HopiUSBody *body = [HopiUSBody new];
         body->_length = (int64_t)bytes.length;
-        body->_bytes = ![bytes isKindOfClass:NSMutableData.class] || body->_length <= gMaxBodyBytes
+        int64_t cap = __atomic_load_n(&gMaxBodyBytes, __ATOMIC_RELAXED);
+        body->_bytes = ![bytes isKindOfClass:NSMutableData.class] || body->_length <= cap
                            ? [bytes copy]
-                           : hopi_us_prefix(bytes, (NSUInteger)gMaxBodyBytes);
+                           : hopi_us_prefix(bytes, (NSUInteger)cap);
         return body;
     };
     id (^file)(id) = ^id(__unused id argument) {
@@ -1652,7 +1653,7 @@ int32_t hopi_us_start(int64_t max_body_bytes, hopi_us_callback on_started, hopi_
     static dispatch_once_t once;
     __block int32_t result = HOPI_US_ALREADY_STARTED;
     dispatch_once(&once, ^{
-        gMaxBodyBytes = max_body_bytes < 0 ? 0 : max_body_bytes;
+        __atomic_store_n(&gMaxBodyBytes, max_body_bytes < 0 ? 0 : max_body_bytes, __ATOMIC_RELAXED);
         gOnStarted = on_started;
         gOnFinished = on_finished;
         dispatch_queue_attr_t attributes = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0);
@@ -1680,6 +1681,10 @@ void hopi_us_release(hopi_us_handle handle) { CFRelease(handle); }
 int64_t hopi_us_store_id(hopi_us_handle handle) { return STATE(handle)->_storeId; }
 
 void hopi_us_set_store_id(hopi_us_handle handle, int64_t id) { STATE(handle)->_storeId = id; }
+
+void hopi_us_set_max_body_bytes(int64_t max_body_bytes) {
+    __atomic_store_n(&gMaxBodyBytes, max_body_bytes < 0 ? 0 : max_body_bytes, __ATOMIC_RELAXED);
+}
 
 int64_t hopi_us_started_at_ms(hopi_us_handle handle) { return STATE(handle)->_startedAtMs; }
 
