@@ -254,6 +254,9 @@ public object TransactionJson {
         }
     }
 
+    private fun List<Pair<String, String>>.contentType(): String? =
+        firstOrNull { it.first.equals("Content-Type", ignoreCase = true) }?.second
+
     private fun heldBytes(body: CapturedBody?): Long? = body?.heldBytes?.takeIf { it != body.reportedBytes }
 
     private fun writeExchange(
@@ -274,7 +277,7 @@ public object TransactionJson {
             w.nullValue()
         } else {
             w.beginObject()
-            val text = body.textOrNull()
+            val text = body.textOrNull()?.let { redactor.body(it, body.contentType ?: headers.contentType()) }
             if (text != null) {
                 w.field("encoding", "utf8").name("text").chunkedValue(text, chunkChars, flush)
             } else {

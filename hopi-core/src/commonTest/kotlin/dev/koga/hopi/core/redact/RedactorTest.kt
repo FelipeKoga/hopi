@@ -139,4 +139,36 @@ class RedactorTest {
         assertSame(plain, r.textMentioning(plain, "https://h/"))
         assertEquals("https://h/?token=t", Redactor.Disabled.textMentioning("https://h/?token=t", "https://h/?token=t"))
     }
+
+    @Test
+    fun secretJsonFieldsAreRedactedInBodies() {
+        val r = Redactor.Default
+        assertEquals(
+            """{"accessToken":"<redacted>","expires_in":3600,"user":{"name":"a","password":"<redacted>"},"note":"\"token\": x"}""",
+            r.body("""{"accessToken":"eyJ.a.b","expires_in":3600,"user":{"name":"a","password":"p\"w"},"note":"\"token\": x"}""", "application/json"),
+        )
+        assertEquals("""[{"otp" : "<redacted>"}, {"API-KEY":"<redacted>"}]""", r.body("""[{"otp" : 123456}, {"API-KEY":null}]""", null))
+        // A nested object under a secret name keeps its shape; a truncated value is cut to the end.
+        assertEquals("""{"secret":{"token":"<redacted>"},"refresh_token":"<redacted>"""", r.body("""{"secret":{"token":"t"},"refresh_token":"abc""", "application/json"))
+        val plain = """{"code":"BR","key":"name","page":2}"""
+        assertSame(plain, r.body(plain, "application/json"))
+        assertEquals("""{"token":"t"}""", Redactor.Disabled.body("""{"token":"t"}""", "application/json"))
+    }
+
+    @Test
+    fun formFieldsAreRedactedLikeAQuery() {
+        val r = Redactor.Default
+        assertEquals(
+            "grant_type=authorization_code&code=<redacted>&client_secret=<redacted>&redirect_uri=x",
+            r.body("grant_type=authorization_code&code=c&client_secret=s&redirect_uri=x", "application/x-www-form-urlencoded; charset=utf-8"),
+        )
+        val text = "token=abc"
+        assertSame(text, r.body(text, "text/plain"))
+    }
+
+    @Test
+    fun configuredQueryParametersAreBodyFieldsToo() {
+        val r = Redactor.create(queryParameters = listOf("tenant_secret"))
+        assertEquals("""{"tenantSecret":"<redacted>"}""", r.body("""{"tenantSecret":"s"}""", "application/json"))
+    }
 }

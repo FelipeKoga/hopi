@@ -43,7 +43,10 @@ This document is the contract every module is built against. Change it before ch
    `X-Amz-Credential`…) in the query and in the fragment (`#access_token=…`, `#/route?token=…`),
    the userinfo of a URL (`https://user:password@host` becomes `https://<redacted>@host`), the
    URLs in `Location`, `Content-Location` and `Referer`, every `scheme://…` quoted in an error's
-   text, plus user-configured headers and query parameters. Opting out is explicit
+   text, the values of a body's secret fields (`Redactor.DEFAULT_BODY_FIELDS` in JSON, matched
+   ignoring case, `_` and `-`, so `accessToken`, `password`, `client_secret`…; a form body's fields
+   as a query's) in the bridge's `get` and in cURL, plus user-configured headers and query
+   parameters (a configured parameter is a body field too). Opting out is explicit
    (`unsafeDisableRedaction()`, which turns all of it off) and logs a notice.
 6. English everywhere: code, comments, docs, commits.
 

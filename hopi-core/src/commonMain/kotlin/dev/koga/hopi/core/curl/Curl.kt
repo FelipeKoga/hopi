@@ -90,7 +90,7 @@ public fun toCurl(transaction: HttpTransaction, redaction: Redactor = Redactor.D
                 decodeUtf8Prefix(body.bytes, budget * 4)
             } else {
                 body.textOrNull()
-            }
+            }?.let { redaction.body(it, body.contentType ?: contentType) }
             if (text != null && budget < MIN_BODY_BUDGET && shellQuotedLength(text) > budget) {
                 // The URL and headers alone fill the limit: no room for any of the body.
                 sentBytes = 0

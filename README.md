@@ -34,8 +34,9 @@ viewer and a CLI.
 - **Log stream**: one NDJSON line per request in logcat or the iOS unified log, with no setup.
 - **Redaction** on every channel, on by default: credential headers (`Authorization`, `Cookie`,
   `X-Api-Key`…), token query parameters (`access_token`, `code`, `key`, presigned-URL
-  signatures…) in the query and the fragment, URL userinfo, and URLs in `Location`/`Referer` and
-  error text; plus the headers and parameters you name. `unsafeDisableRedaction()` turns it off.
+  signatures…) in the query and the fragment, URL userinfo, URLs in `Location`/`Referer` and
+  error text, and secret fields of JSON and form bodies (`accessToken`, `password`…); plus the
+  headers and parameters you name. `unsafeDisableRedaction()` turns it off.
 
 ## Quick start
 

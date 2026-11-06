@@ -4,8 +4,9 @@ import dev.koga.hopi.api.HopiInternalApi
 
 /**
  * Replaces secret header values and query parameter values with [REDACTED]. Header and parameter
- * names match case-insensitively; parameter names are percent-decoded before matching. On by
- * default, with [DEFAULT_HEADERS] and [DEFAULT_QUERY_PARAMETERS]; only [Disabled] (the configs'
+ * names match case-insensitively; parameter names are percent-decoded before matching. Bodies get
+ * the values of their secret fields replaced ([body]). On by default, with [DEFAULT_HEADERS],
+ * [DEFAULT_QUERY_PARAMETERS] and [DEFAULT_BODY_FIELDS]; only [Disabled] (the configs'
  * `unsafeDisableRedaction()`) turns it off.
  */
 @HopiInternalApi
@@ -13,6 +14,7 @@ public class Redactor private constructor(
     public val enabled: Boolean,
     private val headerNames: Set<String>,
     private val queryParameterNames: Set<String>,
+    private val bodyFieldNames: Set<String>,
 ) {
     public fun isRedactedHeader(name: String): Boolean =
         enabled && name.lowercase() in headerNames
@@ -57,6 +59,28 @@ public class Redactor private constructor(
         return redactEmbeddedUrls(known)
     }
 
+    /**
+     * [text], a body of [contentType], with the values of its secret fields replaced by [REDACTED]:
+     * a JSON body's string, number and literal values under a [DEFAULT_BODY_FIELDS] key (or a
+     * configured query parameter's name), matched ignoring case, `_` and `-` (`accessToken`,
+     * `access_token`); a form body's fields as a query's. A body that is neither, or has no such
+     * field, is returned as is.
+     */
+    public fun body(text: String, contentType: String?): String {
+        if (!enabled || text.isEmpty()) return text
+        val type = contentType?.lowercase().orEmpty()
+        return when {
+            "x-www-form-urlencoded" in type -> {
+                val asQuery = "?$text"
+                val redacted = redactQuery(asQuery)
+                if (redacted === asQuery) text else redacted.substring(1)
+            }
+            "json" in type || text.firstOrNull { !it.isWhitespace() }.let { it == '{' || it == '[' } ->
+                redactJsonFields(text, bodyFieldNames)
+            else -> text
+        }
+    }
+
     /** Each `scheme://…` in [text], up to a space, a quote or an angle bracket, through [url]. */
     private fun redactEmbeddedUrls(text: String): String {
         var schemeSeparator = text.indexOf("://")
@@ -83,11 +107,13 @@ public class Redactor private constructor(
         !other.enabled || other === this -> this
         !enabled -> other
         headerNames.containsAll(other.headerNames) &&
-            queryParameterNames.containsAll(other.queryParameterNames) -> this
+            queryParameterNames.containsAll(other.queryParameterNames) &&
+            bodyFieldNames.containsAll(other.bodyFieldNames) -> this
         else -> Redactor(
             enabled = true,
             headerNames = headerNames + other.headerNames,
             queryParameterNames = queryParameterNames + other.queryParameterNames,
+            bodyFieldNames = bodyFieldNames + other.bodyFieldNames,
         )
     }
 
@@ -161,6 +187,16 @@ public class Redactor private constructor(
             "X-Goog-Signature", "X-Goog-Credential",
         )
 
+        /**
+         * The JSON fields redacted unless redaction is disabled, matched ignoring case, `_` and `-`.
+         * Narrower than the query's: `code` and `key` name too many harmless JSON fields.
+         */
+        public val DEFAULT_BODY_FIELDS: List<String> = listOf(
+            "access_token", "refresh_token", "id_token", "token", "session_token", "auth_token",
+            "password", "passwd", "secret", "client_secret", "api_key", "apikey", "private_key",
+            "authorization", "cookie", "sessionid", "otp",
+        )
+
         /** Headers whose value is a URL, redacted with [url]. */
         private val URL_HEADERS = setOf("location", "content-location", "referer")
 
@@ -174,7 +210,7 @@ public class Redactor private constructor(
 
         public val Default: Redactor = create()
 
-        public val Disabled: Redactor = Redactor(enabled = false, emptySet(), emptySet())
+        public val Disabled: Redactor = Redactor(enabled = false, emptySet(), emptySet(), emptySet())
 
         public fun create(
             extraHeaders: Collection<String> = emptyList(),
@@ -189,6 +225,7 @@ public class Redactor private constructor(
                 enabled = true,
                 headerNames = headers,
                 queryParameterNames = (DEFAULT_QUERY_PARAMETERS + queryParameters).mapTo(HashSet()) { it.trim().lowercase() },
+                bodyFieldNames = (DEFAULT_BODY_FIELDS + queryParameters).mapTo(HashSet()) { bodyFieldKey(it.trim()) },
             )
         }
 
