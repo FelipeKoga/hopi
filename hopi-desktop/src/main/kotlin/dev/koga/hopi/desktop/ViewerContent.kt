@@ -136,7 +136,7 @@ internal fun ViewerContent(
                     true
                 },
         ) {
-            TargetBar(viewer, status, theme, onAppFieldFocus = { appFieldFocused = it })
+            TopBar(viewer, status, theme, rules, perf, onAppFieldFocus = { appFieldFocused = it })
             // The panes float on the background, 8 dp apart and from the window's edges.
             Row(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val current = session
@@ -184,81 +184,6 @@ internal fun ViewerContent(
         // The JVM bridge root is watched (a poll on macOS) only while the picker is in front.
         val windowFocused = LocalWindowInfo.current.isWindowFocused
         LaunchedEffect(windowFocused) { viewer.windowFocused(windowFocused) }
-    }
-}
-
-@Composable
-private fun TargetBar(viewer: Viewer, status: ViewerStatus, theme: ThemeSettings, onAppFieldFocus: (Boolean) -> Unit) {
-    val colors = hopiDesktopColors
-    val discovery by viewer.discovery.collectAsState()
-    var selectedId by remember { mutableStateOf<String?>(null) }
-    val app = rememberTextFieldState()
-    val devices = discovery.devices
-    val selected = devices.firstOrNull { it.id == selectedId } ?: devices.firstOrNull { it.ready }
-    // A device's only bridge is the obvious app; a typed id is never overwritten.
-    LaunchedEffect(selected) {
-        val bridges = (selected as? AndroidDevice)?.bridges.orEmpty()
-        if (app.text.isEmpty() && bridges.size == 1) app.setTextAndPlaceCursorAtEnd(bridges.single())
-    }
-    val viewing = when (status) {
-        ViewerStatus.Idle -> null
-        is ViewerStatus.Connecting -> status.target
-        is ViewerStatus.Connected -> status.target
-        is ViewerStatus.Waiting -> status.target
-    }
-    val appId = app.text.toString().trim().ifEmpty { null }
-    val problem = if (selected == null) "no device or bridge found: start an emulator, a simulator or a JVM app" else targetProblem(selected, appId)
-
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            BasicText("Device", style = HopiDesktopType.section.copy(color = colors.textFaint))
-            LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(devices, key = { it.platform.id + ":" + it.id }) { device ->
-                    ChromeChip(
-                        text = listOfNotNull(platformLabel(device.platform), device.label).joinToString(" · "),
-                        detail = if (device.ready) null else (device as? AndroidDevice)?.state,
-                        selected = device == selected,
-                        onClick = { selectedId = device.id },
-                    )
-                }
-            }
-            ChromeTextField(
-                app,
-                placeholder = if (selected?.platform == Platform.Jvm) "app id (optional)" else "app id",
-                modifier = Modifier.width(260.dp).testTag(ViewerTags.APP_FIELD).onFocusChanged { onAppFieldFocus(it.isFocused) },
-            )
-            if (viewing != null) {
-                ChromeButton("Disconnect", onClick = viewer::disconnect)
-            }
-            ChromeButton(
-                if (viewing != null && selected != null && viewing.sameAs(Target(selected, appId))) "Reconnect" else "Connect",
-                onClick = { selected?.let { viewer.connect(Target(it, appId)) } },
-                enabled = selected != null && targetProblem(selected, appId) == null,
-                variant = ButtonVariant.Primary,
-                modifier = Modifier.testTag(ViewerTags.CONNECT),
-            )
-            ChromeButton("Refresh", onClick = viewer::refresh)
-            ThemeButton(theme)
-        }
-        val bridges = (selected as? AndroidDevice)?.bridges.orEmpty()
-        val hint = when {
-            bridges.isNotEmpty() -> null
-            selected != null && problem != null && app.text.isNotEmpty() -> problem
-            discovery.notes.isNotEmpty() -> discovery.notes.joinToString("; ")
-            else -> null
-        }
-        if (bridges.isNotEmpty() || hint != null) {
-            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (bridges.isNotEmpty()) {
-                    BasicText("Bridges", style = HopiDesktopType.section.copy(color = colors.textFaint))
-                    for (bridge in bridges) {
-                        ChromeChip(bridge, selected = app.text.toString() == bridge, onClick = { app.setTextAndPlaceCursorAtEnd(bridge) })
-                    }
-                }
-                // What stops a connect (adb missing, a bad app id): the warning amber.
-                hint?.let { BasicText(it, style = HopiDesktopType.meta.copy(color = colors.textMuted), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            }
-        }
     }
 }
 
@@ -321,7 +246,7 @@ private fun StatusBar(viewer: Viewer, status: ViewerStatus) {
 }
 
 /** The connection's hue: connected success, connecting info, reconnecting or device offline warning, a failed connect error, idle and app stopped neutral. */
-private fun statusTone(status: ViewerStatus, colors: HopiDesktopColors): HopiTone = when (status) {
+internal fun statusTone(status: ViewerStatus, colors: HopiDesktopColors): HopiTone = when (status) {
     ViewerStatus.Idle -> colors.neutral
     is ViewerStatus.Connecting -> colors.info
     is ViewerStatus.Connected -> colors.success
@@ -376,7 +301,7 @@ private fun devicectlReason(message: String): String {
 }
 
 /** Null for JVM bridges, whose label says JVM already. */
-private fun platformLabel(platform: Platform): String? = when (platform) {
+internal fun platformLabel(platform: Platform): String? = when (platform) {
     Platform.Android -> "Android"
     Platform.Ios -> "iOS"
     Platform.Jvm -> null

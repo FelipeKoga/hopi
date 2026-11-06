@@ -12,13 +12,13 @@ public enum class HopiAccent(
     internal val lightPrimary: Color,
     internal val lightOnPrimary: Color,
 ) {
+    Neutral(Color(0xFFE2E2E2), Color(0xFF1B1B1B), Color(0xFF3B3B3B), Color(0xFFFFFFFF)),
     Green(Color(0xFF81DFA2), Color(0xFF003920), Color(0xFF2C6A47), Color(0xFFFFFFFF)),
     Blue(Color(0xFFA8C8FF), Color(0xFF05305F), Color(0xFF3A5F94), Color(0xFFFFFFFF)),
     Teal(Color(0xFF82D3E0), Color(0xFF00363E), Color(0xFF006874), Color(0xFFFFFFFF)),
     Violet(Color(0xFFCDBDFF), Color(0xFF33275E), Color(0xFF65558F), Color(0xFFFFFFFF)),
     Orange(Color(0xFFFFB68A), Color(0xFF522300), Color(0xFF8F4C1F), Color(0xFFFFFFFF)),
     Rose(Color(0xFFFFB1C3), Color(0xFF5E1130), Color(0xFF8E4459), Color(0xFFFFFFFF)),
-    Neutral(Color(0xFFE2E2E2), Color(0xFF1B1B1B), Color(0xFF3B3B3B), Color(0xFFFFFFFF)),
 }
 
 /** Light, dark, or the system's setting. */
@@ -26,7 +26,7 @@ public enum class HopiThemeMode { System, Light, Dark }
 
 /** The viewer's theme choice; none (the default) is Greenwave following the system. */
 @Immutable
-public data class HopiThemeChoice(val accent: HopiAccent = HopiAccent.Green, val mode: HopiThemeMode = HopiThemeMode.System)
+public data class HopiThemeChoice(val accent: HopiAccent = HopiAccent.Neutral, val mode: HopiThemeMode = HopiThemeMode.System)
 
 internal val LocalHopiThemeChoice = staticCompositionLocalOf { HopiThemeChoice() }
 

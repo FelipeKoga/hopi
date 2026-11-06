@@ -61,7 +61,7 @@ internal class ThemeSettings(private val prefs: Preferences? = null) {
 
     private fun load(): HopiThemeChoice {
         val p = prefs ?: return HopiThemeChoice()
-        val accent = HopiAccent.entries.firstOrNull { it.name == p.get(ACCENT, null) } ?: HopiAccent.Green
+        val accent = HopiAccent.entries.firstOrNull { it.name == p.get(ACCENT, null) } ?: HopiAccent.Neutral
         val mode = HopiThemeMode.entries.firstOrNull { it.name == p.get(MODE, null) } ?: HopiThemeMode.System
         return HopiThemeChoice(accent, mode)
     }
@@ -87,7 +87,7 @@ internal object ThemeTags {
 internal fun ThemeButton(settings: ThemeSettings) {
     val open = remember { MutableTransitionState(false) }
     Box {
-        ChromeButton("Theme", onClick = { open.targetState = !open.targetState }, modifier = Modifier.testTag(ThemeTags.BUTTON))
+        ToolbarIconButton(TopBarIcons.Theme, "Theme", onClick = { open.targetState = !open.targetState }, modifier = Modifier.testTag(ThemeTags.BUTTON))
         if (open.currentState || open.targetState) {
             Popup(
                 alignment = Alignment.TopEnd,
@@ -134,6 +134,8 @@ private fun ThemePanel(settings: ThemeSettings) {
                         .padding(4.dp)
                         .clip(CircleShape)
                         .background(accent.swatch)
+                        // A hairline, so a pale swatch (Neutral's) still reads on a light panel.
+                        .border(1.dp, colors.border, CircleShape)
                         .semantics { contentDescription = accent.name; this.selected = selected }
                         .clickable(role = Role.RadioButton) { settings.update(choice.copy(accent = accent)) }
                         .testTag(ThemeTags.accent(accent)),
