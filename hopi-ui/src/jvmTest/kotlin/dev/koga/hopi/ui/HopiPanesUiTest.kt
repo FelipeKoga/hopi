@@ -45,6 +45,7 @@ import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.ui.desktop.HopiPanes
 import dev.koga.hopi.ui.desktop.HopiPanesRules
 import dev.koga.hopi.ui.desktop.HopiPanesState
+import dev.koga.hopi.ui.detail.BodyViewerTags
 import dev.koga.hopi.ui.detail.DetailTags
 import dev.koga.hopi.ui.list.ListTags
 import kotlin.math.ceil
@@ -642,5 +643,30 @@ class HopiPanesUiTest {
         onNodeWithText("/big").performClick()
         waitForText("Mock: response body not held in full")
         onNodeWithText(DetailTags.MOCK).assertIsNotEnabled()
+    }
+
+    @Test
+    fun anExpandedBodyFindsEveryMatchAndStepsThroughThem() = runComposeUiTest {
+        val records = (0 until 600).joinToString(",", "[", "]") { i -> """{"id":$i,"name":"${if (i % 200 == 7) "needle" else "hay"}-$i","ok":true}""" }
+        submitAll(complete(1, url = "https://api.example.com/big", responseBody = textBody(records)))
+        setContent { OnePane() }
+        waitForText("/big")
+        onNodeWithText("/big").performClick()
+        waitForText("Response")
+        onNodeWithText("Response").performClick()
+        waitUntil(timeoutMillis = 5_000) { existsDescription(BodyViewerTags.EXPAND) }
+        onNodeWithContentDescription(BodyViewerTags.EXPAND).performClick()
+        waitUntil(timeoutMillis = 5_000) { existsDescription(BodyViewerTags.SEARCH) }
+        onNodeWithContentDescription(BodyViewerTags.SEARCH).performTextInput("NEEDLE")
+        waitForText("1 of 3")
+        onNodeWithContentDescription(BodyViewerTags.NEXT).performClick()
+        waitForText("2 of 3")
+        onNodeWithContentDescription(BodyViewerTags.PREVIOUS).performClick()
+        onNodeWithContentDescription(BodyViewerTags.PREVIOUS).performClick()
+        waitForText("3 of 3")
+        // The last match, far down a 600-record body, was scrolled into view.
+        waitForText("needle-407", substring = true)
+        onNodeWithContentDescription(BodyViewerTags.CLOSE).performClick()
+        waitUntil(timeoutMillis = 5_000) { !existsDescription(BodyViewerTags.SEARCH) }
     }
 }

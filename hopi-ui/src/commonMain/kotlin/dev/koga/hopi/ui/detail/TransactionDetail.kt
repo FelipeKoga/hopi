@@ -38,6 +38,8 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -101,6 +103,10 @@ internal fun TransactionDetailPane(
     actions: DetailActions,
 ) {
     val colors = LocalHopiColors.current
+    val palette = remember(colors) { JsonPalette.of(colors) }
+    // The body open full size, with its title; a new transaction closes it.
+    var expanded by remember(model?.transaction?.id) { mutableStateOf<Pair<String, BodyView.Text>?>(null) }
+    expanded?.let { (title, body) -> BodyViewer(title, body, onClose = { expanded = null }) }
     Column(Modifier.fillMaxSize()) {
         Row(
             // A minimum, not a height: a large font scale grows the bar instead of clipping the title.
@@ -165,8 +171,8 @@ internal fun TransactionDetailPane(
                         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                             when (shown) {
                                 DetailTab.Overview -> overview(model, colors)
-                                DetailTab.Request -> exchange(model.request, colors)
-                                DetailTab.Response -> exchange(model.response, colors)
+                                DetailTab.Request -> exchange(model.request, colors, palette) { expanded = "Request body" to it }
+                                DetailTab.Response -> exchange(model.response, colors, palette) { expanded = "Response body" to it }
                             }
                             item(key = "end", contentType = "end") { Spacer(Modifier.height(24.dp)) }
                         }
@@ -243,7 +249,7 @@ private fun LazyListScope.overview(model: DetailModel, colors: HopiColors) {
     }
 }
 
-private fun LazyListScope.exchange(exchange: ExchangeView, colors: HopiColors) {
+private fun LazyListScope.exchange(exchange: ExchangeView, colors: HopiColors, palette: JsonPalette, onExpand: (BodyView.Text) -> Unit) {
     item(key = "headers-title", contentType = "title") {
         SectionTitle("Headers", trailing = exchange.headers.size.toString())
     }
@@ -264,7 +270,12 @@ private fun LazyListScope.exchange(exchange: ExchangeView, colors: HopiColors) {
         }
     }
     val body = exchange.body
-    item(key = "body-title", contentType = "title") { SectionTitle("Body", trailing = body.summary) }
+    item(key = "body-title", contentType = "title") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("Body", Modifier.weight(1f), trailing = body.summary)
+            if (body is BodyView.Text) IconButton(HopiIcons.Expand, BodyViewerTags.EXPAND, { onExpand(body) }, Modifier.padding(end = 4.dp))
+        }
+    }
     body.notice?.let { notice ->
         item(key = "body-notice", contentType = "notice") {
             // A warning callout: the body was cut, or not captured at all.
@@ -284,12 +295,8 @@ private fun LazyListScope.exchange(exchange: ExchangeView, colors: HopiColors) {
     when (body) {
         is BodyView.None -> item(key = "body-none", contentType = "message") { Message(body.message, colors) }
         is BodyView.Skipped -> Unit
-        is BodyView.Text -> itemsIndexed(body.chunks, key = { index, _ -> "chunk-$index" }, contentType = { _, _ -> "chunk" }) { _, chunk ->
-            BasicText(
-                chunk,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                style = HopiType.mono.copy(color = colors.text),
-            )
+        is BodyView.Text -> itemsIndexed(body.chunks, key = { index, _ -> "chunk-$index" }, contentType = { _, _ -> "chunk" }) { index, chunk ->
+            BodyPiece(chunk, body.pieceStates?.get(index)?.toInt(), palette, Modifier.fillMaxWidth().padding(horizontal = 16.dp))
         }
         is BodyView.Binary -> {
             item(key = "body-binary", contentType = "message") {

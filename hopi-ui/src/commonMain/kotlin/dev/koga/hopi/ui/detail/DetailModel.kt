@@ -54,6 +54,9 @@ internal sealed interface BodyView {
         val isJson: Boolean,
     ) : BodyView {
         val chunks: List<String> get() = pieces.pieces
+
+        /** Per piece, where a JSON body's piece starts ([jsonPieceStates]), for its colors; null when not JSON. */
+        val pieceStates: ByteArray? = if (isJson) jsonPieceStates(pieces.pieces) else null
     }
 
     class Binary(override val summary: String, override val notice: String?, val hexPreview: String, val previewBytes: Int) :

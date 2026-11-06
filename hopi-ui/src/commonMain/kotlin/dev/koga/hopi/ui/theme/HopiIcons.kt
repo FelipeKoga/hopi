@@ -50,6 +50,13 @@ internal object HopiIcons {
     /** A toast that worked. */
     val Check by lazy { icon("Check", "M20 6 9 17l-5-5") }
 
+    /** Lucide's maximize-2: open a body full size. */
+    val Expand by lazy { icon("Expand", "M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7") }
+
+    val ChevronUp by lazy { icon("ChevronUp", "M18 15l-6-6-6 6") }
+
+    val ChevronDown by lazy { icon("ChevronDown", "M6 9l6 6 6-6") }
+
     private fun icon(name: String, vararg paths: String): ImageVector {
         val builder = ImageVector.Builder(
             name = name,
