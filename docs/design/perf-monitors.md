@@ -243,7 +243,7 @@ frame to Hopi's handler, so the thread wakes once per frame the app draws and **
 draws nothing**. `dropCountSinceLastInvocation` counts *metrics reports* the framework discarded
 because Hopi's handler fell behind, not frames the app dropped; it goes to a `metricsLost` counter
 (a non-zero value means the figures undercount and says so). Frames the app missed are inferred
-from `TOTAL_DURATION` against the deadline and from gaps between consecutive vsync timestamps. Per
+from `TOTAL_DURATION` against the deadline and from each frame's wait to start (below), never from gaps between frames (an idle app draws nothing and misses nothing). Per
 frame the listener reads `TOTAL_DURATION`, the stage durations (input, animation, layout/measure,
 draw, sync, command issue, swap; GPU on API 31+), `FIRST_DRAW_FRAME` and, on API 26+, the intended
 and actual vsync timestamps (on 24 and 25 those metrics do not exist: the frame is bucketed by
@@ -266,7 +266,9 @@ the `DEADLINE` of the last frame that started on time. Read from the intended vs
 carries the wait in `TOTAL_DURATION` and, on API 31+, in `DEADLINE` too (the later frame
 timeline's, several vsyncs long: 50 to 67 ms seen): 30 frames that each blocked 100 ms read as 1
 janky frame and 29 frames of 200 ms "within" their deadline. Now they read as 31 janky frames of
-their own work (the animation stage's median 102 ms). The wait itself shows as missed vsyncs, and
+their own work (the animation stage's median 102 ms). The wait itself shows as missed vsyncs (the
+wait in display intervals, rounded; until 2026-11 they were gaps between frames, which counted idle
+time: 110 to 420 a second on an idle phone), and
 a long one as a hang. Below API 26 (no vsync metrics) the frame is its `TOTAL_DURATION`.
 
 **Per-second buckets, no timer.** Frames are summed into the current second's bucket. Only a

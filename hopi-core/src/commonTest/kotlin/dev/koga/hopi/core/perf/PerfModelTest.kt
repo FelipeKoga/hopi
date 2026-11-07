@@ -106,9 +106,11 @@ class PerfModelTest {
         assertEquals(FrameClass.FROZEN, FrameClassifier.classify(701_000_000, at60))
         // API 31's DEADLINE metric, per frame: a 120 Hz frame of 20 ms is janky.
         assertEquals(FrameClass.JANKY, FrameClassifier.classify(20_000_000, 8_333_333))
-        assertEquals(0, FrameClassifier.missedVsyncs(0, 100, 16))
-        assertEquals(0, FrameClassifier.missedVsyncs(1_000, 1_016, 16))
-        assertEquals(2, FrameClassifier.missedVsyncs(1_000, 1_048, 16))
+        // Missed vsyncs are the frame's wait to start, never idle time between frames.
+        assertEquals(0, FrameClassifier.missedVsyncs(0, 16))
+        assertEquals(0, FrameClassifier.missedVsyncs(8, 16))
+        assertEquals(1, FrameClassifier.missedVsyncs(16, 16))
+        assertEquals(6, FrameClassifier.missedVsyncs(100_000_000, at60))
     }
 
     @Test

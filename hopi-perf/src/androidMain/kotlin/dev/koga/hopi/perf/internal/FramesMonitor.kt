@@ -145,7 +145,6 @@ internal class FramesMonitor(
         @Volatile private var deadlineNs = FrameClassifier.deadlineNs(display?.refreshRate ?: 60f)
 
         // Frames thread only.
-        private var lastVsyncNs = 0L
         private var onTimeDeadlineNs = deadlineNs
         private val stages = LongArray(8)
 
@@ -176,8 +175,8 @@ internal class FramesMonitor(
             } else {
                 deadlineNs
             }
-            val missed = FrameClassifier.missedVsyncs(lastVsyncNs, vsync, deadline)
-            lastVsyncNs = vsync
+            // A late frame's deadline is the last on-time one's, about one display interval.
+            val missed = FrameClassifier.missedVsyncs(skew, deadline)
             stages[0] = metrics.getMetric(FrameMetrics.INPUT_HANDLING_DURATION)
             stages[1] = metrics.getMetric(FrameMetrics.ANIMATION_DURATION)
             stages[2] = metrics.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION)

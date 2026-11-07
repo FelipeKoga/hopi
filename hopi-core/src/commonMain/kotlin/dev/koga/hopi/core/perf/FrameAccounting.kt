@@ -33,14 +33,14 @@ public object FrameClassifier {
         if (refreshRate > 1f) (1_000_000_000.0 / refreshRate).toLong() else 16_666_667L
 
     /**
-     * Vsyncs missed between two consecutive frames' intended vsync timestamps: a gap of more than
-     * 1.5 frame intervals counts the intervals skipped. 0 when either timestamp is unknown.
+     * Vsyncs a frame missed waiting to start: [waitNs] is the time from the vsync it was meant for to
+     * the one it started on (`VSYNC_TIMESTAMP - INTENDED_VSYNC_TIMESTAMP`), counted in display
+     * intervals, rounded. Not the gap since the previous frame: an app that draws nothing is idle,
+     * not missing vsyncs. 0 when either value is unknown.
      */
-    public fun missedVsyncs(previousVsyncNs: Long, vsyncNs: Long, intervalNs: Long): Int {
-        if (previousVsyncNs <= 0 || vsyncNs <= previousVsyncNs || intervalNs <= 0) return 0
-        val gap = vsyncNs - previousVsyncNs
-        if (gap * 2 <= intervalNs * 3) return 0
-        return ((gap + intervalNs / 2) / intervalNs - 1).toInt().coerceAtLeast(0)
+    public fun missedVsyncs(waitNs: Long, intervalNs: Long): Int {
+        if (waitNs <= 0 || intervalNs <= 0 || waitNs * 2 <= intervalNs) return 0
+        return ((waitNs + intervalNs / 2) / intervalNs).toInt()
     }
 }
 
