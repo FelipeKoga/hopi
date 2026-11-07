@@ -30,7 +30,8 @@ nonisolated enum Format {
     static func prettyBody(_ text: String, contentType: String?) -> String {
         let trimmed = text.drop { $0.isWhitespace }
         let looksJSON = contentType?.contains("json") == true || trimmed.first == "{" || trimmed.first == "["
-        guard looksJSON, text.utf8.count < 4 << 20 else { return text }
+        // Off the main thread (RenderedBody); a full body can be tens of megabytes.
+        guard looksJSON, text.utf8.count <= RenderedBody.prettyLimit else { return text }
         return reindent(text) ?? text
     }
 

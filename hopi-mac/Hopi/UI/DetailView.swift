@@ -64,7 +64,7 @@ struct DetailView: View {
                 .controlSize(.large)
                 if let exchange = side == .request ? detail.request : detail.response {
                     HeaderTable(headers: exchange.headers)
-                    BodySection(content: exchange.body)
+                    BodySection(content: exchange.body, key: "\(id)/\(side.rawValue)/\(detail.state)/\(exchange.body?.capturedBytes ?? -1)")
                 } else {
                     Text(detail.state == .pending ? "Waiting for the response…" : "No response.")
                         .foregroundStyle(.secondary)
@@ -178,6 +178,16 @@ private struct HeaderTable: View {
 
 private struct BodySection: View {
     let content: WireBody?
+    /// Which body this is: rendering runs again only when it changes, never on every redraw
+    /// (the inspector redraws whenever a request lands in the list).
+    let key: String
+
+    @State private var rendered: RenderedBody?
+    @State private var renderedKey: String?
+
+    /// Up to this many characters SwiftUI's `Text` lays a body out at once; past it a text view
+    /// that lays out only what scrolls into sight.
+    private static let inlineLimit = 50_000
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -191,17 +201,34 @@ private struct BodySection: View {
             if let content {
                 if let reason = content.skippedReason {
                     Text("Not captured: \(reason)").foregroundStyle(.secondary)
-                } else if let text = content.text {
-                    let pretty = Format.prettyBody(text, contentType: content.contentType)
-                    let isJSON = pretty != text || content.contentType?.contains("json") == true
-                    Text(isJSON ? JSONHighlight.attributed(pretty) : AttributedString(pretty))
-                        .accessibilityIdentifier("detail-body")
-                        .font(.system(.callout, design: .monospaced))
-                        .lineSpacing(2)
-                        .textSelection(.enabled)
+                } else if content.text != nil {
+                    if let rendered, renderedKey == key {
+                        if rendered.text.length <= Self.inlineLimit {
+                            Text((try? AttributedString(rendered.text, including: \.appKit)) ?? AttributedString(rendered.text.string))
+                                .accessibilityIdentifier("detail-body")
+                                .lineSpacing(2)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(.quinary, in: .rect(cornerRadius: 10))
+                        } else {
+                            BodyTextView(text: rendered.text)
+                                .frame(height: 560)
+                                .background(.quinary, in: .rect(cornerRadius: 10))
+                                .clipShape(.rect(cornerRadius: 10))
+                        }
+                        if rendered.omitted > 0 {
+                            Text("\(rendered.omitted.formatted()) more characters not shown: Copy Response Body or Export has them all.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Formatting \(Format.bytes(content.capturedBytes))…").foregroundStyle(.secondary)
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .background(.quinary, in: .rect(cornerRadius: 10))
+                    }
                 } else {
                     Text("Binary, \(Format.bytes(content.capturedBytes))").foregroundStyle(.secondary)
                 }
@@ -209,12 +236,60 @@ private struct BodySection: View {
                 Text("None").foregroundStyle(.secondary)
             }
         }
+        .task(id: key) { await render() }
+    }
+
+    /// Re-indents and colors off the main thread; a newer body cancels an older one's result.
+    private func render() async {
+        guard let text = content?.text else { return }
+        let contentType = content?.contentType
+        let key = key
+        let result = await Task.detached(priority: .userInitiated) {
+            RenderedBody.make(text, contentType: contentType)
+        }.value
+        guard !Task.isCancelled else { return }
+        rendered = result
+        renderedKey = key
     }
 
     private func caption(_ body: WireBody) -> String {
         var parts = [body.contentType ?? "", Format.bytes(body.totalBytes ?? body.capturedBytes)]
         if body.truncated { parts.append("cut at \(Format.bytes(body.capturedBytes))") }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// A large body in a read-only, selectable text view with non-contiguous layout: only the lines
+/// in sight are laid out, so megabytes scroll without a pause.
+private struct BodyTextView: NSViewRepresentable {
+    let text: NSAttributedString
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        guard let view = scroll.documentView as? NSTextView else { return scroll }
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.textContainerInset = NSSize(width: 8, height: 10)
+        view.layoutManager?.allowsNonContiguousLayout = true
+        view.setAccessibilityIdentifier("detail-body")
+        return scroll
+    }
+
+    final class Coordinator {
+        /// The text last shown: compared by identity, never by contents (megabytes per redraw).
+        weak var shown: NSAttributedString?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let view = scroll.documentView as? NSTextView, context.coordinator.shown !== text else { return }
+        context.coordinator.shown = text
+        view.textStorage?.setAttributedString(text)
+        view.scroll(.zero)
     }
 }
 

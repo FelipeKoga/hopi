@@ -109,12 +109,17 @@ final class LineConnection {
     }
 
     private func consume(_ data: Data) {
+        // Only the new bytes are searched: a 16 MB line arrives in 1 MB pieces, and searching the
+        // whole buffer again for each would read it 16 times on the main thread.
+        let searchFrom = buffer.count
         buffer.append(data)
         var start = buffer.startIndex
-        while let newline = buffer[start...].firstIndex(of: 0x0A) {
+        var from = buffer.index(buffer.startIndex, offsetBy: searchFrom)
+        while let newline = buffer[from...].firstIndex(of: 0x0A) {
             let line = buffer[start..<newline]
             if !line.isEmpty { onEvent(.line(Data(line))) }
             start = buffer.index(after: newline)
+            from = start
         }
         if start != buffer.startIndex { buffer.removeSubrange(buffer.startIndex..<start) }
     }
