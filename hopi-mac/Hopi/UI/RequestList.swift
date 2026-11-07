@@ -54,6 +54,7 @@ struct RequestList: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
             }
+            .sharedBackgroundVisibility(.hidden)
             ToolbarItem {
                 Button {
                     Task { await viewer.session?.clear() }
@@ -80,6 +81,17 @@ struct RequestList: View {
     }
 
     private func table(_ session: Session) -> some View {
+        ScrollViewReader { proxy in
+            rows(session)
+                // Follow the newest request, unless one is open.
+                .onChange(of: viewer.visibleTransactions.last?.id) { _, last in
+                    guard let last, viewer.selectedTransaction == nil else { return }
+                    proxy.scrollTo(last, anchor: .bottom)
+                }
+        }
+    }
+
+    private func rows(_ session: Session) -> some View {
         Table(viewer.visibleTransactions, selection: $viewer.selectedTransaction) {
             TableColumn("Status") { StatusBadge(code: $0.code, state: $0.state) }
                 .width(58)
