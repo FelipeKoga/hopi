@@ -1,0 +1,399 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		031FDADDE49151411A5DBE76 /* Format.swift in Sources */ = {isa = PBXBuildFile; fileRef = 363F34563771B290756DFE95 /* Format.swift */; };
+		15B34F1F9EFA1D2831B45720 /* Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74B11F2C967A016E9C64007 /* Wire.swift */; };
+		5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32848713BA3CDDB08C4578E6 /* HopiApp.swift */; };
+		6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */; };
+		73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058FDE9C7DCC3C896E045DA5 /* Discovery.swift */; };
+		7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89365ACE3DCE512AA5612077 /* LineConnection.swift */; };
+		86B59D43BFBDE3C3792D7BDD /* Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */; };
+		8EAF9812DCD4FDB129EC91BD /* RequestList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3602C289C75D5372822A0541 /* RequestList.swift */; };
+		B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91FD826ED1FEAE3ECA43186 /* DetailView.swift */; };
+		C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */; };
+		D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34741D43AF2D559078BAB961 /* Session.swift */; };
+		FCA368E0CE21E91CF60D3BAF /* Hopi.icns in Resources */ = {isa = PBXBuildFile; fileRef = F70589D9237C4AF0FC44D2CC /* Hopi.icns */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		058FDE9C7DCC3C896E045DA5 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
+		10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar.swift; sourceTree = "<group>"; };
+		32848713BA3CDDB08C4578E6 /* HopiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HopiApp.swift; sourceTree = "<group>"; };
+		34741D43AF2D559078BAB961 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		3602C289C75D5372822A0541 /* RequestList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestList.swift; sourceTree = "<group>"; };
+		363F34563771B290756DFE95 /* Format.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Format.swift; sourceTree = "<group>"; };
+		390044B9BA6ADBC6F6A5D81C /* Hopi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hopi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
+		89365ACE3DCE512AA5612077 /* LineConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineConnection.swift; sourceTree = "<group>"; };
+		F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F70589D9237C4AF0FC44D2CC /* Hopi.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Hopi.icns; sourceTree = "<group>"; };
+		F74B11F2C967A016E9C64007 /* Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wire.swift; sourceTree = "<group>"; };
+		F91FD826ED1FEAE3ECA43186 /* DetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1117460F50A3AFD7156C18E2 /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				058FDE9C7DCC3C896E045DA5 /* Discovery.swift */,
+				89365ACE3DCE512AA5612077 /* LineConnection.swift */,
+				F74B11F2C967A016E9C64007 /* Wire.swift */,
+			);
+			path = Bridge;
+			sourceTree = "<group>";
+		};
+		6228EC6874372EA7A5C63D19 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				390044B9BA6ADBC6F6A5D81C /* Hopi.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		6A48C82B50F22FF1D88DD4AA /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				34741D43AF2D559078BAB961 /* Session.swift */,
+				72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		7D3A174993A756800434B4CE /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F70589D9237C4AF0FC44D2CC /* Hopi.icns */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		7DD6518BF981A04BD4AEFE51 = {
+			isa = PBXGroup;
+			children = (
+				FAECCC39012FE875D47AF8A4 /* Hopi */,
+				6228EC6874372EA7A5C63D19 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E3B100D21E4CB4AEF66955BC /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */,
+				F91FD826ED1FEAE3ECA43186 /* DetailView.swift */,
+				363F34563771B290756DFE95 /* Format.swift */,
+				3602C289C75D5372822A0541 /* RequestList.swift */,
+				10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		FAECCC39012FE875D47AF8A4 /* Hopi */ = {
+			isa = PBXGroup;
+			children = (
+				32848713BA3CDDB08C4578E6 /* HopiApp.swift */,
+				1117460F50A3AFD7156C18E2 /* Bridge */,
+				6A48C82B50F22FF1D88DD4AA /* Model */,
+				7D3A174993A756800434B4CE /* Resources */,
+				E3B100D21E4CB4AEF66955BC /* UI */,
+			);
+			path = Hopi;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6B6C0D244B1F387557DC08E3 /* Hopi */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4FCF2E82CE0818DF99DF5047 /* Build configuration list for PBXNativeTarget "Hopi" */;
+			buildPhases = (
+				F580B29CC25D89FD87BF58BE /* Sources */,
+				49F8DB4F9AFDB740787DA475 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Hopi;
+			packageProductDependencies = (
+			);
+			productName = Hopi;
+			productReference = 390044B9BA6ADBC6F6A5D81C /* Hopi.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		90D57688E3F88CC67FCC2C67 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					6B6C0D244B1F387557DC08E3 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 0402514C0BFD07CC6CBBEA3F /* Build configuration list for PBXProject "Hopi" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 7DD6518BF981A04BD4AEFE51;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6228EC6874372EA7A5C63D19 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6B6C0D244B1F387557DC08E3 /* Hopi */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		49F8DB4F9AFDB740787DA475 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FCA368E0CE21E91CF60D3BAF /* Hopi.icns in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F580B29CC25D89FD87BF58BE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */,
+				B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */,
+				73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */,
+				031FDADDE49151411A5DBE76 /* Format.swift in Sources */,
+				5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */,
+				7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */,
+				8EAF9812DCD4FDB129EC91BD /* RequestList.swift in Sources */,
+				D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */,
+				86B59D43BFBDE3C3792D7BDD /* Sidebar.swift in Sources */,
+				C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */,
+				15B34F1F9EFA1D2831B45720 /* Wire.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		5585A871B53457E36F4346FE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Hopi;
+				INFOPLIST_KEY_CFBundleIconFile = Hopi;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Apache-2.0";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.mac;
+				PRODUCT_NAME = Hopi;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		5ED62B2A6682ECBA0EE089FD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		EDC8E94C9E7D8AEC3D85ACA5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		EFECE5D414975A129C09F15C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Hopi;
+				INFOPLIST_KEY_CFBundleIconFile = Hopi;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Apache-2.0";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.mac;
+				PRODUCT_NAME = Hopi;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0402514C0BFD07CC6CBBEA3F /* Build configuration list for PBXProject "Hopi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EDC8E94C9E7D8AEC3D85ACA5 /* Debug */,
+				5ED62B2A6682ECBA0EE089FD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4FCF2E82CE0818DF99DF5047 /* Build configuration list for PBXNativeTarget "Hopi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EFECE5D414975A129C09F15C /* Debug */,
+				5585A871B53457E36F4346FE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 90D57688E3F88CC67FCC2C67 /* Project object */;
+}
