@@ -33,7 +33,12 @@ struct RuleDraft: Identifiable {
     var failure = "timeout"
     var beforeRequestMs = ""
     var beforeResponseMs = ""
+    var requestMethod = ""
+    var requestHost = ""
+    var requestPort = ""
+    var requestPath = ""
     var requestHeaders = ""
+    var requestBody = ""
     var removeRequestHeaders = ""
 
     init(kind: Kind) {
@@ -73,10 +78,15 @@ struct RuleDraft: Identifiable {
             rule["delay"] = ["beforeRequestMs": before, "beforeResponseMs": after]
         case .edit:
             var request: [String: Any] = [:]
+            if let method = trimmed(requestMethod) { request["method"] = method }
+            if let host = trimmed(requestHost) { request["host"] = host }
+            if let port = trimmed(requestPort) { request["port"] = try int(port, "Port", 1...65535) }
+            if let path = trimmed(requestPath) { request["path"] = path }
             let setRequest = try headerPairs(requestHeaders)
             if !setRequest.isEmpty { request["setHeaders"] = setRequest }
             let removed = removeRequestHeaders.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             if !removed.isEmpty { request["removeHeaders"] = removed }
+            if !requestBody.isEmpty { request["body"] = try await upload(Data(requestBody.utf8)) }
             var response: [String: Any] = [:]
             if let status = trimmed(status) { response["status"] = try int(status, "Status", 100...599) }
             let setResponse = try headerPairs(headers)
@@ -184,7 +194,7 @@ struct RuleFormView: View {
                 TextField("Status", text: $draft.status, prompt: Text(draft.fromTransaction == nil ? "200" : "As recorded"))
                     .accessibilityIdentifier("rule-status")
                 editor("Headers", $draft.headers, prompt: "Content-Type: application/json")
-                editor("Body", $draft.body, prompt: draft.fromTransaction == nil ? "{}" : "As recorded", height: 140)
+                editor("Body", $draft.body, prompt: draft.fromTransaction == nil ? "{}" : "As recorded", height: 140, id: "rule-body")
             } header: {
                 Text("Response")
             } footer: {
@@ -206,8 +216,13 @@ struct RuleFormView: View {
             }
         case .edit:
             Section("Request") {
+                TextField("Method", text: $draft.requestMethod, prompt: Text("Unchanged"))
+                TextField("Host", text: $draft.requestHost, prompt: Text("Unchanged"))
+                TextField("Port", text: $draft.requestPort, prompt: Text("Unchanged"))
+                TextField("Path", text: $draft.requestPath, prompt: Text("Unchanged"))
                 editor("Set headers", $draft.requestHeaders, prompt: "Authorization: Bearer test")
                 TextField("Remove headers", text: $draft.removeRequestHeaders, prompt: Text("Cookie, X-Trace"))
+                editor("Body", $draft.requestBody, prompt: "Unchanged", height: 80)
             }
             Section("Response") {
                 TextField("Status", text: $draft.status, prompt: Text("Unchanged"))
@@ -217,10 +232,11 @@ struct RuleFormView: View {
         }
     }
 
-    private func editor(_ title: String, _ text: Binding<String>, prompt: String, height: CGFloat = 54) -> some View {
+    private func editor(_ title: String, _ text: Binding<String>, prompt: String, height: CGFloat = 54, id: String = "") -> some View {
         LabeledContent(title) {
             TextField(title, text: text, prompt: Text(prompt), axis: .vertical)
                 .labelsHidden()
+                .accessibilityIdentifier(id)
                 .font(.system(.callout, design: .monospaced))
                 .lineLimit(3...(Int(height / 14)))
         }

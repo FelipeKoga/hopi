@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 /// Rules and performance against a real app, end to end. Like [DeviceFlowUITests], needs a running
@@ -81,6 +82,14 @@ final class RulesPerfUITests: XCTestCase {
         XCTAssertTrue(status.waitForExistence(timeout: 10), "the mock form did not open")
         status.click()
         status.typeText("418")
+        // A body too long for one command line: it goes up as a blob, in slices.
+        let body = "{\"pad\":\"" + String(repeating: "x", count: 4986) + "\"}"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(body, forType: .string)
+        let bodyField = app.textFields["rule-body"]
+        XCTAssertTrue(bodyField.exists)
+        bodyField.click()
+        app.typeKey("v", modifierFlags: .command)
         app.buttons["rule-save"].click()
         let listed = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'mock 418' OR value BEGINSWITH 'mock 418'")).firstMatch
         XCTAssertTrue(listed.waitForExistence(timeout: 10), "the mock is not listed")
@@ -88,6 +97,7 @@ final class RulesPerfUITests: XCTestCase {
         // The app serves it: a 418 shows up for the path.
         app.typeKey("1", modifierFlags: .command)
         XCTAssertTrue(app.outlines.staticTexts["418"].waitForExistence(timeout: 90), "the app did not serve the mock")
+        XCTAssertTrue(app.outlines.staticTexts["4.9 KB"].waitForExistence(timeout: 5), "the mock's 5000-byte body was not served")
         add(app.screenshotAttachment("mocked"))
 
         app.typeKey("2", modifierFlags: .command)
@@ -95,6 +105,37 @@ final class RulesPerfUITests: XCTestCase {
         XCTAssertTrue(removeAll.waitForExistence(timeout: 5))
         removeAll.click()
         XCTAssertTrue(app.staticTexts["No Rules"].waitForExistence(timeout: 10))
+    }
+
+    /// Export writes the requests shown as HAR, each fetched in full.
+    @MainActor
+    func testExportWritesHar() throws {
+        let e2e = try E2E()
+        try app.attach(to: e2e.appId)
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.click()
+        search.typeText(e2e.path)
+        let row = app.outlines.staticTexts
+            .matching(NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", e2e.path, e2e.path)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 30))
+
+        // The runner is sandboxed: the app writes where the runner cannot look, and says so.
+        app.descendants(matching: .any)["export"].click()
+        app.menuItems["Export as HAR…"].click()
+        let panel = app.sheets.firstMatch.exists ? app.sheets.firstMatch : app.dialogs.firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 10), "no save panel")
+        app.typeKey("g", modifierFlags: [.command, .shift])
+        app.typeText("/private/tmp\r")
+        sleep(1)
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("hopi-e2e-export.har\r")
+        let replace = app.buttons["Replace"]
+        if replace.waitForExistence(timeout: 2) { replace.click() }
+
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved ' OR value BEGINSWITH 'Saved '")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 30), "the export did not finish")
+        add(app.screenshotAttachment("exported"))
     }
 
     /// The performance view tails the app: CPU samples arrive and chart.

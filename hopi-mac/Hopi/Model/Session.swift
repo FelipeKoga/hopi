@@ -42,8 +42,8 @@ final class Session {
             case .closed(let reason): self.status = .closed(reason)
             }
         }
+        // capture.set is a write and tail takes the connection over: both wait for a verified hello.
         stream.send(["cmd": "hello"])
-        stream.send(["cmd": "tail", "since": 0, "rules": true])
     }
 
     func stop() {
@@ -58,6 +58,11 @@ final class Session {
         return await Task.detached(priority: .userInitiated) {
             try? JSONDecoder().decode(Detail.self, from: data)
         }.value
+    }
+
+    /// The `get` reply as the app sent it: one NDJSON export line.
+    func rawDetail(_ id: Int64) async -> Data? {
+        await request(["cmd": "get", "id": id])
     }
 
     /// Clears the app's store, then this list through what the app cleared.
@@ -150,6 +155,9 @@ final class Session {
             }
             self.hello = hello
             status = .live
+            // Whole bodies, as a proxy shows them, for as long as this connection lasts.
+            if hello.fullBodies == true { stream?.send(["cmd": "capture.set", "fullBodies": true]) }
+            stream?.send(["cmd": "tail", "since": 0, "rules": true])
         case "rules":
             rulesRevision += 1
         default:

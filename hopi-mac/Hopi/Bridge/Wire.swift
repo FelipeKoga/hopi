@@ -16,6 +16,8 @@ nonisolated struct Hello: Decodable, Sendable {
     let perf: Bool?
     /// Whether the viewer may start and stop monitors.
     let perfControl: Bool?
+    /// Whether `capture.set` works here: bodies kept whole while this viewer is attached.
+    let fullBodies: Bool?
     /// Android only: what the app wrote to its private storage.
     let proof: String?
 }

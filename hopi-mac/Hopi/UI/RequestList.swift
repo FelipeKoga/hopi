@@ -6,15 +6,25 @@ struct RequestList: View {
     @Bindable var viewer: Viewer
     let session: Session
     @FocusState private var searchFocused: Bool
+    /// Requests written so far, while an export runs.
+    @State private var exported: Int?
+    @State private var exportMessage: String?
+    /// "Saved 12 requests to x.har", shown in place of the count for a few seconds.
+    @State private var savedNote: String?
 
     var body: some View {
         table(session)
             .searchable(text: $viewer.search, placement: .toolbar, prompt: "Filter by URL, method or status")
             .searchFocused($searchFocused)
             .onChange(of: viewer.findRequests) { searchFocused = true }
+            .alert("Export", isPresented: Binding(get: { exportMessage != nil }, set: { if !$0 { exportMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(exportMessage ?? "")
+            }
             .toolbar {
                 ToolbarItem {
-                    Text(count)
+                    Text(exported.map { "Exporting \($0) of \(viewer.visibleTransactions.count)…" } ?? savedNote ?? count)
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize()
@@ -34,6 +44,18 @@ struct RequestList: View {
                     .help("Show only these responses")
                 }
                 ToolbarItem {
+                    Menu {
+                        ForEach(Export.Format.allCases) { format in
+                            Button("Export as \(format.rawValue)…") { export(format) }
+                        }
+                    } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                    .accessibilityIdentifier("export")
+                    .help("Save the requests shown, in full, as HAR or NDJSON")
+                    .disabled(viewer.visibleTransactions.isEmpty || exported != nil)
+                }
+                ToolbarItem {
                     Button {
                         Task { await session.clear() }
                     } label: {
@@ -43,6 +65,32 @@ struct RequestList: View {
                     .disabled(session.transactions.isEmpty)
                 }
             }
+    }
+
+    private func export(_ format: Export.Format) {
+        let panel = NSSavePanel()
+        let stamp = Date().formatted(.verbatim("\(year: .defaultDigits)\(month: .twoDigits)\(day: .twoDigits)-\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\(minute: .twoDigits)", timeZone: .current, calendar: .current))
+        panel.nameFieldStringValue = "\(session.target.app)-\(stamp).\(format.fileExtension)"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let ids = viewer.visibleTransactions.map(\.id)
+        exported = 0
+        Task {
+            defer { exported = nil }
+            do {
+                let result = try await Export.write(format, ids: ids, session: session, to: url) { exported = $0 }
+                if result.gone > 0 {
+                    exportMessage = "Saved \(result.written) requests to \(url.lastPathComponent). \(result.gone) were gone from the app."
+                } else {
+                    let note = "Saved \(result.written) to \(url.lastPathComponent)"
+                    savedNote = note
+                    try? await Task.sleep(for: .seconds(6))
+                    if savedNote == note { savedNote = nil }
+                }
+            } catch {
+                exportMessage = error.localizedDescription
+            }
+        }
     }
 
     private var count: String {

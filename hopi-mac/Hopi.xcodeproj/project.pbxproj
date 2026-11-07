@@ -13,6 +13,7 @@
 		1F3547F2A2289F341630E6FB /* DeviceFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD873EC72880A6CCD1CD352 /* DeviceFlowUITests.swift */; };
 		25D452D1A59905986B65C44A /* MatchShorthand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C8217E015FB0F8F46912A7 /* MatchShorthand.swift */; };
 		2761A21E3132A1CD3DDF6523 /* JSONHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */; };
+		3198CE70E841BB77D59EA5C8 /* Export.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C06D322FE15810098D3952 /* Export.swift */; };
 		5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32848713BA3CDDB08C4578E6 /* HopiApp.swift */; };
 		6043FE7A22EACC41B0C824C7 /* UITestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE24267FEB35C4411566E608 /* UITestSupport.swift */; };
 		681467AF1AC5E4AC1DB17ACE /* RulesPerfUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0E1190C5ED0ECC246F14131 /* RulesPerfUITests.swift */; };
@@ -61,6 +62,7 @@
 		E0E1190C5ED0ECC246F14131 /* RulesPerfUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesPerfUITests.swift; sourceTree = "<group>"; };
 		E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONHighlight.swift; sourceTree = "<group>"; };
 		E82F66A8731D06A05039BEE3 /* PerfSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfSession.swift; sourceTree = "<group>"; };
+		E9C06D322FE15810098D3952 /* Export.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Export.swift; sourceTree = "<group>"; };
 		EE0FBDC51EF571913F4663B2 /* PerfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfView.swift; sourceTree = "<group>"; };
 		F560E4E13826CA8847B3214B /* Adb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adb.swift; sourceTree = "<group>"; };
 		F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -103,6 +105,7 @@
 		6A48C82B50F22FF1D88DD4AA /* Model */ = {
 			isa = PBXGroup;
 			children = (
+				E9C06D322FE15810098D3952 /* Export.swift */,
 				84C8217E015FB0F8F46912A7 /* MatchShorthand.swift */,
 				E82F66A8731D06A05039BEE3 /* PerfSession.swift */,
 				34741D43AF2D559078BAB961 /* Session.swift */,
@@ -267,6 +270,7 @@
 				6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */,
 				B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */,
 				73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */,
+				3198CE70E841BB77D59EA5C8 /* Export.swift in Sources */,
 				031FDADDE49151411A5DBE76 /* Format.swift in Sources */,
 				5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */,
 				2761A21E3132A1CD3DDF6523 /* JSONHighlight.swift in Sources */,
