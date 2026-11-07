@@ -57,6 +57,7 @@ struct AppPicker: View {
     static func symbol(_ kind: Target.Kind) -> String {
         switch kind {
         case .android: "smartphone"
+        case .iphone: "iphone.gen3"
         case .simulator: "iphone"
         case .jvm: "desktopcomputer"
         }
@@ -73,13 +74,14 @@ private struct AppList: View {
                 ContentUnavailableView {
                     Label("No Apps", systemImage: "app.dashed")
                 } description: {
-                    Text("Run a debug build with Hopi on an Android emulator, an iOS simulator or the JVM.")
+                    Text("Run a debug build with Hopi on Android, an iPhone, an iOS simulator or the JVM.")
                 }
                 .frame(height: 170)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         group("Android", .android)
+                        group("iPhones", .iphone)
                         group("iOS Simulators", .simulator)
                         group("JVM", .jvm)
                     }

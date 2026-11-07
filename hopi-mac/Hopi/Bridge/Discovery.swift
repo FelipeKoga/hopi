@@ -6,6 +6,8 @@ nonisolated struct BridgeEndpoint: Sendable, Hashable {
     let port: UInt16
     let token: String
     var proof: String? = nil
+    /// An iPhone on USB: usbmuxd's id for it; [port] is then the bridge's port on the iPhone.
+    var usbDevice: Int? = nil
 
     init(port: UInt16, token: String, proof: String?) {
         self.port = port
@@ -13,19 +15,24 @@ nonisolated struct BridgeEndpoint: Sendable, Hashable {
         self.proof = proof
     }
 
-    init?(file: URL) {
-        guard let data = try? Data(contentsOf: file),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    init?(data: Data, usbDevice: Int? = nil) {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let port = json["port"] as? Int, let token = json["token"] as? String,
               (1...65535).contains(port), token.count == 64 else { return nil }
         self.port = UInt16(port)
         self.token = token
+        self.usbDevice = usbDevice
+    }
+
+    init?(file: URL) {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        self.init(data: data)
     }
 }
 
 /// An app with a bridge the viewer can reach.
 nonisolated struct Target: Sendable, Hashable, Identifiable {
-    enum Kind: Sendable, Hashable { case android, simulator, jvm }
+    enum Kind: Sendable, Hashable { case android, iphone, simulator, jvm }
 
     let kind: Kind
     /// The app's id as the app states it in `hello` (bundle id, applicationId or `hopi.appId`).
@@ -41,8 +48,9 @@ nonisolated struct Target: Sendable, Hashable, Identifiable {
 nonisolated enum Discovery {
     static func scan() async -> [Target] {
         async let android = Adb.targets()
+        async let iphones = Iphones.targets()
         let files = await fileTargets()
-        return await android + files
+        return await android + iphones + files
     }
 
     private static func fileTargets() async -> [Target] {

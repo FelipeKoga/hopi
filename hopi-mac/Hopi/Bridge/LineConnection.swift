@@ -17,15 +17,23 @@ final class LineConnection {
     private var finished = false
 
     init(endpoint: BridgeEndpoint) {
-        connection = NWConnection(
-            host: "127.0.0.1",
-            port: NWEndpoint.Port(rawValue: endpoint.port) ?? 0,
-            using: .tcp
-        )
+        if let device = endpoint.usbDevice {
+            // An iPhone on USB: usbmuxd's socket, turned into a stream to the bridge's port.
+            connection = NWConnection(to: .unix(path: Usbmux.socketPath), using: .tcp)
+            usbmuxConnect = Usbmux.connect(device: device, port: endpoint.port)
+        } else {
+            connection = NWConnection(
+                host: "127.0.0.1",
+                port: NWEndpoint.Port(rawValue: endpoint.port) ?? 0,
+                using: .tcp
+            )
+            usbmuxConnect = nil
+        }
         self.token = endpoint.token
     }
 
     private let token: String
+    private let usbmuxConnect: Data?
 
     /// Opens the connection and sends the token. [onEvent] receives every line, then one `closed`.
     func start(_ onEvent: @escaping (Event) -> Void) {
@@ -40,8 +48,33 @@ final class LineConnection {
             }
         }
         connection.start(queue: .main)
-        sendRaw(token + "\n")
-        receive()
+        guard let usbmuxConnect else {
+            sendRaw(token + "\n")
+            receive()
+            return
+        }
+        connection.send(content: usbmuxConnect, completion: .contentProcessed { _ in })
+        receiveExactly(16) { [weak self] header in
+            guard let self, let header, let length = Usbmux.bodyLength(header) else {
+                self?.finish("usbmuxd did not answer")
+                return
+            }
+            self.receiveExactly(length) { body in
+                guard let body, Usbmux.result(body) == 0 else {
+                    self.finish("the iPhone refused the connection: is the app running?")
+                    return
+                }
+                self.sendRaw(self.token + "\n")
+                self.receive()
+            }
+        }
+    }
+
+    /// Exactly [count] bytes, before the stream becomes the bridge's; nil when it ends first.
+    private func receiveExactly(_ count: Int, _ done: @escaping @MainActor @Sendable (Data?) -> Void) {
+        connection.receive(minimumIncompleteLength: count, maximumLength: count) { data, _, _, _ in
+            MainActor.assumeIsolated { done(data?.count == count ? data : nil) }
+        }
     }
 
     /// Sends one command as a JSON line.

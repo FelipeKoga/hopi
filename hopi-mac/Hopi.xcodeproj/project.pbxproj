@@ -19,6 +19,7 @@
 		681467AF1AC5E4AC1DB17ACE /* RulesPerfUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0E1190C5ED0ECC246F14131 /* RulesPerfUITests.swift */; };
 		6A4C0E0FD15F2F36E6E773D2 /* RulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B185839764211094F4ED9598 /* RulesView.swift */; };
 		6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */; };
+		7318DBBB42C8A7C15AADE87C /* Usbmux.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0246CA6FDD04BA10DA43ADD /* Usbmux.swift */; };
 		733ABC2A90D520791460A941 /* AppPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EA829056E0156C5AA14267 /* AppPicker.swift */; };
 		73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058FDE9C7DCC3C896E045DA5 /* Discovery.swift */; };
 		7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89365ACE3DCE512AA5612077 /* LineConnection.swift */; };
@@ -29,6 +30,7 @@
 		C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */; };
 		D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34741D43AF2D559078BAB961 /* Session.swift */; };
 		DCE65A9B74847AB7A6AC77A7 /* Adb.swift in Sources */ = {isa = PBXBuildFile; fileRef = F560E4E13826CA8847B3214B /* Adb.swift */; };
+		E871DC9F7AA01C177BCF1FA5 /* Iphones.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE8DBFC523563283ACB93BC /* Iphones.swift */; };
 		FCA368E0CE21E91CF60D3BAF /* Hopi.icns in Resources */ = {isa = PBXBuildFile; fileRef = F70589D9237C4AF0FC44D2CC /* Hopi.icns */; };
 /* End PBXBuildFile section */
 
@@ -58,7 +60,9 @@
 		9BD873EC72880A6CCD1CD352 /* DeviceFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFlowUITests.swift; sourceTree = "<group>"; };
 		B185839764211094F4ED9598 /* RulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesView.swift; sourceTree = "<group>"; };
 		BE24267FEB35C4411566E608 /* UITestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestSupport.swift; sourceTree = "<group>"; };
+		CCE8DBFC523563283ACB93BC /* Iphones.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Iphones.swift; sourceTree = "<group>"; };
 		CF6A4105851A5C26333AC537 /* RuleForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuleForm.swift; sourceTree = "<group>"; };
+		D0246CA6FDD04BA10DA43ADD /* Usbmux.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Usbmux.swift; sourceTree = "<group>"; };
 		E0E1190C5ED0ECC246F14131 /* RulesPerfUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesPerfUITests.swift; sourceTree = "<group>"; };
 		E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONHighlight.swift; sourceTree = "<group>"; };
 		E82F66A8731D06A05039BEE3 /* PerfSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfSession.swift; sourceTree = "<group>"; };
@@ -77,7 +81,9 @@
 			children = (
 				F560E4E13826CA8847B3214B /* Adb.swift */,
 				058FDE9C7DCC3C896E045DA5 /* Discovery.swift */,
+				CCE8DBFC523563283ACB93BC /* Iphones.swift */,
 				89365ACE3DCE512AA5612077 /* LineConnection.swift */,
+				D0246CA6FDD04BA10DA43ADD /* Usbmux.swift */,
 				F74B11F2C967A016E9C64007 /* Wire.swift */,
 			);
 			path = Bridge;
@@ -273,6 +279,7 @@
 				3198CE70E841BB77D59EA5C8 /* Export.swift in Sources */,
 				031FDADDE49151411A5DBE76 /* Format.swift in Sources */,
 				5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */,
+				E871DC9F7AA01C177BCF1FA5 /* Iphones.swift in Sources */,
 				2761A21E3132A1CD3DDF6523 /* JSONHighlight.swift in Sources */,
 				7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */,
 				25D452D1A59905986B65C44A /* MatchShorthand.swift in Sources */,
@@ -282,6 +289,7 @@
 				01F07AE3014D1C3929D7D21C /* RuleForm.swift in Sources */,
 				6A4C0E0FD15F2F36E6E773D2 /* RulesView.swift in Sources */,
 				D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */,
+				7318DBBB42C8A7C15AADE87C /* Usbmux.swift in Sources */,
 				C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */,
 				15B34F1F9EFA1D2831B45720 /* Wire.swift in Sources */,
 			);
