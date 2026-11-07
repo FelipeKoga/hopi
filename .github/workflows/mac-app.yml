@@ -1,0 +1,86 @@
+name: macOS app
+
+# The native viewer (hopi-mac) as a .dmg (scripts/mac-dmg.sh, docs/RELEASING.md "The macOS viewer").
+# On main and by hand: an unsigned build, kept as a workflow artifact. On a v* tag: the release's
+# .dmg, attached to its GitHub release (a draft is created when the tag has none), signed and
+# notarized when the release environment holds the Apple secrets, unsigned until then.
+on:
+  push:
+    branches: [main]
+    paths: ['hopi-mac/**', 'scripts/mac-dmg.sh', '.github/workflows/mac-app.yml']
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+permissions:
+  contents: read
+
+env:
+  # As in ci.yml: Xcode 27.1 unless the repository variable HOPI_XCODE names another Xcode .app.
+  DEVELOPER_DIR: ${{ vars.HOPI_XCODE || '/Applications/Xcode_27.1.app' }}/Contents/Developer
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dmg:
+    if: github.ref_type != 'tag'
+    # As in ci.yml: xcode-27 unless the repository variable HOPI_RUNNER names another runner.
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the unsigned .dmg
+        run: scripts/mac-dmg.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hopi-mac-dmg
+          path: build/mac/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_type == 'tag'
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    # The Apple secrets live in the release environment with the Maven Central ones: a person
+    # approves the run before the certificate is read (docs/RELEASING.md).
+    environment: release
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check that the tag is v + hopi.version
+        run: |
+          version=$(sed -n 's/^hopi\.version=//p' gradle.properties | tr -d '[:space:]')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME is not v$version (hopi.version in gradle.properties)"
+            exit 1
+          fi
+      # Empty secrets (not configured yet) build it unsigned; all six sign and notarize it.
+      - name: Build the .dmg
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: scripts/mac-dmg.sh "${GITHUB_REF_NAME#v}"
+      - name: Attach it to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$GITHUB_REF_NAME
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Hopi ${tag#v}" --generate-notes
+          fi
+          gh release upload "$tag" build/mac/*.dmg --repo "$GITHUB_REPOSITORY" --clobber

@@ -75,3 +75,44 @@ scripts/central-release.sh --dry-run   # builds and lists the bundle; no network
   Publish button; `AUTOMATIC` publishes once validated and waits for `PUBLISHED`) and
   `CENTRAL_TIMEOUT_SECONDS` (default 1800). `--status <deployment id>` waits for a deployment's
   verdict again, after a timeout for example.
+
+## The macOS viewer
+
+The native viewer (`hopi-mac`) ships as a `.dmg`, built by `scripts/mac-dmg.sh` and by the
+`macOS app` workflow (`.github/workflows/mac-app.yml`): on `main` (when `hopi-mac` changes) and
+by hand, an unsigned build kept as a workflow artifact for 14 days; on a `v*` tag, the release's
+`Hopi-<hopi.version>.dmg`, attached to the tag's GitHub release (created as a draft when there is
+none: publish it after a look). Locally, `scripts/mac-dmg.sh [version]` writes
+`build/mac/Hopi-<version>.dmg`.
+
+Until the Apple secrets below exist, the `.dmg` is unsigned (the app is signed ad hoc): macOS
+says it cannot check the developer, and the app opens with right-click, Open (or System
+Settings, Privacy & Security, Open Anyway), once. Signed and notarized, it opens without a warning,
+even offline (the notarization ticket is stapled to the `.dmg`).
+
+### Signing and notarization, once, by the owner
+
+1. Join the [Apple Developer Program](https://developer.apple.com/programs/) (USD 99 a year); a
+   free account cannot issue a Developer ID certificate.
+2. Create a **Developer ID Application** certificate: Xcode, Settings, Accounts, the team, Manage
+   Certificates, `+`. Export it with its private key from Keychain Access (My Certificates, the
+   certificate, Export, `.p12`) under a password.
+3. Create an App Store Connect API key for notarization: [App Store Connect](https://appstoreconnect.apple.com),
+   Users and Access, Integrations, Team Keys, `+`, access **Developer**. Download the `.p8` (once
+   only) and note its Key ID and the Issuer ID above the list.
+4. Store the six secrets in the `release` environment (the same reviewer approves every tag):
+
+   ```bash
+   gh secret set MACOS_CERTIFICATE_P12 --env release --repo FelipeKoga/hopi < <(base64 -i DeveloperID.p12)
+   gh secret set MACOS_CERTIFICATE_PASSWORD --env release --repo FelipeKoga/hopi   # asks for it
+   gh secret set APPLE_TEAM_ID --env release --repo FelipeKoga/hopi                # 10 characters, Membership page
+   gh secret set NOTARY_KEY_P8 --env release --repo FelipeKoga/hopi < <(base64 -i AuthKey_XXXXXXXXXX.p8)
+   gh secret set NOTARY_KEY_ID --env release --repo FelipeKoga/hopi
+   gh secret set NOTARY_ISSUER_ID --env release --repo FelipeKoga/hopi
+   ```
+
+   Then delete the `.p12` and `.p8` files, or keep them in a password manager. With all six set,
+   the next tag's `.dmg` is signed with the Developer ID (timestamped, hardened runtime), notarized
+   (`notarytool submit --wait`, a few minutes) and stapled; with some but not all set, the script
+   refuses to build. The same six variables sign a local build: `scripts/mac-dmg.sh` reads them
+   from the environment, puts the certificate in a temporary keychain and deletes it on exit.
