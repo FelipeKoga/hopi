@@ -11,6 +11,10 @@ struct HopiApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .commands {
+            CommandGroup(after: .textEditing) {
+                Button("Find Requests") { viewer.findRequests += 1 }
+                    .keyboardShortcut("f")
+            }
             CommandGroup(after: .newItem) {
                 Button("Find Apps") { Task { await viewer.scan() } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])

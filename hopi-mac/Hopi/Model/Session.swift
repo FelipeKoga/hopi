@@ -72,7 +72,12 @@ final class Session {
             guard let summary = try? JSONDecoder().decode(Summary.self, from: data) else { return }
             upsert(summary)
         case "hello":
-            hello = try? JSONDecoder().decode(Hello.self, from: data)
+            guard let hello = try? JSONDecoder().decode(Hello.self, from: data), target.endpoint.accepts(hello) else {
+                stream?.close()
+                status = .closed("This is not \(target.app)'s bridge: its hello lacks the app's proof.")
+                return
+            }
+            self.hello = hello
             status = .live
         default:
             break // notice, error: the list goes on; SLOW_CLIENT ends the connection, shown as closed.

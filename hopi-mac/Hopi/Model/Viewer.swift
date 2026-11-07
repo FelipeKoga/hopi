@@ -28,6 +28,8 @@ final class Viewer {
     }
     var selectedTransaction: Summary.ID?
     var search = ""
+    /// Bumped by ⌘F; the list focuses its search field.
+    var findRequests = 0
     var statusFilter: StatusFilter = .all
 
     var visibleTransactions: [Summary] {

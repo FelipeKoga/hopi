@@ -14,6 +14,8 @@ nonisolated struct Hello: Decodable, Sendable {
     let count: Int?
     let rules: Bool?
     let perf: Bool?
+    /// Android only: what the app wrote to its private storage.
+    let proof: String?
 }
 
 nonisolated enum TransactionState: String, Decodable, Sendable {

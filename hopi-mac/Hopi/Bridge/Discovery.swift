@@ -1,9 +1,17 @@
 import Foundation
 
-/// Where an app's bridge listens: `bridge.json`'s port and token (iOS simulator and JVM apps).
+/// Where an app's bridge listens and how to open it: the first line to send (the token of
+/// `bridge.json`, or Android's key) and, on Android, the proof `hello` must show.
 nonisolated struct BridgeEndpoint: Sendable, Hashable {
     let port: UInt16
     let token: String
+    var proof: String? = nil
+
+    init(port: UInt16, token: String, proof: String?) {
+        self.port = port
+        self.token = token
+        self.proof = proof
+    }
 
     init?(file: URL) {
         guard let data = try? Data(contentsOf: file),
@@ -17,53 +25,65 @@ nonisolated struct BridgeEndpoint: Sendable, Hashable {
 
 /// An app with a bridge the viewer can reach.
 nonisolated struct Target: Sendable, Hashable, Identifiable {
-    enum Kind: Sendable, Hashable { case simulator, jvm }
+    enum Kind: Sendable, Hashable { case android, simulator, jvm }
 
     let kind: Kind
     /// The app's id as the app states it in `hello` (bundle id, applicationId or `hopi.appId`).
     let app: String
-    /// The simulator's name, or the JVM process id.
+    /// The device's model, the simulator's name, or the JVM process id.
     let device: String
-    let file: URL
+    /// Stable across scans while the app runs: the device and app, or the `bridge.json` path.
+    let id: String
     let endpoint: BridgeEndpoint
-
-    var id: URL { file }
 }
 
-/// Finds the bridges on this Mac: the booted simulators' apps and the JVM processes.
+/// Finds the bridges this Mac can reach: Android devices, booted simulators, JVM processes.
 nonisolated enum Discovery {
     static func scan() async -> [Target] {
+        async let android = Adb.targets()
+        let files = await fileTargets()
+        return await android + files
+    }
+
+    private static func fileTargets() async -> [Target] {
         let candidates = jvmFiles() + simulatorFiles()
         return await withTaskGroup(of: Target?.self) { group in
             for (kind, device, file) in candidates {
                 group.addTask {
                     guard let endpoint = BridgeEndpoint(file: file),
                           let hello = await probe(endpoint) else { return nil }
-                    return Target(kind: kind, app: hello.app, device: device, file: file, endpoint: endpoint)
+                    return Target(kind: kind, app: hello.app, device: device, id: file.path, endpoint: endpoint)
                 }
             }
             var found: [Target] = []
             for await target in group { if let target { found.append(target) } }
-            return found.sorted { ($0.kind == .simulator ? 0 : 1, $0.app) < ($1.kind == .simulator ? 0 : 1, $1.app) }
+            return found.sorted { $0.app < $1.app }
         }
     }
 
-    /// `<java.io.tmpdir>/hopi/<pid>/bridge.json`; the JVM's tmpdir is this user's `$TMPDIR`.
+    /// `<java.io.tmpdir>/hopi/<pid>/bridge.json`. The JVM's tmpdir on macOS is the user's temporary
+    /// directory, read here from the system rather than `$TMPDIR`, which a launcher may change.
     private static func jvmFiles() -> [(Target.Kind, String, URL)] {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("hopi")
+        let root = URL(fileURLWithPath: userTemporaryDirectory).appendingPathComponent("hopi")
         let pids = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return pids.map { (.jvm, "JVM \($0)", root.appendingPathComponent($0).appendingPathComponent("bridge.json")) }
     }
 
+    private static var userTemporaryDirectory: String {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, buffer.count) > 0 else { return NSTemporaryDirectory() }
+        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
     /// Each booted simulator's apps with `Library/Caches/hopi/bridge.json` in their data container.
     private static func simulatorFiles() -> [(Target.Kind, String, URL)] {
-        guard let list = run(["simctl", "list", "devices", "booted", "-j"]),
+        guard let list = Shell.data("/usr/bin/xcrun", ["simctl", "list", "devices", "booted", "-j"]),
               let json = try? JSONSerialization.jsonObject(with: list) as? [String: Any],
               let runtimes = json["devices"] as? [String: [[String: Any]]] else { return [] }
         var files: [(Target.Kind, String, URL)] = []
         for device in runtimes.values.flatMap({ $0 }) {
             guard let udid = device["udid"] as? String, let name = device["name"] as? String,
-                  let apps = run(["simctl", "listapps", udid]),
+                  let apps = Shell.data("/usr/bin/xcrun", ["simctl", "listapps", udid]),
                   let plist = try? PropertyListSerialization.propertyList(from: apps, format: nil) as? [String: Any]
             else { continue }
             for app in plist.values.compactMap({ $0 as? [String: Any] }) {
@@ -90,7 +110,9 @@ nonisolated enum Discovery {
                 }
                 connection.start { event in
                     switch event {
-                    case .line(let data): resume(try? JSONDecoder().decode(Hello.self, from: data))
+                    case .line(let data):
+                        let hello = try? JSONDecoder().decode(Hello.self, from: data)
+                        resume(hello.flatMap { endpoint.accepts($0) ? $0 : nil })
                     case .closed: resume(nil)
                     }
                 }
@@ -99,17 +121,13 @@ nonisolated enum Discovery {
             }
         }
     }
+}
 
-    private static func run(_ arguments: [String]) -> Data? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return process.terminationStatus == 0 ? data : nil
+extension BridgeEndpoint {
+    /// Android: the bridge proves itself with the proof only the app could write (constant time).
+    nonisolated func accepts(_ hello: Hello) -> Bool {
+        guard let proof else { return true }
+        guard let shown = hello.proof, shown.utf8.count == proof.utf8.count else { return false }
+        return zip(shown.utf8, proof.utf8).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
     }
 }

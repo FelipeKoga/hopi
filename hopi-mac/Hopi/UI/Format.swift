@@ -17,7 +17,12 @@ nonisolated enum Format {
     }
 
     static func bytes(_ count: Int64) -> String {
-        count == 0 ? "—" : ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
+        switch count {
+        case ..<1: "—"
+        case ..<1000: "\(count) B"
+        case ..<1_000_000: String(format: "%.1f KB", Double(count) / 1000)
+        default: String(format: "%.1f MB", Double(count) / 1_000_000)
+        }
     }
 
     /// A JSON body re-indented for reading, every value and key order exactly as sent; anything

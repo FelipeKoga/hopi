@@ -5,17 +5,22 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: $viewer.selectedTarget) {
-            section("Simulators", kind: .simulator)
+            section("Android", kind: .android)
+            section("iOS Simulators", kind: .simulator)
             section("JVM", kind: .jvm)
         }
         .overlay {
-            if viewer.targets.isEmpty && !viewer.scanning {
-                ContentUnavailableView {
-                    Label("No Apps", systemImage: "app.dashed")
-                } description: {
-                    Text("Run a debug build with Hopi on a simulator or the JVM.")
-                } actions: {
-                    Button("Look Again") { Task { await viewer.scan() } }
+            if viewer.targets.isEmpty {
+                if viewer.scanning {
+                    ProgressView("Looking for apps…").controlSize(.small)
+                } else {
+                    ContentUnavailableView {
+                        Label("No Apps", systemImage: "app.dashed")
+                    } description: {
+                        Text("Run a debug build with Hopi on an emulator, a simulator or the JVM.")
+                    } actions: {
+                        Button("Look Again") { Task { await viewer.scan() } }
+                    }
                 }
             }
         }
@@ -38,7 +43,7 @@ struct Sidebar: View {
         if !targets.isEmpty {
             Section(title) {
                 ForEach(targets) { target in
-                    TargetRow(target: target, live: viewer.session?.target == target && viewer.session?.status == .live)
+                    TargetRow(target: target, status: viewer.session?.target == target ? viewer.session?.status : nil)
                         .tag(target.id)
                 }
             }
@@ -48,21 +53,36 @@ struct Sidebar: View {
 
 private struct TargetRow: View {
     let target: Target
-    let live: Bool
+    let status: Session.Status?
 
     var body: some View {
-        Label {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(target.app).lineLimit(1).truncationMode(.middle)
-                Text(target.device).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 22)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(target.app)
+                    .lineLimit(1).truncationMode(.middle)
+                Text(target.device)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-        } icon: {
-            Image(systemName: target.kind == .simulator ? "iphone" : "cup.and.saucer")
-                .overlay(alignment: .bottomTrailing) {
-                    if live {
-                        Circle().fill(.green).frame(width: 6, height: 6).offset(x: 2, y: 2)
-                    }
-                }
+            Spacer(minLength: 4)
+            if let status {
+                Circle()
+                    .fill(status == .live ? Color.green : status == .connecting ? Color.yellow : Color.secondary)
+                    .frame(width: 7, height: 7)
+                    .help(status == .live ? "Connected" : status == .connecting ? "Connecting" : "Disconnected")
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var symbol: String {
+        switch target.kind {
+        case .android: "smartphone"
+        case .simulator: "iphone"
+        case .jvm: "desktopcomputer"
         }
     }
 }

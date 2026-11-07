@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		031FDADDE49151411A5DBE76 /* Format.swift in Sources */ = {isa = PBXBuildFile; fileRef = 363F34563771B290756DFE95 /* Format.swift */; };
 		15B34F1F9EFA1D2831B45720 /* Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74B11F2C967A016E9C64007 /* Wire.swift */; };
+		2761A21E3132A1CD3DDF6523 /* JSONHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */; };
 		5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32848713BA3CDDB08C4578E6 /* HopiApp.swift */; };
 		6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */; };
 		73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058FDE9C7DCC3C896E045DA5 /* Discovery.swift */; };
@@ -18,6 +19,7 @@
 		B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91FD826ED1FEAE3ECA43186 /* DetailView.swift */; };
 		C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */; };
 		D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34741D43AF2D559078BAB961 /* Session.swift */; };
+		DCE65A9B74847AB7A6AC77A7 /* Adb.swift in Sources */ = {isa = PBXBuildFile; fileRef = F560E4E13826CA8847B3214B /* Adb.swift */; };
 		FCA368E0CE21E91CF60D3BAF /* Hopi.icns in Resources */ = {isa = PBXBuildFile; fileRef = F70589D9237C4AF0FC44D2CC /* Hopi.icns */; };
 /* End PBXBuildFile section */
 
@@ -32,6 +34,8 @@
 		72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
 		7CAEDFE65548A9E1AE7DA718 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		89365ACE3DCE512AA5612077 /* LineConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineConnection.swift; sourceTree = "<group>"; };
+		E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONHighlight.swift; sourceTree = "<group>"; };
+		F560E4E13826CA8847B3214B /* Adb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adb.swift; sourceTree = "<group>"; };
 		F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		F70589D9237C4AF0FC44D2CC /* Hopi.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Hopi.icns; sourceTree = "<group>"; };
 		F74B11F2C967A016E9C64007 /* Wire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wire.swift; sourceTree = "<group>"; };
@@ -42,6 +46,7 @@
 		1117460F50A3AFD7156C18E2 /* Bridge */ = {
 			isa = PBXGroup;
 			children = (
+				F560E4E13826CA8847B3214B /* Adb.swift */,
 				058FDE9C7DCC3C896E045DA5 /* Discovery.swift */,
 				89365ACE3DCE512AA5612077 /* LineConnection.swift */,
 				F74B11F2C967A016E9C64007 /* Wire.swift */,
@@ -88,6 +93,7 @@
 				F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */,
 				F91FD826ED1FEAE3ECA43186 /* DetailView.swift */,
 				363F34563771B290756DFE95 /* Format.swift */,
+				E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */,
 				3602C289C75D5372822A0541 /* RequestList.swift */,
 				10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */,
 			);
@@ -178,11 +184,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DCE65A9B74847AB7A6AC77A7 /* Adb.swift in Sources */,
 				6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */,
 				B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */,
 				73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */,
 				031FDADDE49151411A5DBE76 /* Format.swift in Sources */,
 				5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */,
+				2761A21E3132A1CD3DDF6523 /* JSONHighlight.swift in Sources */,
 				7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */,
 				8EAF9812DCD4FDB129EC91BD /* RequestList.swift in Sources */,
 				D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */,
