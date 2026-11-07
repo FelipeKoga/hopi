@@ -143,11 +143,13 @@ kotlin {
  * functions `_hopi_us_rule…` included), no `HopiUS` capture or rule-protocol Objective-C class, no
  * `_hopi_hits_` symbol (core's hit counter), no `_hopi_perf_` symbol and no `HopiPerfCadence` class
  * (perf's C library), no Kotlin symbol of any kind (`_kfun:`, `_kclass:`, …) in `dev.koga.hopi.core`,
- * `.network`, `.urlsession`, `.android`, `.ui`, `.perf.internal` or `.start`, and no
- * `_OBJC_CLASS_$_SharedHopi` (hopi-start's `Hopi`); in its bytes, neither the capture and rule
- * queues' labels nor the private selector names (C strings) nor the hang watchdog's and the
- * sampler's thread names (Kotlin strings, UTF-16); in its header, no declaration of `Hopi`,
- * `HopiStartConfig` or the sample's capture probe. `hopi-api`'s symbols and exported classes
+ * `.network`, `.urlsession`, `.android`, `.ui`, `.perf.internal` or `.start`; in its bytes,
+ * neither the capture and rule queues' labels nor the private selector names (C strings) nor the
+ * hang watchdog's and the sampler's thread names (Kotlin strings, UTF-16); in its header, no
+ * declaration of `HopiStartConfig` or the sample's capture probe. The generated `Hopi` entry
+ * (`SharedHopi`, the plugin's, in every configuration) is exported in both builds, once in the
+ * binary and once in the header: hopi-start's own `Hopi` is `@HiddenFromObjC`, so a second one
+ * would mean it reached Swift. `hopi-api`'s symbols and exported classes
  * (`dev.koga.hopi.api`, `.rules`, `.perf`) and the Ktor plugin's (`dev.koga.hopi.ktor`) are expected.
  * With the flag it requires every one of them instead (the positive control), so the check is known
  * to see what it looks for. Either way the header declares no module-prefixed Hopi class
@@ -196,8 +198,6 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
             "runtime Kotlin symbols" to symbols.count { RUNTIME_KOTLIN.containsMatchIn(it) },
             "_hopi_perf_ symbols" to symbols.count { "_hopi_perf_" in it },
             "perf classes" to symbols.count { "HopiPerfCadence" in it },
-            "Hopi classes" to symbols.count { it.trimEnd().endsWith(HOPI_CLASS) },
-            "Hopi declarations" to declared.count { it == "SharedHopi" },
             "HopiStartConfig declarations" to declared.count { it == "SharedHopiStartConfig" },
             "capture probe declarations" to declared.count { it == "SharedSampleCaptureProbe" },
         )
@@ -211,9 +211,18 @@ abstract class VerifyIosCaptureSelection : DefaultTask() {
             "module-prefixed Hopi declarations" to declared.count { it.startsWith("SharedHopi_") },
             "HopiRuntimes declarations" to declared.count { it == "SharedHopiRuntimes" },
         )
-        val found = (families + never).entries.joinToString { "${it.value} ${it.key}" } + "; strings $strings"
+        // 1 with and without the flag: the generated entry, never hopi-start's hidden `Hopi`.
+        val once = linkedMapOf(
+            "Hopi classes" to symbols.count { it.trimEnd().endsWith(HOPI_CLASS) },
+            // Its `@interface`; the `@class` forward list names it once more.
+            "Hopi declarations" to header.get().asFile.readLines().count { it.startsWith("@interface SharedHopi ") },
+        )
+        val found = (families + never + once).entries.joinToString { "${it.value} ${it.key}" } + "; strings $strings"
         if (never.values.any { it != 0 }) {
             throw GradleException("The framework's header declares an internal Hopi type: $found")
+        }
+        if (once.values.any { it != 1 }) {
+            throw GradleException("The framework does not export exactly one Hopi, the generated entry: $found")
         }
         if (real.get()) {
             if (families.values.any { it == 0 } || strings.values.any { !it }) {
