@@ -107,6 +107,16 @@ internal class Adb(private val path: Path, private val processes: ProcessRunner)
         return parseAdbDevices(result.stdout)
     }
 
+    /**
+     * The device's own serial number (`ro.serialno`): one phone that adb lists twice (USB and
+     * Wi-Fi, or Wi-Fi by address and by its mDNS name) has one. Null when adb cannot tell.
+     */
+    fun hardwareSerial(serial: String): String? = try {
+        run("-s", serial, "shell", "getprop", "ro.serialno").takeIf { it.exitCode == 0 }?.stdout?.trim()?.takeIf { it.isNotEmpty() }
+    } catch (_: CliException) {
+        null
+    }
+
     /** Forwards a free host loopback port to the app's abstract socket and returns that port. */
     fun forward(serial: String, socketName: String): Int {
         val result = run("-s", serial, "forward", "tcp:0", "localabstract:$socketName")

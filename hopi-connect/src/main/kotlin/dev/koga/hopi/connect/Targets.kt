@@ -224,7 +224,7 @@ public class Targets(private val environment: HostEnvironment) {
 
     private fun openAndroid(app: String, device: String?): BridgeEndpoint {
         val adb = adb ?: throw notReachable("adb not found: set ANDROID_HOME, or put adb on PATH")
-        val devices = adb.devices()
+        val devices = adb.devices().let { if (device == null) onePerPhone(it) else it }
         val serial = pickDevice(
             device,
             devices.map { Candidate(it.serial, it.serial, it.isReady, it.state) },
@@ -388,7 +388,7 @@ public class Targets(private val environment: HostEnvironment) {
     public fun apps(platform: Platform? = null, device: String? = null): List<FoundApp> {
         val found = ArrayList<FoundApp>()
         if (platform == null || platform == Platform.Android) {
-            discover { androidDevices() }?.filter { it.isReady && (device == null || it.serial == device) }?.forEach { d ->
+            discover { androidDevices() }?.filter { it.isReady && (device == null || it.serial == device) }?.let(::onePerPhone)?.forEach { d ->
                 androidBridges(d.serial).forEach { app -> found += FoundApp(Platform.Android, d.serial, d.model ?: d.serial, app, null) }
             }
         }
@@ -408,6 +408,18 @@ public class Targets(private val environment: HostEnvironment) {
             }
         }
         return found
+    }
+
+    /**
+     * [devices] with each phone's ready transports reduced to the first listed: adb lists a phone
+     * twice once it is reached both by address and by mDNS name (or USB and Wi-Fi), which would
+     * read as two devices. Asked (one `getprop` each) only when several are ready.
+     */
+    private fun onePerPhone(devices: List<AdbDevice>): List<AdbDevice> {
+        val adb = adb ?: return devices
+        if (devices.count { it.isReady } < 2) return devices
+        val seen = HashSet<String>()
+        return devices.filter { d -> !d.isReady || seen.add(adb.hardwareSerial(d.serial) ?: "transport:${d.serial}") }
     }
 
     private fun childDirectories(dir: Path): List<Path> = try {

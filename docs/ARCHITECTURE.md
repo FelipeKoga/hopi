@@ -2225,7 +2225,8 @@ moved by text in a captured body cannot redirect the app's requests without a pe
   export budget; transactions left without bodies are counted in a `hopi: note:` on stderr.
 - `apps`: one line per app whose bridge answers,
   `{"type":"app","app":"…","platform":"android"|"ios"|"jvm","device":"…"|null,"deviceName":"…","bridgeFile":"…"|null}`:
-  Android from each ready device's `@hopi.<app>` sockets, simulators and JVM processes from their
+  Android from each ready device's `@hopi.<app>` sockets (a phone adb lists twice, by address
+  and by mDNS name or over USB and Wi-Fi, counted once by its `ro.serialno`), simulators and JVM processes from their
   `bridge.json` once the bridge answers `hello` (which names the app); iPhones on USB are not
   scanned. Every other command without `--app` (and without `--bridge-file`) uses the only app
   this finds, narrowed by `--platform` and `--device`; several stop with exit 1 and the flags

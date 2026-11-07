@@ -413,6 +413,80 @@ class DeviceFlowTest {
         assertTrue("the bridge serves com.other.app, not $APP" in run.stderr, run.stderr)
     }
 
+    /** One phone adb lists twice (by address and by mDNS name), serving [APP]'s bridge on [port]. */
+    private fun twiceListedPhone(port: Int, sameSerial: Boolean) = FakeProcessRunner { args ->
+        when {
+            args == listOf("devices", "-l") -> ok(
+                "List of devices attached\n" +
+                    "192.168.18.10:41817    device product:lisa model:2109119DG device:lisa transport_id:65\n" +
+                    "adb-d9fe4154._adb-tls-connect._tcp device product:lisa model:2109119DG device:lisa transport_id:3\n",
+            )
+            args.drop(2) == listOf("shell", "getprop", "ro.serialno") -> ok(if (sameSerial) "d9fe4154\n" else "${args[1].length}\n")
+            args.drop(2) == listOf("exec-out", "cat", "/proc/net/unix") -> ok("0000000000000000: 00000002 00000000 00010000 0001 01 123456 @hopi.$APP\n")
+            args.size == 5 && args[2] == "forward" && args[3] == "tcp:0" -> ok("$port")
+            args.size == 5 && args[2] == "forward" && args[3] == "--remove" -> ok()
+            args.drop(2) == listOf("exec-out", "run-as", APP, "cat", "cache/hopi/$APP.proof") -> ok("$PROOF\n$KEY\n")
+            else -> ProcessResult(1, "", "unexpected")
+        }
+    }
+
+    @Test
+    fun appsCountsAPhoneAdbListsTwiceOnce() {
+        val port = androidBridge()
+        record()
+        val phone = twiceListedPhone(port, sameSerial = true)
+        val apps = runCapturing("apps", "--json", processes = phone, env = mapOf("ANDROID_HOME" to "/sdk"), executables = setOf(ADB))
+        assertEquals(ExitCode.OK, apps.exitCode, apps.toString())
+        val line = Json.parseToJsonElement(apps.lines.single()).jsonObject
+        assertEquals(APP, line["app"]!!.jsonPrimitive.content)
+        assertEquals("192.168.18.10:41817", line["device"]!!.jsonPrimitive.content)
+        val list = runCapturing("list", "--json", processes = phone, env = mapOf("ANDROID_HOME" to "/sdk"), executables = setOf(ADB))
+        assertEquals(ExitCode.OK, list.exitCode, list.toString())
+        assertEquals(1, list.lines.size, list.toString())
+
+        // Two phones (two serial numbers) stay two, and a command without --app asks which.
+        val two = twiceListedPhone(port, sameSerial = false)
+        assertEquals(2, runCapturing("apps", "--json", processes = two, env = mapOf("ANDROID_HOME" to "/sdk"), executables = setOf(ADB)).lines.size)
+        val several = runCapturing("list", processes = two, env = mapOf("ANDROID_HOME" to "/sdk"), executables = setOf(ADB))
+        assertEquals(ExitCode.USAGE, several.exitCode, several.toString())
+        assertTrue("--app $APP --platform android --device 192.168.18.10:41817" in several.stderr, several.stderr)
+    }
+
+    @Test
+    fun appsFindsSimulatorAppsWhoseBridgeAnswers() {
+        val home = root.resolve("home")
+        val apps = home.resolve("Library/Developer/CoreSimulator/Devices/$UDID/data/Containers/Data/Application")
+        // An app that answers, as an iOS bridge does (token first line), and one a killed app left behind.
+        val listener = LoopbackListener()
+        val server = AgentBridgeServer(listener, store, BridgeInfo(APP, "ios", null), token = BridgeToken.of(KEY))
+        server.start()
+        closeables += AutoCloseable { server.close() }
+        val live = apps.resolve("B-LIVE")
+        Files.createDirectories(live.resolve("Library/Caches/hopi"))
+        Files.writeString(live.resolve("Library/Caches/hopi/bridge.json"), """{"port":${listener.port},"token":"$KEY"}""")
+        val dead = ServerSocket(0).use { it.localPort }
+        Files.createDirectories(apps.resolve("A-DEAD/Library/Caches/hopi"))
+        Files.writeString(apps.resolve("A-DEAD/Library/Caches/hopi/bridge.json"), """{"port":$dead,"token":"$KEY"}""")
+        record()
+
+        fun run(vararg argv: String) = runCapturing(
+            *argv,
+            processes = xcrun(live),
+            userHome = home.toString(),
+            isMac = true,
+            executables = setOf(Paths.get("/usr/bin/xcrun")),
+        )
+        val found = run("apps", "--json")
+        assertEquals(ExitCode.OK, found.exitCode, found.toString())
+        val line = Json.parseToJsonElement(found.lines.single()).jsonObject
+        assertEquals(APP, line["app"]!!.jsonPrimitive.content)
+        assertEquals("ios", line["platform"]!!.jsonPrimitive.content)
+        assertEquals(UDID, line["device"]!!.jsonPrimitive.content)
+        val list = run("list", "--json")
+        assertEquals(ExitCode.OK, list.exitCode, list.toString())
+        assertEquals(1, list.lines.size, list.toString())
+    }
+
     private fun xcrun(container: Path?, simulators: String = fixture("simctl-booted.json")) = FakeProcessRunner { args ->
         when {
             args == listOf("simctl", "list", "devices", "booted", "-j") -> ok(simulators)
