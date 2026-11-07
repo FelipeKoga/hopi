@@ -20,13 +20,16 @@ targets:
     platform: macOS
     sources:
       - path: Hopi
+    info:
+      path: Hopi/Info.plist
+      properties:
+        CFBundleIconFile: Hopi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.koga.hopi.mac
         PRODUCT_NAME: Hopi
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Hopi
-        INFOPLIST_KEY_CFBundleIconFile: Hopi
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         INFOPLIST_KEY_NSHumanReadableCopyright: "Apache-2.0"
         # The viewer reads $TMPDIR/hopi, runs xcrun simctl and, later, adb: no sandbox.

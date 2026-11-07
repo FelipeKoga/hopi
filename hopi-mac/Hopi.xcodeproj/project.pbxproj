@@ -30,6 +30,7 @@
 		363F34563771B290756DFE95 /* Format.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Format.swift; sourceTree = "<group>"; };
 		390044B9BA6ADBC6F6A5D81C /* Hopi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hopi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
+		7CAEDFE65548A9E1AE7DA718 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		89365ACE3DCE512AA5612077 /* LineConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineConnection.swift; sourceTree = "<group>"; };
 		F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		F70589D9237C4AF0FC44D2CC /* Hopi.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Hopi.icns; sourceTree = "<group>"; };
@@ -97,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				32848713BA3CDDB08C4578E6 /* HopiApp.swift */,
+				7CAEDFE65548A9E1AE7DA718 /* Info.plist */,
 				1117460F50A3AFD7156C18E2 /* Bridge */,
 				6A48C82B50F22FF1D88DD4AA /* Model */,
 				7D3A174993A756800434B4CE /* Resources */,
@@ -202,8 +204,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Hopi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Hopi;
-				INFOPLIST_KEY_CFBundleIconFile = Hopi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Apache-2.0";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -358,8 +360,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Hopi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Hopi;
-				INFOPLIST_KEY_CFBundleIconFile = Hopi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Apache-2.0";
 				LD_RUNPATH_SEARCH_PATHS = (
