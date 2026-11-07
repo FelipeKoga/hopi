@@ -25,7 +25,8 @@ open build/Build/Products/Release/Hopi.app
 ## End-to-end tests
 
 The UI tests drive the viewer against a real app: run a debug build with Hopi (the sample works),
-keep it making the request named below (the sample's Items screen, Reload), then:
+keep it making the request named below (the sample's Items screen, Reload; on an emulator the
+sample reaches its dev server through `adb reverse tcp:8765 tcp:8765`), then:
 
 ```bash
 TEST_RUNNER_HOPI_E2E_APP=dev.koga.hopi.sample TEST_RUNNER_HOPI_E2E_PATH=/items \

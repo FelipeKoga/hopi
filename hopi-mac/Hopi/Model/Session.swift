@@ -23,7 +23,7 @@ final class Session {
 
     @ObservationIgnored private var index: [Int64: Int] = [:]
     @ObservationIgnored private var stream: LineConnection?
-    @ObservationIgnored private var commands: LineConnection?
+    @ObservationIgnored private var commands: CommandLine?
     /// One per command sent, in order: each takes reply lines until it returns true (done).
     @ObservationIgnored private var waiting: [(Data?) -> Bool] = []
     @ObservationIgnored private var nextBlob: Int64 = 0
@@ -214,16 +214,25 @@ final class Session {
         }
     }
 
-    private func commandConnection() -> LineConnection {
+    /// The command connection: commands wait until its own hello proves it is the app's bridge,
+    /// so a squatter on the socket name never receives a write.
+    private func commandConnection() -> CommandLine {
         if let commands { return commands }
         let connection = LineConnection(endpoint: target.endpoint)
-        var greeted = false
+        let line = CommandLine(connection: connection)
         connection.start { [weak self] event in
             guard let self else { return }
             switch event {
             case .line(let data):
-                // The first line answers this connection's own hello.
-                if !greeted { greeted = true; return }
+                if !line.verified {
+                    guard let hello = try? JSONDecoder().decode(Hello.self, from: data),
+                          self.target.endpoint.accepts(hello) else {
+                        connection.close()
+                        return
+                    }
+                    line.verify()
+                    return
+                }
                 if let first = self.waiting.first, first(data) { self.waiting.removeFirst() }
             case .closed:
                 self.commands = nil
@@ -231,13 +240,38 @@ final class Session {
             }
         }
         connection.send(["cmd": "hello"])
-        commands = connection
-        return connection
+        commands = line
+        return line
     }
 
     private func failWaiting() {
         let pending = waiting
         waiting = []
         pending.forEach { _ = $0(nil) }
+    }
+}
+
+/// A connection whose commands are held until its hello is verified, then sent in order.
+final class CommandLine {
+    let connection: LineConnection
+    private(set) var verified = false
+    private var held: [[String: Any]] = []
+
+    init(connection: LineConnection) {
+        self.connection = connection
+    }
+
+    func send(_ command: [String: Any]) {
+        if verified { connection.send(command) } else { held.append(command) }
+    }
+
+    func verify() {
+        verified = true
+        held.forEach(connection.send)
+        held = []
+    }
+
+    func close() {
+        connection.close()
     }
 }

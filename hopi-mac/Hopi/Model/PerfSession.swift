@@ -73,7 +73,21 @@ final class PerfSession {
             guard let self, let connection, self.connection === connection else { return }
             switch event {
             case .line(let data):
-                if !greeted { greeted = true; return }
+                if !greeted {
+                    greeted = true
+                    // perf.tail is a write: sent only once the hello proves this is the app's bridge.
+                    guard let hello = try? JSONDecoder().decode(Hello.self, from: data),
+                          self.target.endpoint.accepts(hello) else {
+                        self.status = .unavailable("This is not \(self.target.app)'s bridge: its hello lacks the app's proof.")
+                        connection.close()
+                        return
+                    }
+                    connection.send([
+                        "cmd": "perf.tail", "since": self.lastSeq, "samples": true, "fps": true,
+                        "start": Array(monitors).sorted(),
+                    ])
+                    return
+                }
                 self.line(data)
             case .closed(let reason):
                 if case .unavailable = self.status { return }
@@ -81,10 +95,6 @@ final class PerfSession {
             }
         }
         connection.send(["cmd": "hello"])
-        connection.send([
-            "cmd": "perf.tail", "since": lastSeq, "samples": true, "fps": true,
-            "start": Array(monitors).sorted(),
-        ])
     }
 
     private func line(_ data: Data) {
