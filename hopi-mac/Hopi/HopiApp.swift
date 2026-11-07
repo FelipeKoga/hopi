@@ -11,6 +11,13 @@ struct HopiApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .commands {
+            CommandGroup(before: .toolbar) {
+                ForEach(Array(Viewer.Mode.allCases.enumerated()), id: \.offset) { index, mode in
+                    Button(mode.rawValue) { viewer.mode = mode }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+                }
+                Divider()
+            }
             CommandGroup(after: .textEditing) {
                 Button("Find Requests") { viewer.findRequests += 1 }
                     .keyboardShortcut("f")

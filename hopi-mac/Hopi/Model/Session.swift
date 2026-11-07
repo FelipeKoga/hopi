@@ -18,11 +18,15 @@ final class Session {
     private(set) var hello: Hello?
     /// Oldest first, as the app sends them: the backlog and live events append.
     private(set) var transactions: [Summary] = []
+    /// Bumped when the app's rule set changes (`{"type":"rules"}` on the tail), so lists fetch again.
+    private(set) var rulesRevision = 0
 
     @ObservationIgnored private var index: [Int64: Int] = [:]
     @ObservationIgnored private var stream: LineConnection?
     @ObservationIgnored private var commands: LineConnection?
-    @ObservationIgnored private var waiting: [(Data?) -> Void] = []
+    /// One per command sent, in order: each takes reply lines until it returns true (done).
+    @ObservationIgnored private var waiting: [(Data?) -> Bool] = []
+    @ObservationIgnored private var nextBlob: Int64 = 0
 
     init(target: Target) {
         self.target = target
@@ -39,7 +43,7 @@ final class Session {
             }
         }
         stream.send(["cmd": "hello"])
-        stream.send(["cmd": "tail", "since": 0])
+        stream.send(["cmd": "tail", "since": 0, "rules": true])
     }
 
     func stop() {
@@ -65,6 +69,73 @@ final class Session {
         reindex()
     }
 
+    // MARK: Rules
+
+    func rules() async throws -> [Rule] {
+        guard let lines = await requestLines(["cmd": "rules.list"]) else { throw Self.gone }
+        return try lines.map(Self.rule)
+    }
+
+    /// Adds [rule], the wire object of `rules.add`. Bodies too long for one line go up as blobs first.
+    @discardableResult
+    func addRule(_ rule: [String: Any]) async throws -> Rule {
+        guard let line = await request(["cmd": "rules.add", "rule": rule]) else { throw Self.gone }
+        return try Self.rule(line)
+    }
+
+    /// `rules.update`: `enabled`, `priority`, `times` (NSNull clears it), `resetHits`.
+    @discardableResult
+    func updateRule(_ id: Int64, _ fields: [String: Any]) async throws -> Rule {
+        var command = fields
+        command["cmd"] = "rules.update"
+        command["id"] = id
+        guard let line = await request(command) else { throw Self.gone }
+        return try Self.rule(line)
+    }
+
+    func removeRule(_ id: Int64) async throws {
+        guard let line = await request(["cmd": "rules.remove", "id": id]) else { throw Self.gone }
+        try Self.check(line)
+    }
+
+    func clearRules() async throws {
+        guard let line = await request(["cmd": "rules.clear"]) else { throw Self.gone }
+        try Self.check(line)
+    }
+
+    /// The body object for a rule: inline text when it fits a command line, an uploaded blob otherwise.
+    func ruleBody(_ bytes: Data) async throws -> [String: Any] {
+        if bytes.count <= 1500, let text = String(data: bytes, encoding: .utf8) { return ["text": text] }
+        nextBlob += 1
+        let blob = nextBlob
+        let base64 = bytes.base64EncodedString()
+        // 3072 base64 chars carry 2304 bytes: offsets stay whole bytes.
+        var offset = 0
+        var start = base64.startIndex
+        while start < base64.endIndex {
+            let end = base64.index(start, offsetBy: 3072, limitedBy: base64.endIndex) ?? base64.endIndex
+            let chunk = String(base64[start..<end])
+            guard let line = await request(["cmd": "blob.put", "blob": blob, "offset": offset, "data": chunk]) else { throw Self.gone }
+            try Self.check(line)
+            offset += Data(base64Encoded: chunk)?.count ?? 0
+            start = end
+        }
+        return ["blob": blob, "size": bytes.count]
+    }
+
+    private nonisolated static let gone = WireError(code: "GONE", message: "The app closed the connection.")
+
+    private nonisolated static func check(_ line: Data) throws {
+        if (try? JSONDecoder().decode(WireType.self, from: line))?.type == "error" {
+            throw (try? JSONDecoder().decode(WireError.self, from: line)) ?? gone
+        }
+    }
+
+    private nonisolated static func rule(_ line: Data) throws -> Rule {
+        try check(line)
+        return try JSONDecoder().decode(Rule.self, from: line)
+    }
+
     private func streamLine(_ data: Data) {
         guard let type = try? JSONDecoder().decode(WireType.self, from: data).type else { return }
         switch type {
@@ -79,6 +150,8 @@ final class Session {
             }
             self.hello = hello
             status = .live
+        case "rules":
+            rulesRevision += 1
         default:
             break // notice, error: the list goes on; SLOW_CLIENT ends the connection, shown as closed.
         }
@@ -102,10 +175,41 @@ final class Session {
         index = Dictionary(uniqueKeysWithValues: transactions.enumerated().map { ($1.id, $0) })
     }
 
+    /// A command whose reply is one line.
     private func request(_ command: [String: Any]) async -> Data? {
         let connection = commandConnection()
         return await withCheckedContinuation { continuation in
-            waiting.append { continuation.resume(returning: $0) }
+            waiting.append { line in
+                continuation.resume(returning: line)
+                return true
+            }
+            connection.send(command)
+        }
+    }
+
+    /// A command whose reply is lines up to `{"type":"end"}`, or one `{"type":"error"}` line.
+    /// Nil when the connection closed first.
+    private func requestLines(_ command: [String: Any]) async -> [Data]? {
+        let connection = commandConnection()
+        return await withCheckedContinuation { continuation in
+            var lines: [Data] = []
+            waiting.append { line in
+                guard let line else {
+                    continuation.resume(returning: nil)
+                    return true
+                }
+                let type = (try? JSONDecoder().decode(WireType.self, from: line))?.type
+                if type == "end" {
+                    continuation.resume(returning: lines)
+                    return true
+                }
+                lines.append(line)
+                if type == "error" {
+                    continuation.resume(returning: lines)
+                    return true
+                }
+                return false
+            }
             connection.send(command)
         }
     }
@@ -120,7 +224,7 @@ final class Session {
             case .line(let data):
                 // The first line answers this connection's own hello.
                 if !greeted { greeted = true; return }
-                if !self.waiting.isEmpty { self.waiting.removeFirst()(data) }
+                if let first = self.waiting.first, first(data) { self.waiting.removeFirst() }
             case .closed:
                 self.commands = nil
                 self.failWaiting()
@@ -134,6 +238,6 @@ final class Session {
     private func failWaiting() {
         let pending = waiting
         waiting = []
-        pending.forEach { $0(nil) }
+        pending.forEach { _ = $0(nil) }
     }
 }

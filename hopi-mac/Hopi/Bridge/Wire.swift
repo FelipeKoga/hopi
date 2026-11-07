@@ -14,6 +14,8 @@ nonisolated struct Hello: Decodable, Sendable {
     let count: Int?
     let rules: Bool?
     let perf: Bool?
+    /// Whether the viewer may start and stop monitors.
+    let perfControl: Bool?
     /// Android only: what the app wrote to its private storage.
     let proof: String?
 }
@@ -77,4 +79,151 @@ nonisolated struct WireError: Decodable, Sendable, Error {
 
 nonisolated struct ClearReply: Decodable, Sendable {
     let through: Int64?
+}
+
+// MARK: - Rules
+
+/// One rule as `rules.*` replies carry it. Bodies arrive as their size only, never their bytes.
+nonisolated struct Rule: Decodable, Sendable, Identifiable, Hashable {
+    struct Match: Decodable, Sendable, Hashable {
+        let shorthand: String
+    }
+
+    struct Delay: Decodable, Sendable, Hashable {
+        let beforeRequestMs: Int64
+        let beforeResponseMs: Int64
+    }
+
+    struct Size: Decodable, Sendable, Hashable {
+        let bytes: Int64
+    }
+
+    struct Mock: Decodable, Sendable, Hashable {
+        let status: Int
+        let body: Size?
+    }
+
+    /// One side of an edit: decoded only to know it is there and what it changes.
+    struct Side: Decodable, Sendable, Hashable {
+        let status: Int?
+        let method: String?
+        let host: String?
+        let path: String?
+        let setHeaders: [[String]]?
+        let removeHeaders: [String]?
+        let body: Size?
+    }
+
+    struct Edit: Decodable, Sendable, Hashable {
+        let request: Side?
+        let response: Side?
+    }
+
+    struct Unsupported: Decodable, Sendable, Hashable {
+        let source: String
+        let reason: String
+        let applies: Bool
+    }
+
+    let id: Int64
+    let label: String?
+    let enabled: Bool
+    let priority: Int
+    let times: Int?
+    let hits: Int64
+    let exhausted: Bool
+    let match: Match
+    let delay: Delay?
+    let mock: Mock?
+    let fail: String?
+    let edit: Edit?
+    let unsupported: [Unsupported]
+
+    /// `mock 500 (61 B)`, `fail timeout`, `edit response`, `delay 2000 ms before response`.
+    var action: String {
+        var parts: [String] = []
+        if let mock { parts.append("mock \(mock.status)" + (mock.body.map { " (\(Format.bytes($0.bytes)))" } ?? "")) }
+        if let fail { parts.append("fail \(fail)") }
+        if let edit {
+            let sides = [edit.request.map { _ in "request" }, edit.response.map { _ in "response" }].compactMap { $0 }
+            parts.append("edit " + sides.joined(separator: "+"))
+        }
+        if let delay, delay.beforeRequestMs > 0 || delay.beforeResponseMs > 0 {
+            let when = [
+                delay.beforeRequestMs > 0 ? "\(delay.beforeRequestMs) ms before request" : nil,
+                delay.beforeResponseMs > 0 ? "\(delay.beforeResponseMs) ms before response" : nil,
+            ].compactMap { $0 }
+            parts.append("delay " + when.joined(separator: ", "))
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - Performance
+
+/// `perf.status`: what the app can monitor and what runs.
+nonisolated struct PerfStatus: Decodable, Sendable, Hashable {
+    struct Running: Decodable, Sendable, Hashable {
+        let since: Int64?
+        let expiresAt: Int64?
+    }
+
+    let platform: String
+    let available: [String]
+    let remoteControl: Bool
+    let running: [String: Running]
+    let notices: [String]?
+}
+
+/// `perf.sample`: CPU in percent of one core, memory in bytes.
+nonisolated struct PerfSample: Decodable, Sendable, Hashable {
+    struct Cpu: Decodable, Sendable, Hashable {
+        let process: Double
+        let hopi: Double?
+        let cores: Int?
+    }
+
+    struct Memory: Decodable, Sendable, Hashable {
+        let javaHeap: Int64?
+        let javaMax: Int64?
+        let nativeHeap: Int64?
+        let resident: Int64?
+        let available: Int64?
+    }
+
+    let at: Int64
+    let cpu: Cpu?
+    let memory: Memory?
+}
+
+/// `perf.frames`: one closed second of frames.
+nonisolated struct PerfFrames: Decodable, Sendable, Hashable {
+    let sec: Int64
+    let frames: Int
+    let slow: Int
+    let janky: Int
+    let frozen: Int
+    let screen: String?
+}
+
+/// `perf.event`: a hang, a janky frame, a stall, a memory signal or an earlier ANR.
+nonisolated struct PerfEvent: Decodable, Sendable, Hashable, Identifiable {
+    let kind: String
+    let seq: Int64
+    let at: Int64
+    let state: String?
+    let ms: Double?
+    let screen: String?
+    let stacks: [[String]]?
+    let event: String?
+    let level: String?
+    let detail: String?
+    let description: String?
+    let trace: String?
+
+    var id: Int64 { seq }
+}
+
+extension WireError: LocalizedError {
+    nonisolated var errorDescription: String? { message }
 }

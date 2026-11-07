@@ -1,83 +1,55 @@
+import AppKit
 import SwiftUI
 
+/// The attached app's requests, oldest first, filtered by the toolbar's search and status menu.
 struct RequestList: View {
     @Bindable var viewer: Viewer
+    let session: Session
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        Group {
-            if let session = viewer.session {
-                switch session.status {
-                case .closed(let reason):
-                    ContentUnavailableView {
-                        Label("Disconnected", systemImage: "bolt.horizontal.circle")
-                    } description: {
-                        Text(reason ?? "The app closed the connection.")
-                    } actions: {
-                        Button("Reconnect") { viewer.reconnect() }
-                            .buttonStyle(.glassProminent)
+        table(session)
+            .searchable(text: $viewer.search, placement: .toolbar, prompt: "Filter by URL, method or status")
+            .searchFocused($searchFocused)
+            .onChange(of: viewer.findRequests) { searchFocused = true }
+            .toolbar {
+                ToolbarItem {
+                    Text(count)
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+                .sharedBackgroundVisibility(.hidden)
+                ToolbarItem {
+                    Menu {
+                        Picker("Status", selection: $viewer.statusFilter) {
+                            ForEach(Viewer.StatusFilter.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Label("Status", systemImage: viewer.statusFilter == .all
+                              ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
-                default:
-                    table(session)
+                    .accessibilityIdentifier("status-filter")
+                    .help("Show only these responses")
                 }
-            } else {
-                ContentUnavailableView {
-                    Label(viewer.targets.isEmpty ? "No Apps Found" : "No App Selected", systemImage: "network")
-                } description: {
-                    Text(viewer.targets.isEmpty
-                         ? "Run a debug build with Hopi on an Android emulator, an iOS simulator or the JVM."
-                         : "Choose an app in the toolbar to see its requests.")
-                } actions: {
-                    if viewer.targets.isEmpty {
-                        Button("Look Again") { Task { await viewer.scan() } }
-                            .disabled(viewer.scanning)
+                ToolbarItem {
+                    Button {
+                        Task { await session.clear() }
+                    } label: {
+                        Label("Clear", systemImage: "trash")
                     }
+                    .help("Clear the app's requests (⌘K)")
+                    .disabled(session.transactions.isEmpty)
                 }
             }
-        }
-        .searchable(text: $viewer.search, placement: .toolbar, prompt: "Filter by URL, method or status")
-        .searchFocused($searchFocused)
-        .onChange(of: viewer.findRequests) { searchFocused = true }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Status", selection: $viewer.statusFilter) {
-                    ForEach(Viewer.StatusFilter.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Show only these responses")
-                .disabled(viewer.session == nil)
-            }
-            ToolbarItem {
-                Text(subtitle)
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-            }
-            .sharedBackgroundVisibility(.hidden)
-            ToolbarItem {
-                Button {
-                    Task { await viewer.session?.clear() }
-                } label: {
-                    Label("Clear", systemImage: "trash")
-                }
-                .help("Clear the app's requests (⌘K)")
-                .disabled(viewer.session?.transactions.isEmpty ?? true)
-            }
-        }
     }
 
-    private var subtitle: String {
-        guard let session = viewer.session else { return "" }
-        switch session.status {
-        case .connecting: return "Connecting…"
-        case .closed: return "Disconnected"
-        case .live:
-            let total = session.transactions.count
-            let shown = viewer.visibleTransactions.count
-            let noun = total == 1 ? "request" : "requests"
-            return shown == total ? "\(total) \(noun)" : "\(shown) of \(total) \(noun)"
-        }
+    private var count: String {
+        let total = session.transactions.count
+        let shown = viewer.visibleTransactions.count
+        let noun = total == 1 ? "request" : "requests"
+        return shown == total ? "\(total) \(noun)" : "\(shown) of \(total) \(noun)"
     }
 
     private func table(_ session: Session) -> some View {
@@ -102,7 +74,12 @@ struct RequestList: View {
             }
             .width(min: 52, ideal: 60, max: 80)
             TableColumn("Path") { summary in
-                PathText(url: summary.url)
+                HStack(spacing: 6) {
+                    PathText(url: summary.url)
+                    if let applied = summary.applied {
+                        RuleTag(text: applied.replacingOccurrences(of: ",", with: " + "))
+                    }
+                }
             }
             .width(min: 140, ideal: 340)
             TableColumn("Host") { summary in
@@ -125,6 +102,20 @@ struct RequestList: View {
             }
             .width(min: 52, ideal: 60, max: 90)
         }
+        .contextMenu(forSelectionType: Summary.ID.self) { ids in
+            if let id = ids.first, let summary = session.transactions.last(where: { $0.id == id }) {
+                Button("Mock This Response…") {
+                    viewer.draftMock = summary
+                    viewer.mode = .rules
+                }
+                .disabled(summary.state != .complete)
+                Divider()
+                Button("Copy URL") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summary.url, forType: .string)
+                }
+            }
+        }
         .tableStyle(.inset)
         .alternatingRowBackgrounds(.disabled)
         .overlay {
@@ -137,6 +128,22 @@ struct RequestList: View {
                 }
             }
         }
+    }
+}
+
+/// What a rule did to a request: `mock`, `fail`, `delay + edit-response`.
+struct RuleTag: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.purple)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(.purple.opacity(0.14), in: .capsule)
+            .fixedSize()
+            .help("Changed by a rule")
     }
 }
 

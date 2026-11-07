@@ -26,19 +26,7 @@ final class DeviceFlowUITests: XCTestCase {
         let appId = try XCTUnwrap(env["HOPI_E2E_APP"], "set TEST_RUNNER_HOPI_E2E_APP")
         let path = try XCTUnwrap(env["HOPI_E2E_PATH"], "set TEST_RUNNER_HOPI_E2E_PATH")
 
-        // The toolbar's picker lists the app; choosing it connects. The scan may still be running,
-        // so the picker is opened again until the app is listed.
-        let picker = app.descendants(matching: .any)["app-picker"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        let target = app.descendants(matching: .any)["target:\(appId)"]
-        let deadline = Date().addingTimeInterval(40)
-        while !target.exists && Date() < deadline {
-            picker.click()
-            _ = target.waitForExistence(timeout: 3)
-            if !target.exists { app.typeKey(.escape, modifierFlags: []) }
-        }
-        XCTAssertTrue(target.exists, "\(appId) is not in the picker")
-        target.click()
+        try app.attach(to: appId)
 
         // Filter the list down to the expected request, so the table stays small.
         let search = app.searchFields.firstMatch
