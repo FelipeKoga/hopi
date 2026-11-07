@@ -79,6 +79,7 @@ struct RequestList: View {
             defer { exported = nil }
             do {
                 let result = try await Export.write(format, ids: ids, session: session, to: url) { exported = $0 }
+                exported = nil
                 if result.gone > 0 {
                     exportMessage = "Saved \(result.written) requests to \(url.lastPathComponent). \(result.gone) were gone from the app."
                 } else {

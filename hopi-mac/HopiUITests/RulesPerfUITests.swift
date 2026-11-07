@@ -97,7 +97,7 @@ final class RulesPerfUITests: XCTestCase {
         // The app serves it: a 418 shows up for the path.
         app.typeKey("1", modifierFlags: .command)
         XCTAssertTrue(app.outlines.staticTexts["418"].waitForExistence(timeout: 90), "the app did not serve the mock")
-        XCTAssertTrue(app.outlines.staticTexts["4.9 KB"].waitForExistence(timeout: 5), "the mock's 5000-byte body was not served")
+        XCTAssertTrue(app.outlines.staticTexts["5.0 KB"].waitForExistence(timeout: 5), "the mock's 5000-byte body was not served")
         add(app.screenshotAttachment("mocked"))
 
         app.typeKey("2", modifierFlags: .command)
