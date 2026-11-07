@@ -21,12 +21,20 @@ struct RequestList: View {
                     table(session)
                 }
             } else {
-                ContentUnavailableView("No App Selected", systemImage: "network",
-                                       description: Text("Pick an app on the left to see its requests."))
+                ContentUnavailableView {
+                    Label(viewer.targets.isEmpty ? "No Apps Found" : "No App Selected", systemImage: "network")
+                } description: {
+                    Text(viewer.targets.isEmpty
+                         ? "Run a debug build with Hopi on an Android emulator, an iOS simulator or the JVM."
+                         : "Choose an app in the toolbar to see its requests.")
+                } actions: {
+                    if viewer.targets.isEmpty {
+                        Button("Look Again") { Task { await viewer.scan() } }
+                            .disabled(viewer.scanning)
+                    }
+                }
             }
         }
-        .navigationTitle(viewer.session?.target.app ?? "Hopi")
-        .navigationSubtitle(subtitle)
         .searchable(text: $viewer.search, placement: .toolbar, prompt: "Filter by URL, method or status")
         .searchFocused($searchFocused)
         .onChange(of: viewer.findRequests) { searchFocused = true }
@@ -39,6 +47,12 @@ struct RequestList: View {
                 .labelsHidden()
                 .help("Show only these responses")
                 .disabled(viewer.session == nil)
+            }
+            ToolbarItem {
+                Text(subtitle)
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
             }
             ToolbarItem {
                 Button {

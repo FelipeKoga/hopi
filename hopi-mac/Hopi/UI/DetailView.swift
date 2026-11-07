@@ -96,6 +96,7 @@ private struct Header: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(Format.path(detail.url))
+                    .accessibilityIdentifier("detail-path")
                     .font(.system(.title3, design: .monospaced).weight(.medium))
                     .textSelection(.enabled)
                     .lineLimit(5)
@@ -194,6 +195,7 @@ private struct BodySection: View {
                     let pretty = Format.prettyBody(text, contentType: content.contentType)
                     let isJSON = pretty != text || content.contentType?.contains("json") == true
                     Text(isJSON ? JSONHighlight.attributed(pretty) : AttributedString(pretty))
+                        .accessibilityIdentifier("detail-body")
                         .font(.system(.callout, design: .monospaced))
                         .lineSpacing(2)
                         .textSelection(.enabled)

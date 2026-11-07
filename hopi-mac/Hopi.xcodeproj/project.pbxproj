@@ -9,12 +9,13 @@
 /* Begin PBXBuildFile section */
 		031FDADDE49151411A5DBE76 /* Format.swift in Sources */ = {isa = PBXBuildFile; fileRef = 363F34563771B290756DFE95 /* Format.swift */; };
 		15B34F1F9EFA1D2831B45720 /* Wire.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74B11F2C967A016E9C64007 /* Wire.swift */; };
+		1F3547F2A2289F341630E6FB /* DeviceFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD873EC72880A6CCD1CD352 /* DeviceFlowUITests.swift */; };
 		2761A21E3132A1CD3DDF6523 /* JSONHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */; };
 		5399343F36E71AEA3E88F8F5 /* HopiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32848713BA3CDDB08C4578E6 /* HopiApp.swift */; };
 		6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */; };
+		733ABC2A90D520791460A941 /* AppPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EA829056E0156C5AA14267 /* AppPicker.swift */; };
 		73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 058FDE9C7DCC3C896E045DA5 /* Discovery.swift */; };
 		7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89365ACE3DCE512AA5612077 /* LineConnection.swift */; };
-		86B59D43BFBDE3C3792D7BDD /* Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */; };
 		8EAF9812DCD4FDB129EC91BD /* RequestList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3602C289C75D5372822A0541 /* RequestList.swift */; };
 		B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91FD826ED1FEAE3ECA43186 /* DetailView.swift */; };
 		C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */; };
@@ -23,17 +24,29 @@
 		FCA368E0CE21E91CF60D3BAF /* Hopi.icns in Resources */ = {isa = PBXBuildFile; fileRef = F70589D9237C4AF0FC44D2CC /* Hopi.icns */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		B309452F6A8D2176A4D77E6C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 90D57688E3F88CC67FCC2C67 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6B6C0D244B1F387557DC08E3;
+			remoteInfo = Hopi;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		058FDE9C7DCC3C896E045DA5 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
-		10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar.swift; sourceTree = "<group>"; };
 		32848713BA3CDDB08C4578E6 /* HopiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HopiApp.swift; sourceTree = "<group>"; };
 		34741D43AF2D559078BAB961 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		3602C289C75D5372822A0541 /* RequestList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestList.swift; sourceTree = "<group>"; };
 		363F34563771B290756DFE95 /* Format.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Format.swift; sourceTree = "<group>"; };
 		390044B9BA6ADBC6F6A5D81C /* Hopi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hopi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		470E35B345DC9B31881AE8B4 /* HopiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HopiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		64EA829056E0156C5AA14267 /* AppPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPicker.swift; sourceTree = "<group>"; };
 		72EB4FCDF7FD2EB213F2B020 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
 		7CAEDFE65548A9E1AE7DA718 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		89365ACE3DCE512AA5612077 /* LineConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineConnection.swift; sourceTree = "<group>"; };
+		9BD873EC72880A6CCD1CD352 /* DeviceFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFlowUITests.swift; sourceTree = "<group>"; };
 		E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONHighlight.swift; sourceTree = "<group>"; };
 		F560E4E13826CA8847B3214B /* Adb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Adb.swift; sourceTree = "<group>"; };
 		F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -58,8 +71,17 @@
 			isa = PBXGroup;
 			children = (
 				390044B9BA6ADBC6F6A5D81C /* Hopi.app */,
+				470E35B345DC9B31881AE8B4 /* HopiUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		6940045D3055FDEF813ABE09 /* HopiUITests */ = {
+			isa = PBXGroup;
+			children = (
+				9BD873EC72880A6CCD1CD352 /* DeviceFlowUITests.swift */,
+			);
+			path = HopiUITests;
 			sourceTree = "<group>";
 		};
 		6A48C82B50F22FF1D88DD4AA /* Model */ = {
@@ -83,6 +105,7 @@
 			isa = PBXGroup;
 			children = (
 				FAECCC39012FE875D47AF8A4 /* Hopi */,
+				6940045D3055FDEF813ABE09 /* HopiUITests */,
 				6228EC6874372EA7A5C63D19 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,12 +113,12 @@
 		E3B100D21E4CB4AEF66955BC /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				64EA829056E0156C5AA14267 /* AppPicker.swift */,
 				F6E4DC6ACF9F7D9D687DC363 /* ContentView.swift */,
 				F91FD826ED1FEAE3ECA43186 /* DetailView.swift */,
 				363F34563771B290756DFE95 /* Format.swift */,
 				E7BDC850361471D5D4C08D7D /* JSONHighlight.swift */,
 				3602C289C75D5372822A0541 /* RequestList.swift */,
-				10FF24ECE33B40F1F0D2C4D7 /* Sidebar.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -116,6 +139,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		194D98E713DB16ECE1C953A4 /* HopiUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3C06AB1D643A063A53F18CBA /* Build configuration list for PBXNativeTarget "HopiUITests" */;
+			buildPhases = (
+				962B32DF12BC98A9C556FB33 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				56FE70E9B668383899851C71 /* PBXTargetDependency */,
+			);
+			name = HopiUITests;
+			packageProductDependencies = (
+			);
+			productName = HopiUITests;
+			productReference = 470E35B345DC9B31881AE8B4 /* HopiUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		6B6C0D244B1F387557DC08E3 /* Hopi */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4FCF2E82CE0818DF99DF5047 /* Build configuration list for PBXNativeTarget "Hopi" */;
@@ -143,6 +184,11 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					194D98E713DB16ECE1C953A4 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+						TestTargetID = 6B6C0D244B1F387557DC08E3;
+					};
 					6B6C0D244B1F387557DC08E3 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Manual;
@@ -164,6 +210,7 @@
 			projectRoot = "";
 			targets = (
 				6B6C0D244B1F387557DC08E3 /* Hopi */,
+				194D98E713DB16ECE1C953A4 /* HopiUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -180,11 +227,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		962B32DF12BC98A9C556FB33 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F3547F2A2289F341630E6FB /* DeviceFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F580B29CC25D89FD87BF58BE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				DCE65A9B74847AB7A6AC77A7 /* Adb.swift in Sources */,
+				733ABC2A90D520791460A941 /* AppPicker.swift in Sources */,
 				6CEF28EBE9CF38A46BE01BF6 /* ContentView.swift in Sources */,
 				B67332D4DDF32C9CF0574EBE /* DetailView.swift in Sources */,
 				73AA0970226BAE1E392FFA21 /* Discovery.swift in Sources */,
@@ -194,7 +250,6 @@
 				7B66FB7BBF547306094DC8E7 /* LineConnection.swift in Sources */,
 				8EAF9812DCD4FDB129EC91BD /* RequestList.swift in Sources */,
 				D0EFC6D76DB40D04A5190F5A /* Session.swift in Sources */,
-				86B59D43BFBDE3C3792D7BDD /* Sidebar.swift in Sources */,
 				C6494C1856A30511CC2AF72E /* Viewer.swift in Sources */,
 				15B34F1F9EFA1D2831B45720 /* Wire.swift in Sources */,
 			);
@@ -202,7 +257,51 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		56FE70E9B668383899851C71 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6B6C0D244B1F387557DC08E3 /* Hopi */;
+			targetProxy = B309452F6A8D2176A4D77E6C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		0EC52197678C7D432EF064B2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.mac.uitests;
+				SDKROOT = macosx;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				TEST_TARGET_NAME = Hopi;
+			};
+			name = Release;
+		};
+		2A119FDAD1645FB0AB7FEACE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.koga.hopi.mac.uitests;
+				SDKROOT = macosx;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				TEST_TARGET_NAME = Hopi;
+			};
+			name = Debug;
+		};
 		5585A871B53457E36F4346FE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -390,6 +489,15 @@
 			buildConfigurations = (
 				EDC8E94C9E7D8AEC3D85ACA5 /* Debug */,
 				5ED62B2A6682ECBA0EE089FD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3C06AB1D643A063A53F18CBA /* Build configuration list for PBXNativeTarget "HopiUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2A119FDAD1645FB0AB7FEACE /* Debug */,
+				0EC52197678C7D432EF064B2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

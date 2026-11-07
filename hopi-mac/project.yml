@@ -36,3 +36,24 @@ targets:
         ENABLE_APP_SANDBOX: NO
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_USER_SCRIPT_SANDBOXING: YES
+  HopiUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: HopiUITests
+    dependencies:
+      - target: Hopi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.koga.hopi.mac.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Hopi
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+schemes:
+  Hopi:
+    build:
+      targets:
+        Hopi: all
+    test:
+      targets:
+        - HopiUITests
