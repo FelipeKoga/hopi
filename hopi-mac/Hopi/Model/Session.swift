@@ -16,7 +16,7 @@ final class Session {
     let target: Target
     private(set) var status: Status = .connecting
     private(set) var hello: Hello?
-    /// Newest first.
+    /// Oldest first, as the app sends them: the backlog and live events append.
     private(set) var transactions: [Summary] = []
 
     @ObservationIgnored private var index: [Int64: Int] = [:]
@@ -83,13 +83,13 @@ final class Session {
     private func upsert(_ summary: Summary) {
         if let position = index[summary.id] {
             transactions[position] = summary
-        } else if let first = transactions.first, summary.id < first.id {
+        } else if let last = transactions.last, summary.id < last.id {
             transactions.append(summary)
-            transactions.sort { $0.id > $1.id }
+            transactions.sort { $0.id < $1.id }
             reindex()
         } else {
-            transactions.insert(summary, at: 0)
-            reindex()
+            index[summary.id] = transactions.count
+            transactions.append(summary)
         }
     }
 

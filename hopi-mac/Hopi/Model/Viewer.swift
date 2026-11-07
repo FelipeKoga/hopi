@@ -33,7 +33,8 @@ final class Viewer {
     var visibleTransactions: [Summary] {
         guard let session else { return [] }
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return session.transactions.filter { summary in
+        // Newest first.
+        return session.transactions.reversed().filter { summary in
             statusFilter.matches(summary) && (query.isEmpty
                 || summary.url.lowercased().contains(query)
                 || summary.method.lowercased() == query
