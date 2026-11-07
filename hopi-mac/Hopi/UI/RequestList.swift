@@ -149,7 +149,7 @@ struct RequestList: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 52, ideal: 60, max: 90)
+            .width(min: 64, ideal: 76, max: 96)
         }
         .contextMenu(forSelectionType: Summary.ID.self) { ids in
             if let id = ids.first, let summary = session.transactions.last(where: { $0.id == id }) {

@@ -1,7 +1,7 @@
 # Hopi
 
 Hopi is a debug-only devtool for Android, iOS (Kotlin Multiplatform) and JVM apps: network
-capture with mock, fail, delay and edit rules, plus performance monitors, viewed in a desktop
+capture with mock, fail, delay and edit rules, plus performance monitors, viewed in a native macOS
 viewer and a CLI.
 
 [![CI](https://github.com/FelipeKoga/hopi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/FelipeKoga/hopi/actions/workflows/ci.yml?query=branch%3Amain)
@@ -12,11 +12,11 @@ viewer and a CLI.
 > Hopi is experimental, and it is developed entirely with AI (Claude Code). Its APIs can change
 > between versions, and it is for debug builds only.
 
-![The desktop viewer: the request list, and the selected GET's response with its headers (Set-Cookie redacted) and its JSON body in colors](docs/images/viewer.png)
+![The macOS viewer attached to the sample on a Xiaomi phone: the request list with statuses, a request a mock rule answered marked "mock", and the selected GET /items in the inspector with its headers and its JSON body in colors](docs/images/viewer.png)
 
-| Full-size body and search | Rules | Performance |
-| --- | --- | --- |
-| ![A JSON body opened over the whole window, with a search marking its first of two matches](docs/images/body-search.png) | ![The Rules panel: two rules with their switches, Update and Remove](docs/images/rules.png) | ![The Perf panel: the monitors' switches and the frames, CPU and memory charts](docs/images/perf.png) |
+| Rules | Performance |
+| --- | --- |
+| ![The Rules view: a mock, a delay and a fail rule with their switches, hits and priority](docs/images/rules.png) | ![The Performance view: frames, hangs, CPU and memory running, live CPU, memory, frames per second and janky frame charts, and the hangs and janky frames the sample's perf lab caused](docs/images/perf.png) |
 
 ## Features
 
@@ -27,12 +27,13 @@ viewer and a CLI.
   or the response, in the app's memory for the session only and never weakening its TLS or pinning.
 - **Performance monitors**: frames, hangs with the main thread's stack, CPU and memory, each off
   until started.
-- **Desktop viewer** (Compose Desktop, macOS first): requests and their detail side by side, JSON
-  bodies in colors, any body opened full size with a search, a Rules panel, a Performance screen, cURL, HAR and
-  NDJSON export, and a choice of accent color and light or dark.
-- **Whole bodies, as a proxy shows them**: while the viewer is attached the app keeps bodies whole
-  (up to an eighth of its heap) and the viewer fetches each one as its request ends; the app then
-  cuts its own copy back to its cap (256 KB), so its memory stays where it was.
+- **macOS viewer** (SwiftUI, macOS 26): finds the debug apps on Android phones and emulators (USB
+  or Wi-Fi), iPhones on USB, iOS simulators and JVM processes; requests and their detail side by
+  side, JSON bodies in colors, a Rules view (mock, fail, delay, edit, and "Mock This Response" from
+  any request), a Performance view with live charts and events, cURL, and HAR or NDJSON export.
+- **Whole bodies, as a proxy shows them**: while the viewer is attached the app keeps bodies whole,
+  up to an eighth of its heap instead of its usual cap (256 KB), and goes back to that cap when the
+  viewer leaves.
 - **CLI**, `hopi`: list, tail, get, cURL, rules and monitors from a terminal; its `--json` output is
   a stable contract for AI coding agents, which treat captured content as data, and a rule that
   sends requests to another host needs `--allow-other-origin`, which an agent adds only once its
@@ -98,7 +99,7 @@ dependencies {
 ```
 
 That is the whole setup. Debug builds record every OkHttp and `HttpURLConnection` request, the
-libraries' included, with no code to call, and the CLI and the desktop viewer can connect; release
+libraries' included, with no code to call, and the CLI and the macOS viewer can connect; release
 builds get no runtime. Add `implementation("io.github.felipekoga.hopi:hopi-api:0.1.0")` only if
 your code calls `HopiRules` or `HopiPerf`.
 More: [Android](docs/GUIDE.md#android-every-okhttp-and-httpurlconnection-request-automatically).
@@ -159,19 +160,31 @@ property: [JVM](docs/GUIDE.md#jvm-compose-desktop-the-ktor-plugins-requests).
 
 ## See it
 
-The desktop viewer and the CLI run on your Mac; they are not dependencies of the app. Both reach a
+The macOS viewer and the CLI run on your Mac; they are not dependencies of the app. Both reach a
 debug build over its device-local bridge, which is on by default and authenticates every
 connection. Today they run from a clone of this repository; a packaged distribution is planned.
 
-The desktop viewer: run it, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime).
-Pick a device, enter the app's id (on Android the apps with a bridge are offered), and connect.
-Select a request with ↓ / ↑; the ⤢ button by a body opens it full size, where Enter steps through
-the search's matches. ⌘L opens the Rules panel, ⌘P the Performance screen, ⌘E exports HAR.
+The macOS viewer needs macOS 26 and Xcode 26, plus [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+(`brew install xcodegen`):
 
 ```bash
-./gradlew :hopi-desktop:run
-./gradlew :hopi-desktop:packageDmg   # hopi-desktop/build/compose/binaries/main/dmg/Hopi-1.0.0.dmg
+cd hopi-mac
+xcodegen generate
+xcodebuild -project Hopi.xcodeproj -scheme Hopi -configuration Release -derivedDataPath build build
+open build/Build/Products/Release/Hopi.app
 ```
+
+It looks for apps when it opens (⇧⌘R looks again) and lists them in the toolbar's picker:
+
+- **Android**: a phone on USB, or on Wi-Fi after `adb pair <ip>:<port> <code>` (Developer options,
+  Wireless debugging), and emulators. It needs `adb` (`ANDROID_HOME` or the default SDK path).
+- **iPhone on USB**: paired with the Mac (trust it once) and the app built and installed by you.
+- **iOS simulators**: any booted one.
+- **JVM**: processes running `hopi-start`.
+
+⌘1, ⌘2 and ⌘3 switch between Requests, Rules and Performance; ⌘F filters the requests, ⌘K clears
+them, and a right-click on a request mocks its response. The previous Compose viewer
+(`hopi-desktop`) stays in the repository until the macOS viewer replaces it everywhere.
 
 The CLI: build it with `./gradlew :hopi-cli:installDist`; the binary is
 `hopi-cli/build/install/hopi-cli/bin/hopi`.
@@ -214,7 +227,7 @@ Versions between the two columns are not tested. Every caveat (`.set()` before G
   read per request while no rule exists; a performance monitor that is off has no thread, listener
   or timer.
 - **Nothing inside the app.** Hopi shows what it sees in the device log and, over a device-local
-  bridge, in the CLI and the desktop viewer. Rules live in the app's memory, and a restart clears
+  bridge, in the CLI and the macOS viewer. Rules live in the app's memory, and a restart clears
   them.
 
 The design contract: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
