@@ -1,6 +1,8 @@
 package dev.koga.hopi.desktop
 
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
@@ -22,10 +24,10 @@ import java.nio.file.Paths
  * The desktop viewer. One window views one app; the menu repeats the window's shortcuts without
  * binding them a second time (the window content handles every key, see [Shortcut]).
  */
-public fun main() {
+public fun main(args: Array<String>) {
     // The native menu bar on macOS, with the app's name.
     System.setProperty("apple.awt.application.name", "Hopi")
-    val viewer = Viewer(Targets(HostEnvironment()))
+    val viewer = Viewer(Targets(HostEnvironment()), launch = ViewerLaunch.parse(args.asList()))
     // SIGTERM and SIGINT too: the adb tracking subprocesses would otherwise outlive the viewer.
     Runtime.getRuntime().addShutdownHook(Thread(viewer::close, "hopi-desktop-shutdown"))
     viewer.start()
@@ -47,6 +49,12 @@ public fun main() {
             val export = { format: ExportFormat ->
                 chooseFile(format, exportFileName(viewer.status.value, format))?.let { viewer.export(format, it) }
             }
+            // The title bar takes the theme's background, whatever the system's appearance.
+            remember(this.window) {
+                this.window.rootPane.putClientProperty("apple.awt.transparentTitleBar", true)
+                this.window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
+            }
+            val titleBar = remember(this.window) { { color: Color -> this.window.background = java.awt.Color(color.toArgb()) } }
             MenuBar {
                 Menu("File") {
                     Item("Export HAR…   ${Shortcut.ExportHar.keys}", onClick = { export(ExportFormat.Har) })
@@ -64,7 +72,7 @@ public fun main() {
                     Item("New edit…", onClick = { rules.edit(RuleForm(FormKind.Edit)) })
                 }
                 Menu("Perf") {
-                    Item("Perf panel   ${Shortcut.Perf.keys}", onClick = perf::toggle)
+                    Item("Performance screen   ${Shortcut.Perf.keys}", onClick = perf::toggle)
                 }
                 Menu("Connection") {
                     Item("Reconnect   ${Shortcut.Reconnect.keys}", onClick = viewer::reconnect)
@@ -73,7 +81,7 @@ public fun main() {
                 }
             }
             val theme = remember { ThemeSettings.stored() }
-            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody, perf = perf, theme = theme)
+            ViewerContent(viewer, chooseExportFile = chooseFile, panes = panes, rules = rules, chooseBodyFile = chooseBody, perf = perf, theme = theme, onBackground = titleBar)
         }
     }
 }

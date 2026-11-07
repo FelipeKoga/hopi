@@ -93,6 +93,7 @@ class IosSamplingTest {
         assertTrue((memory.residentBytes ?: 0) > 1024 * 1024, "footprint ${memory.residentBytes}")
         val threads = assertNotNull(PerfHook.controller).threads(50).orEmpty()
         assertTrue(threads.any { it.name == "hopi-perf-samp" && it.hopi }, "the sampler is listed as Hopi's: ${threads.map { it.name }}")
+        assertTrue(threads.any { it.name == "main" && !it.hopi }, "the main thread is named, though it has no pthread name: ${threads.map { it.name }}")
         HopiPerf.stop(HopiMonitor.Cpu)
         assertEquals(listOf("hopi-perf-samp"), perfThreads(), "memory still samples")
         HopiPerf.stop(HopiMonitor.Memory)

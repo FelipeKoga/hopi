@@ -86,7 +86,8 @@ internal object TopBarTags {
     const val DISCONNECT = "Disconnect"
     const val REFRESH = "Refresh devices"
     const val RULES = "Rules (⌘L)"
-    const val PERF = "Perf (⌘P)"
+    const val NETWORK = "Network"
+    const val PERF = "Performance (⌘P)"
 }
 
 /**
@@ -108,8 +109,8 @@ internal fun TopBar(
 ) {
     val colors = hopiDesktopColors
     val discovery by viewer.discovery.collectAsState()
-    var selectedId by remember { mutableStateOf<String?>(null) }
-    val app = rememberTextFieldState()
+    var selectedId by remember { mutableStateOf(viewer.launch?.device) }
+    val app = rememberTextFieldState(viewer.launch?.app.orEmpty())
     val devices = discovery.devices
     val selected = devices.firstOrNull { it.id == selectedId } ?: devices.firstOrNull { it.ready }
     // A device's only bridge is the obvious app; a typed id is never overwritten.
@@ -123,6 +124,8 @@ internal fun TopBar(
         is ViewerStatus.Connected -> status.target
         is ViewerStatus.Waiting -> status.target
     }
+    // A connection the launch made shows in the picker too.
+    LaunchedEffect(viewing?.device?.id) { viewing?.let { selectedId = it.device.id } }
     val appId = app.text.toString().trim().ifEmpty { null }
     val problem = when {
         selected == null -> "no device or bridge found: start an emulator, a simulator or a JVM app"
@@ -158,8 +161,10 @@ internal fun TopBar(
             }
             Spacer(Modifier.width(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ToolbarIconButton(TopBarIcons.Rules, TopBarTags.RULES, onClick = rules::toggle, selected = rules.open)
-                ToolbarIconButton(TopBarIcons.Perf, TopBarTags.PERF, onClick = perf::toggle, selected = perf.open)
+                ScreenButton("Network", TopBarTags.NETWORK, selected = !perf.open) { perf.open = false }
+                ScreenButton("Performance", TopBarTags.PERF, selected = perf.open) { perf.open = true }
+                Spacer(Modifier.width(8.dp))
+                if (!perf.open) ToolbarIconButton(TopBarIcons.Rules, TopBarTags.RULES, onClick = rules::toggle, selected = rules.open)
                 ThemeButton(theme)
             }
         }
@@ -174,6 +179,17 @@ internal fun TopBar(
             )
         }
     }
+}
+
+/** One of the two screens: tonal while shown. */
+@Composable
+private fun ScreenButton(text: String, tag: String, selected: Boolean, onClick: () -> Unit) {
+    ChromeButton(
+        text,
+        onClick = onClick,
+        modifier = Modifier.semantics { contentDescription = tag },
+        variant = if (selected) ButtonVariant.Secondary else ButtonVariant.Ghost,
+    )
 }
 
 @Composable
@@ -461,7 +477,6 @@ internal object TopBarIcons {
     val Rules by lazy { icon("Rules", "M3 17l2 2 4-4", "M3 7l2 2 4-4", "M13 6h8", "M13 12h8", "M13 18h8") }
 
     /** activity. */
-    val Perf by lazy { icon("Perf", "M22 12h-4l-3 9L9 3l-3 9H2") }
 
     /** pencil. */
     val Edit by lazy { icon("Edit", "M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z", "M15 5l4 4") }

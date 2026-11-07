@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +38,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import dev.koga.hopi.ui.platform.PaneScrollbar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -136,6 +138,7 @@ internal fun TransactionListPane(
             }
             else -> {
                 StayOnNewest(listState, newest = model.rows[0].id)
+                Box(Modifier.fillMaxSize()) {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(model.rows, key = { it.id }, contentType = { "row" }) { row ->
                         // New requests fade and slide in, and the list makes room on a spring.
@@ -151,6 +154,8 @@ internal fun TransactionListPane(
                             ),
                         )
                     }
+                }
+                PaneScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
                 }
             }
         }

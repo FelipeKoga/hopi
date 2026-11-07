@@ -28,7 +28,7 @@ viewer and a CLI.
 - **Performance monitors**: frames, hangs with the main thread's stack, CPU and memory, each off
   until started.
 - **Desktop viewer** (Compose Desktop, macOS first): requests and their detail side by side, JSON
-  bodies in colors, any body opened full size with a search, Rules and Perf panels, cURL, HAR and
+  bodies in colors, any body opened full size with a search, a Rules panel, a Performance screen, cURL, HAR and
   NDJSON export, and a choice of accent color and light or dark.
 - **Whole bodies, as a proxy shows them**: while the viewer is attached the app keeps bodies whole
   (up to an eighth of its heap) and the viewer fetches each one as its request ends; the app then
@@ -166,7 +166,7 @@ connection. Today they run from a clone of this repository; a packaged distribut
 The desktop viewer: run it, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime).
 Pick a device, enter the app's id (on Android the apps with a bridge are offered), and connect.
 Select a request with ↓ / ↑; the ⤢ button by a body opens it full size, where Enter steps through
-the search's matches. ⌘L opens the Rules panel, ⌘P the Perf panel, ⌘E exports HAR.
+the search's matches. ⌘L opens the Rules panel, ⌘P the Performance screen, ⌘E exports HAR.
 
 ```bash
 ./gradlew :hopi-desktop:run

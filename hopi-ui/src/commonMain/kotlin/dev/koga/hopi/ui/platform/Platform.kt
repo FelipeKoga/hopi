@@ -1,6 +1,8 @@
 package dev.koga.hopi.ui.platform
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 
 /** Local wall-clock time of [epochMs]: `14:03:22`, or `14:03:22.481` [withMillis]. */
@@ -8,6 +10,10 @@ internal expect fun formatTimeOfDay(epochMs: Long, withMillis: Boolean): String
 
 /** The sans of every HopiType style but the monospace ones: Open Runde (OFL 1.1), bundled on the JVM. */
 internal expect fun hopiSans(): FontFamily
+
+/** The scrollbar of a lazy list, laid over its end edge. */
+@Composable
+internal expect fun PaneScrollbar(state: LazyListState, modifier: Modifier)
 
 /** Hands text to the platform share sheet. */
 internal fun interface ShareSheet {

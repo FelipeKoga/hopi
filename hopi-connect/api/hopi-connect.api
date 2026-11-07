@@ -52,6 +52,13 @@ public final class dev/koga/hopi/connect/BridgeEndpoint : java/lang/AutoCloseabl
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class dev/koga/hopi/connect/BridgeSecrets {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getKey ()Ljava/lang/String;
+	public final fun getProof ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
 public class dev/koga/hopi/connect/CliException : java/lang/Exception {
 	public fun <init> (ILjava/lang/String;)V
 	public final fun getExitCode ()I
@@ -169,16 +176,19 @@ public final class dev/koga/hopi/connect/RemotePerf {
 	public static final field MAX_HANGS I
 	public static final field MAX_MEMORY_EVENTS I
 	public static final field MAX_POINTS I
+	public static final field MAX_STALLS I
 	public final fun getView ()Lkotlinx/coroutines/flow/StateFlow;
 	public final fun setMonitor (Ljava/lang/String;Z)Ljava/util/concurrent/CompletableFuture;
 	public final fun stopAll ()Ljava/util/concurrent/CompletableFuture;
-	public final fun watch ()Ljava/lang/AutoCloseable;
+	public final fun watch (Z)Ljava/lang/AutoCloseable;
+	public static synthetic fun watch$default (Ldev/koga/hopi/connect/RemotePerf;ZILjava/lang/Object;)Ljava/lang/AutoCloseable;
 	public final fun watchThreads (Z)Ljava/util/concurrent/CompletableFuture;
 }
 
 public final class dev/koga/hopi/connect/RemotePerf$Companion {
 	public final fun framesOf (Ldev/koga/hopi/connect/RemotePerfSeries;)Ljava/util/List;
 	public final fun samplesOf (Ldev/koga/hopi/connect/RemotePerfSeries;Ldev/koga/hopi/connect/RemotePerfSeries;)Ljava/util/List;
+	public final fun threadsBetween (Ljava/util/List;JJ)Ljava/util/List;
 }
 
 public final class dev/koga/hopi/connect/RemotePerfEvent {
@@ -306,7 +316,7 @@ public final class dev/koga/hopi/connect/RemotePerfThread$Companion {
 
 public final class dev/koga/hopi/connect/RemotePerfView {
 	public static final field Companion Ldev/koga/hopi/connect/RemotePerfView$Companion;
-	public fun <init> (ZZLdev/koga/hopi/connect/RemotePerfStatus;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;JJLjava/util/List;ZLjava/lang/String;)V
+	public fun <init> (ZZLdev/koga/hopi/connect/RemotePerfStatus;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;JJLjava/util/List;Ljava/util/List;ZLjava/lang/String;)V
 	public final fun getControl ()Z
 	public final fun getFrames ()Ljava/util/List;
 	public final fun getHangs ()Ljava/util/List;
@@ -314,10 +324,12 @@ public final class dev/koga/hopi/connect/RemotePerfView {
 	public final fun getMemoryEvents ()Ljava/util/List;
 	public final fun getMessage ()Ljava/lang/String;
 	public final fun getSamples ()Ljava/util/List;
+	public final fun getStallEvents ()Ljava/util/List;
 	public final fun getStalls ()J
 	public final fun getStatus ()Ldev/koga/hopi/connect/RemotePerfStatus;
 	public final fun getStreaming ()Z
 	public final fun getSupported ()Z
+	public final fun getThreadTicks ()Ljava/util/List;
 	public final fun getThreads ()Ljava/util/List;
 }
 
@@ -362,8 +374,8 @@ public final class dev/koga/hopi/connect/RemoteSession : java/lang/AutoCloseable
 	public static final field DEFAULT_MAX_ENTRIES I
 	public static final field DEFAULT_MAX_TOTAL_BYTES J
 	public static final field DEFAULT_READ_TIMEOUT_MS I
-	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;)V
-	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)V
+	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun addRule (Lkotlin/jvm/functions/Function1;)Ljava/util/concurrent/CompletableFuture;
 	public final fun clear ()Ljava/util/concurrent/Future;
 	public final fun clearRules ()Ljava/util/concurrent/CompletableFuture;
@@ -423,6 +435,30 @@ public final class dev/koga/hopi/connect/RemoteState$Idle : dev/koga/hopi/connec
 	public fun equals (Ljava/lang/Object;)Z
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class dev/koga/hopi/connect/RemoteThreadLoad {
+	public fun <init> (JLjava/lang/String;ZJJ)V
+	public final fun getCpuMs ()J
+	public final fun getHopi ()Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getSinceMs ()J
+	public final fun getTid ()J
+}
+
+public final class dev/koga/hopi/connect/RemoteThreadTick {
+	public fun <init> (JLjava/util/List;)V
+	public final fun getAtMs ()J
+	public final fun getLoads ()Ljava/util/List;
+}
+
+public final class dev/koga/hopi/connect/RemoteThreadUse {
+	public fun <init> (JLjava/lang/String;ZDD)V
+	public final fun getCpuMs ()D
+	public final fun getHopi ()Z
+	public final fun getName ()Ljava/lang/String;
+	public final fun getPercent ()D
+	public final fun getTid ()J
 }
 
 public final class dev/koga/hopi/connect/RemoteUnsupported {

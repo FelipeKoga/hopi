@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import dev.koga.hopi.ui.platform.PaneScrollbar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -168,6 +170,7 @@ internal fun BodyViewer(title: String, body: BodyView.Text, onClose: () -> Unit)
                 )
             }
             val currentMatch = matches.getOrNull(current)
+            Box(Modifier.fillMaxSize()) {
             SelectionContainer(Modifier.fillMaxSize()) {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(bottom = 16.dp)) {
                     itemsIndexed(body.chunks, key = { index, _ -> index }, contentType = { _, _ -> "chunk" }) { index, chunk ->
@@ -181,6 +184,8 @@ internal fun BodyViewer(title: String, body: BodyView.Text, onClose: () -> Unit)
                         )
                     }
                 }
+            }
+            PaneScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
         }
     }

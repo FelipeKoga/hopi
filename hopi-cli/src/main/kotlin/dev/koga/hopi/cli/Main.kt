@@ -84,6 +84,7 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             Command.Get -> get()
             Command.Curl -> curl()
             Command.Clear -> clear()
+            Command.Viewer -> viewer()
             Command.MockAdd, Command.FailAdd, Command.DelayAdd, Command.EditAdd -> addRule()
             Command.RulesLs -> listRules()
             Command.RulesRm -> removeRules()
@@ -97,6 +98,28 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             Command.PerfSnapshot -> perfSnapshot()
             Command.PerfTail -> perfTail()
             Command.Hangs -> hangs()
+        }
+    }
+
+    /**
+     * Opens Hopi.app. `open` hands arguments only to a process it starts, so a named target gets its
+     * own window (`-n`), and with none it brings up the viewer already running.
+     */
+    private fun viewer() {
+        if (!environment.host.isMac) throw usageError("viewer is macOS only: run ./gradlew :hopi-desktop:run in Hopi's repository")
+        val target = listOfNotNull(
+            args.app?.let { listOf("--app", it) },
+            args.platform?.let { listOf("--platform", it.id) },
+            args.device?.let { listOf("--device", it) },
+        ).flatten()
+        val open = if (target.isEmpty()) listOf("/usr/bin/open", "-a", "Hopi") else listOf("/usr/bin/open", "-n", "-a", "Hopi", "--args") + target
+        val opened = try {
+            environment.host.processes.run(open).exitCode == 0
+        } catch (_: IOException) {
+            false
+        }
+        if (!opened) {
+            throw notReachable("Hopi.app is not installed: run ./gradlew :hopi-desktop:packageDmg in Hopi's repository and drag the app to Applications")
         }
     }
 

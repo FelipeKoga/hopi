@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,9 +93,11 @@ internal fun ViewerContent(
     chooseBodyFile: () -> BodyFile? = { null },
     perf: PerfPanelState = remember { PerfPanelState() },
     theme: ThemeSettings = remember { ThemeSettings() },
+    onBackground: (Color) -> Unit = {},
 ) {
     HopiDesktopTheme(theme.choice) {
         val colors = hopiDesktopColors
+        SideEffect { onBackground(colors.background) }
         val status by viewer.status.collectAsState()
         val session by viewer.session.collectAsState()
         val rootFocus = remember { FocusRequester() }
@@ -129,7 +132,10 @@ internal fun ViewerContent(
                         Shortcut.ExportHar -> export(ExportFormat.Har)
                         Shortcut.ExportNdjson -> export(ExportFormat.Ndjson)
                         Shortcut.Reconnect -> viewer.reconnect()
-                        Shortcut.Rules -> rules.toggle()
+                        Shortcut.Rules -> {
+                            perf.open = false
+                            rules.toggle()
+                        }
                         Shortcut.Perf -> perf.toggle()
                         null -> return@onPreviewKeyEvent false
                     }
@@ -140,6 +146,10 @@ internal fun ViewerContent(
             // The panes float on the background, 8 dp apart and from the window's edges.
             Row(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val current = session
+                // One screen at a time: Network (with its Rules panel) or Performance.
+                if (perf.open) {
+                    PerfPanel(current, perf, modifier = Modifier.fillMaxSize().clip(PaneShape).background(colors.pane))
+                } else {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     if (current == null) {
                         Placeholder()
@@ -170,12 +180,6 @@ internal fun ViewerContent(
                         modifier = Modifier.width(RULES_PANEL_WIDTH).fillMaxHeight().clip(PaneShape).background(colors.pane).onFocusChanged { rulesFocused = it.hasFocus },
                     )
                 }
-                AnimatedVisibility(
-                    visible = perf.open,
-                    enter = expandHorizontally(HopiDesktopMotion.defaultSpatial(), expandFrom = Alignment.Start) + fadeIn(HopiDesktopMotion.defaultEffects()),
-                    exit = shrinkHorizontally(HopiDesktopMotion.defaultSpatial(), shrinkTowards = Alignment.Start) + fadeOut(HopiDesktopMotion.fastEffects()),
-                ) {
-                    PerfPanel(current, perf, modifier = Modifier.width(PERF_PANEL_WIDTH).fillMaxHeight().clip(PaneShape).background(colors.pane))
                 }
             }
             StatusBar(viewer, status)
@@ -315,4 +319,3 @@ private val LIST_KEYS = setOf(Shortcut.Next, Shortcut.Previous, Shortcut.Open, S
 
 private val RULES_PANEL_WIDTH = 420.dp
 
-private val PERF_PANEL_WIDTH = 440.dp

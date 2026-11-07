@@ -48,7 +48,9 @@ internal class FakePerfController(override val remoteControl: Boolean = true) : 
         )
     }
 
-    override fun threads(limit: Int): List<PerfThread> = listOf(PerfThread(7, "main", 120, 42.5, false), PerfThread(9, "hopi-perf-samp", 3, 0.1, true))
+    @Volatile var threadList: List<PerfThread> = listOf(PerfThread(7, "main", 120, 42.5, false), PerfThread(9, "hopi-perf-samp", 3, 0.1, true))
+
+    override fun threads(limit: Int): List<PerfThread> = threadList
 
     override fun watchThreads(watching: Boolean) {
         watchingThreads = watching

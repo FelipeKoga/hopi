@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
+import dev.koga.hopi.ui.desktop.HopiScrollbar
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -165,7 +168,9 @@ internal fun RulesPanel(
                     if (rules.rules.isEmpty()) {
                         Note("No rules. Add one here, mock a response from a request's detail, or use the hopi CLI.")
                     } else {
-                        LazyColumn(Modifier.fillMaxSize()) {
+                        val listState = rememberLazyListState()
+                        Box(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
                             items(rules.rules, key = { it.id }) { rule ->
                                 RuleRow(
                                     rule,
@@ -175,6 +180,8 @@ internal fun RulesPanel(
                                     onRemove = { send({ session.removeRule(rule.id) }) { "Rule #${rule.id} removed" } },
                                 )
                             }
+                        }
+                        HopiScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
                         }
                     }
                 }
@@ -331,7 +338,9 @@ private fun FormView(form: RuleForm, state: RulesPanelState, chooseBodyFile: () 
             })
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val formScroll = rememberScrollState()
+    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().verticalScroll(formScroll).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when (form.kind) {
             FormKind.Update -> {
                 Field("Priority", form.priority, "0")
@@ -386,6 +395,8 @@ private fun FormView(form: RuleForm, state: RulesPanelState, chooseBodyFile: () 
                 }
             }
         }
+    }
+    HopiScrollbar(formScroll, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
     }
 }
 

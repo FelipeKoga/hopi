@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -27,6 +29,8 @@ import androidx.compose.ui.test.withKeyDown
 import dev.koga.hopi.core.perf.PerfHook
 import dev.koga.hopi.core.perf.PerfMonitor
 import dev.koga.hopi.core.perf.PerfOwner
+import dev.koga.hopi.core.perf.PerfThread
+import dev.koga.hopi.core.perf.StallEvent
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -119,15 +123,62 @@ class PerfPanelUiTest {
         waitForText("48.0% (Hopi 0.5%)")
         screenshot("viewer-perf.png")
 
-        onNodeWithContentDescription(PerfTags.THREADS).performScrollTo().performClick()
-        waitFor { controller.watchingThreads }
+        // The screen asks for the threads by itself; the list is what each used between two scans.
+        assertTrue(controller.watchingThreads)
+        controller.threadList = listOf(PerfThread(7, "main", 1_120, 42.5, false), PerfThread(9, "hopi-perf-samp", 3, 0.1, true))
         controller.sample(System.currentTimeMillis() + 1_000, cpu = 20.0, residentMb = 150)
-        waitForText("42.5%  main")
+        waitForText("  main")
 
         // Closing the panel closes its stream: the app drops what only the panel held.
         perf.open = false
         // The UI clock must run for the panel to leave the composition.
         waitUntil(timeoutMillis = 15_000) { !controller.held(PerfMonitor.HANGS) && !controller.watchingThreads }
+    }
+
+    /** The recorte: a drag over one chart selects a stretch of every series, a hang's Inspect jumps to its own. */
+    @Test
+    fun aDragSelectsAStretchAndTheSideSumsItUp() = runComposeUiTest {
+        val controller = FakePerfController().also { PerfHook.register(it) }
+        val app = FakeApp(root.resolve("3")).also { closeables += it }
+        connected(app)
+        openPanel()
+        waitFor { controller.watchingThreads }
+        val end = System.currentTimeMillis()
+        // Thirty seconds of quiet, one peak at the middle of the last minute, on the GC thread.
+        var gc = 0L
+        var main = 0L
+        for (second in 60 downTo 0) {
+            val peak = second in 28..32
+            gc += if (peak) 800 else 10
+            main += 50
+            controller.threadList = listOf(PerfThread(7, "main", main, 1.0, false), PerfThread(11, "Main GC thread", gc, 1.0, false))
+            controller.sample(end - second * 1000, cpu = if (peak) 85.0 else 6.0, residentMb = if (second > 30) 180 else 196)
+            Thread.sleep(5)
+        }
+        waitForText("6.0% (Hopi 0.5%)")
+        controller.data.recordStall(StallEvent(controller.data.nextSeq(), end - 30_000, 260, null))
+        waitFor { controller.data.nextSeq() > 0 }
+        onNodeWithText("1 min").performClick()
+        waitForIdle()
+        screenshot("viewer-perf-timeline.png")
+
+        onNodeWithTag(PerfTags.CPU_CHART).performMouseInput {
+            moveTo(Offset(width * 0.40f, height / 2f))
+            press()
+            moveTo(Offset(width * 0.60f, height / 2f))
+            release()
+        }
+        onNodeWithTag(PerfTags.SELECTION).assertExists()
+        waitForText("CPU peak 85.0%")
+        waitForText("Memory 180.0 MB to 196.0 MB")
+        waitForText("Main GC thread")
+        waitForText("Hangs 0, stalls 1")
+        screenshot("viewer-perf-selection.png")
+
+        onNodeWithText("Zoom").performClick()
+        waitForText("Zoom out")
+        onNodeWithText("Live").performClick()
+        waitUntil(timeoutMillis = 15_000) { onAllNodes(hasTestTag(PerfTags.SELECTION)).fetchSemanticsNodes().isEmpty() }
     }
 
     @Test

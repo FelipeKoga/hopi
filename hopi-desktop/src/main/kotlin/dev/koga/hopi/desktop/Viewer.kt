@@ -82,6 +82,8 @@ internal class Viewer(
      */
     private val newSession: (open: () -> BridgeEndpoint) -> RemoteSession = { open -> RemoteSession(open, fullBodies = { true }) },
     private val settleDelaysMs: List<Long> = ANDROID_SETTLE_DELAYS_MS,
+    /** `hopi viewer`'s target: connected to once discovery shows the one device it means. */
+    val launch: ViewerLaunch? = null,
 ) : AutoCloseable {
     private val worker = ScheduledThreadPoolExecutor(1) { Thread(it, "hopi-desktop-connect").apply { isDaemon = true } }.apply {
         removeOnCancelPolicy = true
@@ -105,6 +107,7 @@ internal class Viewer(
 
     // Written on the worker thread only. The closeables are also read by [close], from any thread.
     private var target: Target? = null
+    private var pendingLaunch: ViewerLaunch? = launch?.takeIf { it.app != null }
 
     @Volatile
     private var current: RemoteSession? = null
@@ -417,6 +420,19 @@ internal class Viewer(
 
     private fun discoverNow() {
         _discovery.value = discover(targets, jvmBridgeRoot, androids)
+        connectLaunch()
+    }
+
+    /** Worker: a target chosen by hand wins; otherwise this waits for the device to appear. */
+    private fun connectLaunch() {
+        val pending = pendingLaunch ?: return
+        if (target != null) {
+            pendingLaunch = null
+            return
+        }
+        val device = pending.pick(_discovery.value.devices) ?: return
+        pendingLaunch = null
+        connect(Target(device, pending.app))
     }
 
     private fun nonJvm(): List<Device> = _discovery.value.devices.filter { it !is JvmBridge }

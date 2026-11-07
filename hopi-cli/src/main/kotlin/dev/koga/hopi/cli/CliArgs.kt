@@ -19,6 +19,7 @@ internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<S
     Get("get", Ids.ONE, TARGET_FLAGS + "--json"),
     Curl("curl", Ids.ONE, TARGET_FLAGS),
     Clear("clear", Ids.NONE, TARGET_FLAGS + "--json"),
+    Viewer("viewer", Ids.NONE, setOf("--app", "--platform", "--device")),
     MockAdd("mock add", Ids.NONE, RULE_FLAGS + setOf("--status", "--header", "--body", "--from", "--delay")),
     FailAdd("fail add", Ids.NONE, RULE_FLAGS + setOf("--with", "--after")),
     DelayAdd("delay add", Ids.NONE, RULE_FLAGS + setOf("--before-request", "--before-response")),
@@ -174,7 +175,7 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
     val app = values["--app"]?.also {
         if (!APP_ID.matches(it)) throw usageError("--app '$it' is not an application id, bundle id or process name")
     }
-    if (app == null && command != Command.Devices && platform != Platform.Jvm) {
+    if (app == null && command != Command.Devices && command != Command.Viewer && platform != Platform.Jvm) {
         throw usageError("${command.wireName} needs --app <applicationId or bundleId>")
     }
     val limit = values["--limit"]?.let {
@@ -208,6 +209,7 @@ internal val USAGE_TEXT: String = """
     |  get <id>                full detail of one transaction, bodies included
     |  curl <id>               the request as a cURL command
     |  clear                   drop every recorded transaction
+    |  viewer                  open the desktop viewer (macOS); with --app it connects to that app
     |
     |Rules (in the app's memory only; gone when it restarts):
     |  mock add  --match M --status N [--header 'K: V']... [--body B] [--from <id>] [--delay D]

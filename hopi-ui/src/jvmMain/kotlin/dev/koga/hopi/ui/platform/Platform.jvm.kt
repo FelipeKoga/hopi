@@ -1,9 +1,12 @@
 package dev.koga.hopi.ui.platform
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.platform.Font
+import dev.koga.hopi.ui.desktop.HopiScrollbar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -14,6 +17,9 @@ private val millis = ThreadLocal.withInitial { SimpleDateFormat("HH:mm:ss.SSS", 
 
 internal actual fun formatTimeOfDay(epochMs: Long, withMillis: Boolean): String =
     (if (withMillis) millis else seconds).get().format(Date(epochMs))
+
+@Composable
+internal actual fun PaneScrollbar(state: LazyListState, modifier: Modifier): Unit = HopiScrollbar(state, modifier)
 
 /** Desktop JVMs have no share sheet; copying covers the same need there. */
 @Composable

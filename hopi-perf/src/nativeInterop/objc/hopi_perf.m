@@ -404,6 +404,8 @@ int32_t hopi_perf_threads(hopi_perf_thread_info *out, int32_t max) {
     thread_act_array_t threads;
     mach_msg_type_number_t count = 0;
     if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) return -1;
+    // pthread_mach_thread_np adds no port reference; the main thread has no pthread name of its own.
+    thread_t main_thread = pthread_mach_thread_np(pthread_main_thread_np());
     int32_t written = 0;
     for (mach_msg_type_number_t i = 0; i < count; i++) {
         if (written < max) {
@@ -426,6 +428,7 @@ int32_t hopi_perf_threads(hopi_perf_thread_info *out, int32_t max) {
                 if (thread_info(threads[i], THREAD_EXTENDED_INFO, (thread_info_t)&extended, &extended_count) == KERN_SUCCESS) {
                     strlcpy(entry->name, extended.pth_name, sizeof(entry->name));
                 }
+                if (entry->name[0] == '\0' && threads[i] == main_thread) strlcpy(entry->name, "main", sizeof(entry->name));
             }
         }
         // Every port task_threads handed out, whether read or not: the classic leak.

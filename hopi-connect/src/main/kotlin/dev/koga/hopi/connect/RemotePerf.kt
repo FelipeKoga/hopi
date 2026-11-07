@@ -27,11 +27,15 @@ public class RemotePerfView(
     public val hangs: List<RemotePerfEvent>,
     /** Memory events (and the previous ANR), at most [RemotePerf.MAX_MEMORY_EVENTS]. */
     public val memoryEvents: List<RemotePerfEvent>,
+    /** iOS stalls by sequence number, at most [RemotePerf.MAX_STALLS], for the timeline. */
+    public val stallEvents: List<RemotePerfEvent>,
     /** Janky frames and iOS stalls seen since the stream opened. */
     public val janks: Long,
     public val stalls: Long,
     /** The per-thread list while [RemotePerf.watchThreads] asks for it; null otherwise or where the platform has none. */
     public val threads: List<RemotePerfThread>?,
+    /** What each thread used per scan, at most [RemotePerf.MAX_POINTS]; kept for the app process's life. */
+    public val threadTicks: List<RemoteThreadTick>,
     /** True while the perf stream is open. */
     public val streaming: Boolean,
     /** The last command's refusal or the stream's end, for the panel. */
@@ -45,15 +49,17 @@ public class RemotePerfView(
         samples: List<RemotePerfSample> = this.samples,
         hangs: List<RemotePerfEvent> = this.hangs,
         memoryEvents: List<RemotePerfEvent> = this.memoryEvents,
+        stallEvents: List<RemotePerfEvent> = this.stallEvents,
         janks: Long = this.janks,
         stalls: Long = this.stalls,
         threads: List<RemotePerfThread>? = this.threads,
+        threadTicks: List<RemoteThreadTick> = this.threadTicks,
         streaming: Boolean = this.streaming,
         message: String? = this.message,
-    ): RemotePerfView = RemotePerfView(supported, control, status, frames, samples, hangs, memoryEvents, janks, stalls, threads, streaming, message)
+    ): RemotePerfView = RemotePerfView(supported, control, status, frames, samples, hangs, memoryEvents, stallEvents, janks, stalls, threads, threadTicks, streaming, message)
 
     public companion object {
-        public val NONE: RemotePerfView = RemotePerfView(false, false, null, emptyList(), emptyList(), emptyList(), emptyList(), 0, 0, null, false, null)
+        public val NONE: RemotePerfView = RemotePerfView(false, false, null, emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), 0, 0, null, emptyList(), false, null)
     }
 }
 
@@ -91,14 +97,18 @@ public class RemotePerf internal constructor(
     private var highestSeq = 0L
     private var lastSecond = 0L
     private var lastSampleAt = 0L
+    private var lastThreadTickAt = 0L
+    private val threadCpu = HashMap<Long, ThreadCpu>()
     private var closed = false
 
     /**
      * A viewer shows the perf data: the stream runs while at least one holds it, across reconnects.
+     * [threads] asks for the per-thread list from the stream's first line (see [watchThreads]).
      * Closing the returned handle releases it (and, with the last, the monitors started here).
      */
-    public fun watch(): AutoCloseable {
+    public fun watch(threads: Boolean = false): AutoCloseable {
         val open = synchronized(lock) {
+            if (threads) wantThreads = true
             watchers++
             watchers == 1
         }
@@ -159,6 +169,8 @@ public class RemotePerf internal constructor(
                 highestSeq = 0
                 lastSecond = 0
                 lastSampleAt = 0
+                lastThreadTickAt = 0
+                threadCpu.clear()
                 _view.value = RemotePerfView.NONE
             }
             _view.value = _view.value.copy(supported = client != null, control = client?.control == true, message = null)
@@ -330,7 +342,7 @@ public class RemotePerf internal constructor(
                     "hang" -> shown.copy(hangs = upsert(shown.hangs, event, MAX_HANGS))
                     "memory", "anr" -> shown.copy(memoryEvents = upsert(shown.memoryEvents, event, MAX_MEMORY_EVENTS))
                     "jank" -> if (seen) shown else shown.copy(janks = shown.janks + 1)
-                    "stall" -> if (seen) shown else shown.copy(stalls = shown.stalls + 1)
+                    "stall" -> shown.copy(stallEvents = upsert(shown.stallEvents, event, MAX_STALLS), stalls = if (seen) shown.stalls else shown.stalls + 1)
                     else -> shown
                 }
             }
@@ -342,9 +354,37 @@ public class RemotePerf internal constructor(
                 lastSampleAt = it.atMs
                 _view.value = shown.copy(samples = (shown.samples + it).takeLast(MAX_POINTS))
             }
-            "perf.threads" -> if (wantThreads) _view.value = shown.copy(threads = RemotePerfThread.decodeAll(reply.json))
+            "perf.threads" -> {
+                val threads = RemotePerfThread.decodeAll(reply.json)
+                val tick = threads?.let(::threadTick)
+                _view.value = shown.copy(
+                    threads = if (wantThreads) threads else null,
+                    threadTicks = if (tick == null) shown.threadTicks else (shown.threadTicks + tick).takeLast(MAX_POINTS),
+                )
+            }
         }
     }
+
+    /**
+     * Under [lock]. The `perf.threads` line follows its sample on the stream, so that sample's time
+     * dates it; a second line for one sample (a dropped older sample) adds nothing. Each thread is
+     * measured from the cumulative CPU it reported last, never from the line's `percent`: iOS fills
+     * that with the kernel's decayed average, which flattens the peak this history is for. A thread
+     * seen for the first time, or whose tid came back with less CPU, is only a baseline.
+     */
+    private fun threadTick(threads: List<RemotePerfThread>): RemoteThreadTick? {
+        val atMs = lastSampleAt
+        if (atMs <= lastThreadTickAt) return null
+        lastThreadTickAt = atMs
+        val loads = threads.mapNotNull { thread ->
+            val before = threadCpu.put(thread.tid, ThreadCpu(thread.cpuMs, atMs))
+            if (before == null || thread.cpuMs <= before.cpuMs) return@mapNotNull null
+            RemoteThreadLoad(thread.tid, thread.name, thread.hopi, thread.cpuMs - before.cpuMs, before.atMs)
+        }
+        return RemoteThreadTick(atMs, loads)
+    }
+
+    private class ThreadCpu(val cpuMs: Long, val atMs: Long)
 
     /** A command on the request connection; its `perf.status` reply updates the view. */
     private fun command(block: (PerfClient) -> Reply): CompletableFuture<Unit> {
@@ -377,6 +417,31 @@ public class RemotePerf internal constructor(
         public const val MAX_POINTS: Int = 1_200
         public const val MAX_HANGS: Int = 100
         public const val MAX_MEMORY_EVENTS: Int = 200
+        public const val MAX_STALLS: Int = 1_000
+
+        /**
+         * Who used the CPU between [fromMs] and [toMs], busiest first. A load that reaches outside
+         * the range counts for its share of the time inside it: a thread that left the app's top
+         * list comes back with everything it used meanwhile, and [RemoteThreadLoad.sinceMs] says
+         * over how long.
+         */
+        public fun threadsBetween(ticks: List<RemoteThreadTick>, fromMs: Long, toMs: Long): List<RemoteThreadUse> {
+            if (toMs <= fromMs) return emptyList()
+            val used = LinkedHashMap<Long, Double>()
+            val names = HashMap<Long, RemoteThreadLoad>()
+            for (tick in ticks) {
+                for (load in tick.loads) {
+                    val overlap = minOf(tick.atMs, toMs) - maxOf(load.sinceMs, fromMs)
+                    if (overlap <= 0) continue
+                    used[load.tid] = (used[load.tid] ?: 0.0) + load.cpuMs * overlap.toDouble() / (tick.atMs - load.sinceMs)
+                    names[load.tid] = load
+                }
+            }
+            return used.map { (tid, ms) ->
+                val thread = names.getValue(tid)
+                RemoteThreadUse(tid, thread.name, thread.hopi, ms, ms * 100.0 / (toMs - fromMs))
+            }.sortedByDescending { it.cpuMs }
+        }
 
         private fun upsert(events: List<RemotePerfEvent>, event: RemotePerfEvent, max: Int): List<RemotePerfEvent> {
             val index = events.indexOfFirst { it.seq == event.seq }
@@ -430,3 +495,15 @@ public class RemotePerf internal constructor(
         private fun kib(value: Double?): Long? = value?.takeIf { !it.isNaN() }?.let { (it * 1024).toLong() }
     }
 }
+
+/** What the threads in the app's top list used since their last report, as of [atMs]. */
+@HopiInternalApi
+public class RemoteThreadTick(public val atMs: Long, public val loads: List<RemoteThreadLoad>)
+
+/** One thread's CPU in a [RemoteThreadTick]: [cpuMs] used since [sinceMs]. */
+@HopiInternalApi
+public class RemoteThreadLoad(public val tid: Long, public val name: String, public val hopi: Boolean, public val cpuMs: Long, public val sinceMs: Long)
+
+/** One thread's CPU over a range ([RemotePerf.threadsBetween]); [percent] of one core, as a sample's. */
+@HopiInternalApi
+public class RemoteThreadUse(public val tid: Long, public val name: String, public val hopi: Boolean, public val cpuMs: Double, public val percent: Double)

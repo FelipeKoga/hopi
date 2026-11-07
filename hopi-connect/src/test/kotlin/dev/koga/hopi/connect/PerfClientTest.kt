@@ -4,6 +4,7 @@ import dev.koga.hopi.core.bridge.JvmAgentBridge
 import dev.koga.hopi.core.perf.PerfHook
 import dev.koga.hopi.core.perf.PerfMonitor
 import dev.koga.hopi.core.perf.PerfOwner
+import dev.koga.hopi.core.perf.PerfThread
 import dev.koga.hopi.core.perf.StallEvent
 import dev.koga.hopi.core.store.HopiStore
 import java.nio.file.Files
@@ -244,6 +245,67 @@ class PerfClientTest {
         watch.close()
         waitUntil { !app.held(PerfMonitor.HANGS) }
         assertFalse(session.perf.view.value.streaming)
+    }
+
+    /** The history comes from the cumulative CPU between scans, never the line's `percent` (iOS: a decayed average). */
+    @Test
+    fun threadHistoryMeasuresEachThreadBetweenItsScans() {
+        val app = fake()
+        val session = RemoteSession(::endpoint).also { closeables += it }
+        session.connect()
+        session.perf.view.await { it.supported }
+        val watch = session.perf.watch(threads = true)
+        closeables += watch
+        session.perf.view.await { it.streaming }
+        waitUntil { app.watchingThreads }
+        val start = 1_700_000_000_000
+
+        fun scan(atMs: Long, vararg cpuMs: Pair<Long, Long>) {
+            app.threadList = cpuMs.map { (tid, ms) -> PerfThread(tid, if (tid == 7L) "main" else "", ms, 99.0, false) }
+            app.sample(atMs, cpu = 50.0, residentMb = 100)
+            session.perf.view.await { v -> v.threadTicks.lastOrNull()?.atMs == atMs }
+        }
+        scan(start, 7L to 1_000, 8L to 500)
+        scan(start + 1_000, 7L to 1_200, 8L to 500)
+        // Thread 8 left the top list for three seconds: what it used then is spread over them.
+        scan(start + 2_000, 7L to 1_300)
+        scan(start + 3_000, 7L to 1_300)
+        scan(start + 4_000, 7L to 1_300, 8L to 1_100)
+
+        val ticks = session.perf.view.value.threadTicks
+        assertEquals(emptyList(), ticks.first().loads, "a first sighting is only a baseline")
+        val main = ticks[1].loads.single()
+        assertEquals(listOf(7L, 200L, start), listOf(main.tid, main.cpuMs, main.sinceMs))
+
+        val first = RemotePerf.threadsBetween(ticks, start, start + 1_000)
+        assertEquals(listOf("main"), first.map { it.name })
+        assertEquals(20.0, first.single().percent, 0.01, "percent of one core over the range, not the line's 99")
+
+        val all = RemotePerf.threadsBetween(ticks, start, start + 4_000).associateBy { it.tid }
+        assertEquals(300.0, assertNotNull(all[7]).cpuMs, 0.01)
+        assertEquals(600.0, assertNotNull(all[8]).cpuMs, 0.01)
+        // Thread 8's 600 ms cover the three seconds since its last report; two of them fall inside this range.
+        assertEquals(400.0, RemotePerf.threadsBetween(ticks, start + 2_000, start + 4_000).single { it.tid == 8L }.cpuMs, 0.01)
+        assertTrue(RemotePerf.threadsBetween(ticks, start + 5_000, start + 6_000).isEmpty())
+
+        // A tid reused by a new thread starts over rather than going negative.
+        scan(start + 5_000, 7L to 10, 8L to 1_200)
+        assertEquals(listOf(8L), session.perf.view.value.threadTicks.last().loads.map { it.tid })
+    }
+
+    @Test
+    fun stallsKeepTheirMomentAndCountOnceAcrossAReopen() {
+        val app = fake()
+        val session = RemoteSession(::endpoint).also { closeables += it }
+        session.connect()
+        session.perf.view.await { it.supported }
+        val watch = session.perf.watch()
+        closeables += watch
+        session.perf.view.await { it.streaming }
+        app.data.recordStall(StallEvent(app.data.nextSeq(), 1_700_000_000_000, 260, null))
+        val view = session.perf.view.await { it.stallEvents.isNotEmpty() }
+        assertEquals(listOf(1_700_000_000_000 to 260.0), view.stallEvents.map { it.atMs to it.ms })
+        assertEquals(1, view.stalls)
     }
 
     /**

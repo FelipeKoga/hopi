@@ -22,6 +22,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
+import dev.koga.hopi.ui.platform.PaneScrollbar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -177,6 +179,7 @@ internal fun TransactionDetailPane(
                 ) { shown ->
                     // A fresh scroll position per tab and per transaction.
                     val listState = remember(shown, model.transaction.id) { LazyListState() }
+                    Box(Modifier.fillMaxSize()) {
                     SelectionContainer(Modifier.fillMaxSize()) {
                         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                             when (shown) {
@@ -186,6 +189,8 @@ internal fun TransactionDetailPane(
                             }
                             item(key = "end", contentType = "end") { Spacer(Modifier.height(24.dp)) }
                         }
+                    }
+                    PaneScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
                     }
                 }
             }

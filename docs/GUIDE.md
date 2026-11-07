@@ -606,6 +606,7 @@ simulators, iPhones over USB). Build it with `./gradlew :hopi-cli:installDist`; 
 
 ```bash
 hopi devices --json                        # reachable targets
+hopi viewer --app <id>                     # the desktop viewer on that app (macOS)
 hopi list --app <applicationId or bundle id> --json --limit 20
 hopi tail --app <id> --json                # live, one line per event, until interrupted
 hopi get  <transaction id> --app <id> --json
@@ -648,6 +649,11 @@ from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java 
 ./gradlew :hopi-desktop:packageDmg   # hopi-desktop/build/compose/binaries/main/dmg/Hopi-1.0.0.dmg
 ```
 
+Installed in Applications, `hopi viewer` opens it from a terminal, and `hopi viewer --app <id>`
+also connects: to the one ready device, or to the one `--platform` or `--device` names. With several
+devices and neither flag, the app id is filled in and the picker is yours. A named target opens its
+own window, since one window views one app.
+
 Pick a device (adb devices and emulators, booted iOS simulators, iPhones on USB, JVM processes
 with a bridge), enter the app's id (on Android the bridges listening on the device are offered),
 and connect. While the viewer is attached the app keeps whole bodies, up to an eighth of its heap
@@ -668,7 +674,7 @@ once it runs.
 | ⌘E, ⇧⌘E | export the session as HAR 1.2, as NDJSON (`hopi get --json` lines) |
 | ⌘R | reconnect |
 | ⌘L | the Rules panel |
-| ⌘P | the Perf panel |
+| ⌘P | the Performance screen, in place of Network; again to go back |
 
 Ctrl replaces ⌘ on Linux and Windows. An export fetches the bodies not opened yet, up to 32 MB
 per request and 256 MB in all; larger ones keep their sizes and a comment.
@@ -878,7 +884,7 @@ to a dialog's, bottom sheet's or popup's own window is not bracketed (no public 
 a click that blocks there is caught only with `hangHeartbeat = true` (`perf.status` says
 `"inputWindows":"activities only"`).
 
-The desktop viewer has a Perf panel (⌘P) with charts of FPS, CPU and memory, each monitor's owners,
+The desktop viewer has a Performance screen (⌘P), which replaces Network, with charts of FPS, CPU, memory and requests on one timeline (drag over them to sum up a stretch: its peaks, hangs, stalls, requests and the threads that used the CPU; a hang's Inspect selects the seconds around it), each monitor's owners,
 and the hangs with their stacks.
 
 The sample's perf lab injects known jank, hangs, CPU burn and allocations and checks Hopi's record

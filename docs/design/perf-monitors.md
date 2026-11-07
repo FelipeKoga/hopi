@@ -674,9 +674,27 @@ summaries and the top threads; `hangs` prints each hang's duration, screen and s
 
 ### Desktop viewer
 
-A Perf panel (⌘P) over `PerfClient`: monitor toggles (with the lease shown), three charts drawn
-with Compose `Canvas` and no chart library (frames per second with janky bars, CPU %, memory
-lines), the hang list with stacks (copy as text), memory events as markers on the memory chart.
+A Performance screen (⌘P), in place of the Network one, over `PerfClient`: monitor toggles (with
+the lease shown), charts drawn with Compose `Canvas` and no chart library (frames per second with
+janky bars, CPU %, memory lines, requests as bars), the hang list with stacks (copy as text),
+memory events as markers on the memory chart.
+
+Every chart reads one time scale (`PerfPanelState.domain`), so a pixel column is one moment in all
+of them, with hangs and stalls drawn across them. Dragging over a chart selects a stretch and holds
+the timeline still; the side then sums up that stretch alone: CPU peak and average, memory, frames,
+hangs, stalls, requests, and who used the CPU. A hang's Inspect selects the seconds around it, at
+any distance back. Copy gives the selection as text. All of it is the viewer's: the app adds
+nothing, the 20 minutes it keeps are the limit.
+
+The per-thread list is scanned only while this screen is open (`perf.tail` with `threads`). Each
+line follows its sample, which dates it, and the viewer keeps what each thread used since its last
+report (`RemoteThreadTick`), from the cumulative `cpuMs`: never from `percent`, which on iOS is the
+kernel's decayed average and flattens a peak. A thread that leaves the app's top 10 comes back with
+everything it used meanwhile, spread over that time (`RemotePerf.threadsBetween`). So a stretch
+when the screen was closed has charts (the app's rings) but no threads, and says so. On iOS only
+the threads that name themselves and the main thread have names; a GCD worker shows as its tid (its
+queue's label is not read). The app still picks its top 10 by `percent`, so on iOS a short burst on
+an idle worker can miss the list at that tick and come back spread over the time away.
 
 ### In-app (removed)
 
