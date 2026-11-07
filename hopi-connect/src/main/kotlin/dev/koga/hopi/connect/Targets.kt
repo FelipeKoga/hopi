@@ -6,6 +6,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -376,6 +377,64 @@ public class Targets(private val environment: HostEnvironment) {
         return BridgeEndpoint(port, token, Platform.Jvm, app, unreachable)
     }
 
+    /**
+     * The apps whose bridge answers on this host: every ready adb device's `hopi.<app>` sockets,
+     * every booted simulator's apps with a `bridge.json` in their data container, and the JVM
+     * processes under [HostEnvironment.jvmBridgeRoot]. A simulator's or JVM process's file is kept
+     * only when its bridge answers `hello` (a killed app leaves its file behind), and names the app.
+     * iPhones on USB are not listed: reading their files takes seconds per app (`--device` names one).
+     * [platform] and [device] narrow the scan; a tool that fails lists nothing for its platform.
+     */
+    public fun apps(platform: Platform? = null, device: String? = null): List<FoundApp> {
+        val found = ArrayList<FoundApp>()
+        if (platform == null || platform == Platform.Android) {
+            discover { androidDevices() }?.filter { it.isReady && (device == null || it.serial == device) }?.forEach { d ->
+                androidBridges(d.serial).forEach { app -> found += FoundApp(Platform.Android, d.serial, d.model ?: d.serial, app, null) }
+            }
+        }
+        if (platform == null || platform == Platform.Ios) {
+            discover { simulators() }?.filter { device == null || it.udid == device }?.forEach { sim ->
+                val containers = Paths.get(environment.userHome, "Library/Developer/CoreSimulator/Devices", sim.udid, "data/Containers/Data/Application")
+                childDirectories(containers).forEach { container ->
+                    val file = container.resolve(IOS_BRIDGE_FILE)
+                    probe(file, Platform.Ios)?.let { app -> found += FoundApp(Platform.Ios, sim.udid, sim.name, app, null) }
+                }
+            }
+        }
+        if ((platform == null || platform == Platform.Jvm) && device == null) {
+            childDirectories(environment.jvmBridgeRoot).forEach { dir ->
+                val file = dir.resolve("bridge.json")
+                probe(file, Platform.Jvm)?.let { app -> found += FoundApp(Platform.Jvm, null, "JVM ${dir.fileName}", app, file) }
+            }
+        }
+        return found
+    }
+
+    private fun childDirectories(dir: Path): List<Path> = try {
+        Files.list(dir).use { stream -> stream.filter { Files.isDirectory(it) }.sorted().toList() }
+    } catch (_: IOException) {
+        emptyList()
+    }
+
+    /** The app a `bridge.json`'s bridge names in `hello`; null when there is no file or nothing answers. */
+    private fun probe(file: Path, platform: Platform): String? {
+        if (!Files.isRegularFile(file)) return null
+        val (port, token) = try {
+            readBridgeFile(file, missing = "")
+        } catch (_: CliException) {
+            return null
+        }
+        return try {
+            BridgeClient.connect(BridgeEndpoint(port, token, platform, null, ""), PROBE_TIMEOUT_MS).use { client ->
+                client.handshake(null).json.str("app")?.takeIf { TargetIds.APP.matches(it) }
+            }
+        } catch (_: CliException) {
+            null
+        } catch (_: IOException) {
+            null
+        }
+    }
+
     private class Candidate(val id: String, val label: String, val ready: Boolean, val state: String)
 
     private fun pickDevice(requested: String?, candidates: List<Candidate>, kind: String, none: String): String {
@@ -403,10 +462,25 @@ public class Targets(private val environment: HostEnvironment) {
         /** Where the iOS bridge writes its `bridge.json`, relative to the app's data container. */
         public const val IOS_BRIDGE_FILE: String = "Library/Caches/hopi/bridge.json"
 
+        private const val PROBE_TIMEOUT_MS = 1_000
+
         private const val NO_XCODE = "iOS simulators need macOS with Xcode: /usr/bin/xcrun not found"
         private const val NO_XCODE_USB = "iPhones on USB need macOS with Xcode 15 or later: /usr/bin/xcrun not found"
     }
 }
+
+/** An app whose bridge answers ([Targets.apps]): what `--platform`, `--device`, `--app` and `--bridge-file` name. */
+@HopiInternalApi
+public class FoundApp(
+    public val platform: Platform,
+    /** The adb serial or simulator UDID; null for a JVM process. */
+    public val device: String?,
+    /** The device's model, the simulator's name, or `JVM <pid>`. */
+    public val deviceName: String,
+    public val app: String,
+    /** A JVM process's `bridge.json`. */
+    public val bridgeFile: Path?,
+)
 
 /** What a target id may look like before it reaches a subprocess's argument array. */
 @HopiInternalApi

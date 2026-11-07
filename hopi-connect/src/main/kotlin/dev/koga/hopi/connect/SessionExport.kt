@@ -1,5 +1,6 @@
-package dev.koga.hopi.desktop
+package dev.koga.hopi.connect
 
+import dev.koga.hopi.api.HopiInternalApi
 import dev.koga.hopi.core.body.textOrNull
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.json.TransactionJson
@@ -15,7 +16,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-internal enum class ExportFormat(val extension: String, val label: String) {
+@HopiInternalApi
+public enum class ExportFormat(public val extension: String, public val label: String) {
     Har("har", "HAR"),
     Ndjson("ndjson", "NDJSON"),
 }
@@ -28,10 +30,12 @@ internal enum class ExportFormat(val extension: String, val label: String) {
  * [CapturedBody.heldBytes]), not the bodies' sizes on the wire: a 50 MB download the app
  * truncated to 256 KB costs 256 KB. Bodies fetched before (the ones opened) are always written.
  */
-internal class ExportBudget(val maxTransactionBytes: Long = 32L * 1024 * 1024, val maxTotalBytes: Long = 256L * 1024 * 1024)
+@HopiInternalApi
+public class ExportBudget(public val maxTransactionBytes: Long = 32L * 1024 * 1024, public val maxTotalBytes: Long = 256L * 1024 * 1024)
 
-internal class ExportResult(val transactions: Int, val fetched: Int, val withoutBodies: Int) {
-    fun describe(file: Path): String = buildString {
+@HopiInternalApi
+public class ExportResult(public val transactions: Int, public val fetched: Int, public val withoutBodies: Int) {
+    public fun describe(file: Path): String = buildString {
         append("Exported $transactions request").append(if (transactions == 1) "" else "s").append(" to ${file.fileName}")
         if (withoutBodies > 0) append(" ($withoutBodies without bodies: over the export budget or gone from the app)")
     }
@@ -44,24 +48,25 @@ internal class ExportResult(val transactions: Int, val fetched: Int, val without
  * ([fetch]) within [ExportBudget]; the store's redactor ([Redactor.Default] in the viewer) applies
  * on top of the app's, as it does for copy as cURL.
  */
-internal object SessionExport {
-    fun write(
+@HopiInternalApi
+public object SessionExport {
+    public fun write(
         format: ExportFormat,
         store: HopiStore,
         out: Writer,
         fetch: (Long) -> HttpTransaction?,
         budget: ExportBudget = ExportBudget(),
-        creatorVersion: String = viewerVersion(),
+        creatorVersion: String,
     ): ExportResult = write(format, store.transactions.value, store.redactor, out, fetch, budget, creatorVersion)
 
-    fun write(
+    public fun write(
         format: ExportFormat,
         transactions: List<HttpTransaction>,
         redactor: Redactor,
         out: Writer,
         fetch: (Long) -> HttpTransaction?,
         budget: ExportBudget = ExportBudget(),
-        creatorVersion: String = viewerVersion(),
+        creatorVersion: String,
     ): ExportResult {
         val resolver = Resolver(fetch, budget)
         when (format) {
@@ -206,7 +211,7 @@ internal object SessionExport {
         headers.firstOrNull { it.first.equals(name, ignoreCase = true) }?.second
 
     /** The query of [url] as name/value pairs, percent-decoded where it decodes. */
-    internal fun queryString(url: String): List<Pair<String, String>> {
+    public fun queryString(url: String): List<Pair<String, String>> {
         val query = url.substringBefore('#').substringAfter('?', missingDelimiterValue = "")
         if (query.isEmpty()) return emptyList()
         return query.split('&').filter { it.isNotEmpty() }.map { part ->
@@ -261,6 +266,3 @@ internal object SessionExport {
 
     private val ISO_MILLIS: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX").withZone(ZoneOffset.UTC)
 }
-
-/** The packaged app's version (its jar manifest), else "dev". */
-internal fun viewerVersion(): String = Viewer::class.java.`package`?.implementationVersion ?: "dev"

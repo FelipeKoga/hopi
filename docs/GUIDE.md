@@ -606,13 +606,26 @@ simulators, iPhones over USB). Build it with `./gradlew :hopi-cli:installDist`; 
 
 ```bash
 hopi devices --json                        # reachable targets
+hopi apps --json                           # apps whose bridge answers; with one, --app may be left out
 hopi viewer --app <id>                     # the desktop viewer on that app (macOS)
 hopi list --app <applicationId or bundle id> --json --limit 20
+hopi list --app <id> --json --status 4xx,5xx,failed --url /users   # filters: --url, --method, --status
 hopi tail --app <id> --json                # live, one line per event, until interrupted
+hopi tail --app <id> --json --full-bodies  # and requests that start meanwhile keep whole bodies
 hopi get  <transaction id> --app <id> --json
+hopi get  <transaction id> --app <id> --body response | jq .   # one body's bytes alone
+hopi wait --app <id> --url /login --status 2xx,4xx --json      # blocks until a new match ends (exit 3 at --timeout, 30s)
 hopi curl <transaction id> --app <id>      # a cURL command that replays the request
 hopi clear --app <id> --json
+hopi export --app <id> > session.har       # HAR 1.2 with headers and bodies; --format ndjson, filters
 ```
+
+A body is captured up to the app's cap (256 KB by default), and `get` marks a cut one
+`"truncated":true`. With `tail --full-bodies` running, requests that start keep whole bodies, up
+to 8 to 64 MB depending on the app's memory, as the viewers get them: keep the tail open
+(in the background), make the request, then `get` it. When the tail ends the app's caps go back,
+and later traffic may evict the large bodies. An app whose Hopi predates full bodies answers
+exit 4.
 
 `--platform android|ios` and `--device <serial|udid>` choose the target when more than one is
 reachable. Exit codes: 0 ok, 1 usage (and a rule the app rejects), 2 not reachable, 3 not found,
@@ -702,12 +715,14 @@ From the CLI (over the bridge, like every other command):
 ```bash
 hopi mock add --app <id> --match 'GET */users/*' --status 500 --header 'Content-Type: application/json' --body @err.json
 hopi mock add --app <id> --match 'GET https://api.example.com/v1/me' --from 42     # the response of record 42
+hopi mock add --app <id> --from 42                                                    # matching record 42's method and URL exactly
 hopi fail add --app <id> --match 'POST */upload' --with timeout --after 30s           # also reset, unknown-host, cancel
 hopi delay add --app <id> --match '* *.cdn.example.com/**' --before-response 2s
 hopi edit add --app <id> --match 'GET /v1/items?page=2' --set-header 'X-Env: staging' --path /v2/items --status 503
 hopi edit add --app <id> --match '*/v1/**' --host staging.example.com --allow-other-origin  # another origin: say so
 hopi rules ls --app <id>                                                               # ID ON PRI HITS MATCH ACTION
 hopi rules disable 3 --app <id>                                                        # enable, reset (hits), rm, clear
+hopi rules set 3 --app <id> --times none --priority 5                                  # change the limit or priority
 ```
 
 `--match` is `[METHODS ]URL-PATTERN`: `GET`, `GET|POST` or `*`, then

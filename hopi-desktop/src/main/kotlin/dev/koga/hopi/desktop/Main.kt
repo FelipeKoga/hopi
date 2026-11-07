@@ -1,5 +1,6 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.connect.ExportFormat
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.BitmapPainter

@@ -1,5 +1,9 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.connect.ExportBudget
+import dev.koga.hopi.connect.ExportFormat
+import dev.koga.hopi.connect.ExportResult
+import dev.koga.hopi.connect.SessionExport
 import dev.koga.hopi.connect.BridgeDecoder
 import dev.koga.hopi.core.json.TransactionJson
 import dev.koga.hopi.core.model.CapturedBody

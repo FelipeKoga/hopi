@@ -128,6 +128,15 @@ internal object Render {
     fun droppedNotice(dropped: Long): String =
         "! the app's store has dropped $dropped transactions so far (it could not keep up); they stay pending here"
 
+    /** `hopi apps`: app, platform, device (or bridge file), device name. */
+    fun apps(rows: List<List<String>>): List<String> {
+        val all = listOf(listOf("APP", "PLATFORM", "DEVICE", "NAME")) + rows
+        val widths = IntArray(3) { column -> all.maxOf { visible(it[column]).length } }
+        return all.map { cells ->
+            cells.mapIndexed { i, cell -> if (i < 3) visible(cell).padEnd(widths[i]) else visible(cell) }.joinToString("  ").trimEnd()
+        }
+    }
+
     fun devices(rows: List<List<String>>): List<String> {
         val all = listOf(listOf("PLATFORM", "ID", "STATE", "NAME")) + rows
         val widths = IntArray(3) { column -> all.maxOf { it[column].length } }
@@ -227,7 +236,7 @@ internal object Render {
         )
     }
 
-    private fun capturedBody(body: JsonObject): CapturedBody {
+    fun capturedBody(body: JsonObject): CapturedBody {
         val bytes = when (body.str("encoding")) {
             "utf8" -> body.str("text")?.encodeToByteArray()
             "base64" -> body.str("data")?.let {

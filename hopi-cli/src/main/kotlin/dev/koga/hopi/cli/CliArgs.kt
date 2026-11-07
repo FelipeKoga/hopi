@@ -14,11 +14,14 @@ internal enum class Ids { NONE, ONE, MANY }
 
 internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<String>) {
     Devices("devices", Ids.NONE, setOf("--json", "--platform")),
-    List("list", Ids.NONE, TARGET_FLAGS + setOf("--json", "--limit", "--since")),
-    Tail("tail", Ids.NONE, TARGET_FLAGS + setOf("--json", "--since")),
-    Get("get", Ids.ONE, TARGET_FLAGS + "--json"),
+    Apps("apps", Ids.NONE, setOf("--json", "--platform", "--device")),
+    List("list", Ids.NONE, TARGET_FLAGS + FILTER_FLAGS + setOf("--json", "--limit", "--since")),
+    Tail("tail", Ids.NONE, TARGET_FLAGS + FILTER_FLAGS + setOf("--json", "--since", "--full-bodies")),
+    Get("get", Ids.ONE, TARGET_FLAGS + setOf("--json", "--body")),
+    Wait("wait", Ids.NONE, TARGET_FLAGS + FILTER_FLAGS + setOf("--json", "--since", "--timeout")),
     Curl("curl", Ids.ONE, TARGET_FLAGS),
     Clear("clear", Ids.NONE, TARGET_FLAGS + "--json"),
+    Export("export", Ids.NONE, TARGET_FLAGS + FILTER_FLAGS + setOf("--format", "--limit", "--since")),
     Viewer("viewer", Ids.NONE, setOf("--app", "--platform", "--device")),
     MockAdd("mock add", Ids.NONE, RULE_FLAGS + setOf("--status", "--header", "--body", "--from", "--delay")),
     FailAdd("fail add", Ids.NONE, RULE_FLAGS + setOf("--with", "--after")),
@@ -34,6 +37,7 @@ internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<S
     RulesEnable("rules enable", Ids.MANY, TARGET_FLAGS + "--json"),
     RulesDisable("rules disable", Ids.MANY, TARGET_FLAGS + "--json"),
     RulesReset("rules reset", Ids.MANY, TARGET_FLAGS + "--json"),
+    RulesSet("rules set", Ids.MANY, TARGET_FLAGS + setOf("--json", "--times", "--priority")),
     PerfStart("perf start", Ids.NONE, TARGET_FLAGS + MONITOR_FLAGS + setOf("--json", "--hang-ms", "--interval", "--for", "--no-expiry")),
     PerfStop("perf stop", Ids.NONE, TARGET_FLAGS + MONITOR_FLAGS + "--json"),
     PerfStatus("perf status", Ids.NONE, TARGET_FLAGS + "--json"),
@@ -45,7 +49,7 @@ internal enum class Command(val wireName: String, val ids: Ids, val flags: Set<S
     val takesId: Boolean get() = ids != Ids.NONE
 
     /** A command that changes or reads the app's rules: write lines go out only after `hello` was verified. */
-    val isRuleCommand: Boolean get() = ordinal in MockAdd.ordinal..RulesReset.ordinal
+    val isRuleCommand: Boolean get() = ordinal in MockAdd.ordinal..RulesSet.ordinal
 
     /** A perf command (docs/design/perf-monitors.md, "CLI"): sent only after `hello` was verified, like the rules. */
     val isPerfCommand: Boolean get() = ordinal >= PerfStart.ordinal
@@ -64,7 +68,7 @@ internal val REPEATABLE: Set<String> = setOf(
 
 /** Flags without a value. */
 private val SWITCHES = setOf(
-    "--json", "--disabled", "--allow-other-origin", "--frames", "--hangs", "--cpu", "--memory", "--no-expiry", "--threads", "--pss", "--samples", "--fps",
+    "--json", "--disabled", "--allow-other-origin", "--full-bodies", "--frames", "--hangs", "--cpu", "--memory", "--no-expiry", "--threads", "--pss", "--samples", "--fps",
 )
 
 /** `perf start` and `perf stop`: one switch per monitor, named as on the wire. */
@@ -79,6 +83,9 @@ private val REQUEST_EDIT_FLAGS: Set<String>
     )
 
 private val TARGET_FLAGS: Set<String> get() = setOf("--app", "--platform", "--device", "--bridge-file")
+
+/** `list` and `tail`: see [TransactionFilter]. */
+private val FILTER_FLAGS: Set<String> get() = setOf("--url", "--method", "--status")
 
 /** A parsed command line. [platform] is null when it is to be inferred from the attached targets. */
 internal class CliArgs(
@@ -164,9 +171,6 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
     }
     val platform = values["--platform"]?.let(::parsePlatform) ?: if (bridgeFile != null) Platform.Jvm else null
     if (command == Command.Devices && platform == Platform.Jvm) throw usageError("devices lists android and ios targets only")
-    if (platform == Platform.Jvm && bridgeFile == null && command != Command.Devices) {
-        throw usageError("--platform jvm needs --bridge-file <path>")
-    }
     if (bridgeFile != null && platform != Platform.Jvm) throw usageError("--bridge-file is only for --platform jvm")
     val device = values["--device"]?.also {
         if (platform == Platform.Jvm) throw usageError("--device does not apply to --platform jvm")
@@ -174,9 +178,6 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
     }
     val app = values["--app"]?.also {
         if (!APP_ID.matches(it)) throw usageError("--app '$it' is not an application id, bundle id or process name")
-    }
-    if (app == null && command != Command.Devices && command != Command.Viewer && platform != Platform.Jvm) {
-        throw usageError("${command.wireName} needs --app <applicationId or bundleId>")
     }
     val limit = values["--limit"]?.let {
         it.toIntOrNull()?.takeIf { n -> n in 1..MAX_LIMIT } ?: throw usageError("--limit must be 1..$MAX_LIMIT")
@@ -190,7 +191,9 @@ internal fun parseInvocation(argv: kotlin.collections.List<String>): Invocation 
     if (command.takesId && ids.isEmpty()) {
         throw usageError("${command.wireName} needs a ${if (command.ids == Ids.MANY) "rule id" else "transaction id"}")
     }
-    if (command.isAdd && values["--match"] == null) throw usageError("${command.wireName} needs --match '<METHODS> <URL-PATTERN>'")
+    if (command.isAdd && values["--match"] == null && !(command == Command.MockAdd && values["--from"] != null)) {
+        throw usageError("${command.wireName} needs --match '<METHODS> <URL-PATTERN>'" + if (command == Command.MockAdd) " (or --from <id> alone)" else "")
+    }
     return Invocation.Run(
         CliArgs(command, app, platform, device, bridgeFile, json, limit, since, ids.firstOrNull() ?: 0L, ids, values, lists, switches),
     )
@@ -204,15 +207,27 @@ internal val USAGE_TEXT: String = """
     |
     |Commands:
     |  devices                 list reachable targets: adb devices, booted iOS simulators, iPhones on USB
+    |  apps                    list the apps whose Hopi bridge answers (Android, simulators, JVM),
+    |                          with the --platform, --device and --app that reach each
     |  list                    the newest transactions (--limit, default $DEFAULT_LIMIT), oldest first
-    |  tail                    retained transactions, then live events until interrupted
+    |  tail [--full-bodies]    retained transactions, then live events until interrupted; with
+    |                          --full-bodies, requests that start while it runs keep whole bodies
+    |                          (8 to 64 MB, by the app's memory), for hopi get while tail runs
     |  get <id>                full detail of one transaction, bodies included
+    |  get <id> --body request|response   that body's bytes alone, for jq or a file
+    |  wait [--timeout 30s]    until a transaction passing --url, --method, --status ends, then print it;
+    |                          only ones after --since, else after the newest when it starts
+    |                          (exit 3 at the timeout)
     |  curl <id>               the request as a cURL command
     |  clear                   drop every recorded transaction
+    |  export [--format har|ndjson]   every retained transaction (or the newest --limit) with headers
+    |                          and bodies, on stdout: HAR 1.2 (default) or one get --json line each
     |  viewer                  open the desktop viewer (macOS); with --app it connects to that app
     |
     |Rules (in the app's memory only; gone when it restarts):
     |  mock add  --match M --status N [--header 'K: V']... [--body B] [--from <id>] [--delay D]
+    |  mock add  --from <id> [--status N] ...   that request's response, matching its method and
+    |            URL exactly (any query) when --match is left out
     |  fail add  --match M --with timeout|reset|unknown-host|cancel [--after D]
     |  delay add --match M [--before-request D] [--before-response D]
     |  edit add  --match M [--method X] [--host H --port N --allow-other-origin] [--path P] [--set-query k=v]...
@@ -220,6 +235,7 @@ internal val USAGE_TEXT: String = """
     |            [--remove-header K]... [--body B] [--status N] [--set-response-header 'K: V']...
     |            [--add-response-header 'K: V']... [--remove-response-header K]... [--response-body B]
     |  rules ls | rm <id>... | clear | enable <id>... | disable <id>... | reset <id>...
+    |  rules set <id>... [--times N|none] [--priority N]   change a rule's limit (none: no limit) or priority
     |
     |  M is '[METHODS ]URL-PATTERN': GET or GET|POST or *, then [scheme://]host[:port]path[?query];
     |  in a host * matches any run, in a path * one segment and ** any; ?page=2&debug&!trace adds
@@ -240,13 +256,18 @@ internal val USAGE_TEXT: String = """
     |  hangs         [--since SEQ]   every hang the app holds, with its main-thread stacks
     |
     |Options:
-    |  --app <id>              applicationId (Android) or bundle id (iOS); required except for jvm
+    |  --app <id>              applicationId (Android) or bundle id (iOS); when left out, the only
+    |                          app hopi apps finds (with --platform and --device narrowing the search)
     |  --platform <p>          android, ios or jvm; inferred when only one of adb/simctl has a target
     |  --device <id>           adb serial, simulator UDID or USB iPhone UDID, when several are attached;
     |                          an iPhone is picked unnamed only when no adb device or simulator is ready
     |  --bridge-file <path>    bridge.json of a JVM process (implies --platform jvm)
     |  --json                  NDJSON output, one object per line (the stable contract for agents)
     |  --limit <n>             list: at most n transactions, 1..$MAX_LIMIT
+    |  --url <text>            list, tail, export, wait: only URLs containing text (any case)
+    |  --method <M,...>        list, tail, export, wait: only these methods (GET,POST)
+    |  --status <S,...>        list, tail, export, wait: only these codes, classes, failed or pending (404,5xx,failed);
+    |                          list keeps the newest --limit that match
     |  --since <id>            list, tail: only transactions with a greater id;
     |                          perf tail, hangs: only events with a greater seq
     |  -h, --help              this help

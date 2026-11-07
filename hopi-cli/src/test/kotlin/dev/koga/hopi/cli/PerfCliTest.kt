@@ -93,7 +93,6 @@ class PerfCliTest {
         assertTrue("does not take --hang-ms" in usage("perf", "stop", "--app", "a.b", "--hang-ms", "300"))
         assertTrue("takes no value" in usage("perf", "start", "--app", "a.b", "--hangs=yes"))
         assertTrue("perf event seq" in usage("hangs", "--app", "a.b", "--since", "-1"))
-        assertTrue("needs --app" in usage("perf", "status"))
         assertTrue("at least one of --frames" in startError())
         assertTrue("goes with --hangs" in startError("--cpu", "--hang-ms", "300"))
         assertTrue("100..10000" in startError("--hangs", "--hang-ms", "50"))

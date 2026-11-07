@@ -2,6 +2,7 @@ package dev.koga.hopi.cli
 
 import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.core.bridge.JvmAgentBridge
+import dev.koga.hopi.core.capture.FullBodies
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.json.parseFlatJsonObject
 import dev.koga.hopi.core.model.HttpTransaction
@@ -135,6 +136,124 @@ class CliBridgeTest {
     }
 
     @Test
+    fun listFiltersByUrlMethodAndStatusBeforeTheLimit() {
+        val post = postUser()
+        val missing = getPath("/missing")
+        val failed = getPath("/boom")
+        getPath("/a")
+        fun ids(vararg filter: String) =
+            cli("list", "--bridge-file", bridgeFile, "--json", *filter).lines.map { parse(it)["id"]!!.jsonPrimitive.content.toLong() }
+        assertEquals(listOf(missing.id, failed.id), ids("--status", "4xx,failed"))
+        assertEquals(listOf(post.id), ids("--method", "post"))
+        assertEquals(listOf(missing.id), ids("--url", "/MISSING"))
+        assertEquals(listOf(post.id), ids("--status", "201", "--url", "users"))
+        // The newest match, not a match among the newest.
+        assertEquals(listOf(failed.id), ids("--status", "4xx,failed", "--limit", "1"))
+        assertEquals(emptyList<Long>(), ids("--status", "5xx"))
+        assertEquals(listOf("no matching transactions"), cli("list", "--bridge-file", bridgeFile, "--status", "5xx").lines)
+    }
+
+    @Test
+    fun appsFindsTheJvmBridgeAndCommandsUseTheOnlyAppWithoutApp() {
+        // A file a killed process left behind: nothing answers on its port.
+        val dead = ServerSocket(0).use { it.localPort }
+        Files.createDirectories(root.resolve("dead"))
+        Files.writeString(root.resolve("dead/bridge.json"), """{"port":$dead,"token":"${"b".repeat(64)}"}""")
+
+        val apps = runCapturing("apps", "--json", jvmBridgeRoot = root)
+        assertEquals(ExitCode.OK, apps.exitCode, apps.toString())
+        val line = parse(apps.lines.single())
+        assertEquals(APP, line["app"]!!.jsonPrimitive.content)
+        assertEquals("jvm", line["platform"]!!.jsonPrimitive.content)
+        assertEquals(bridgeFile, line["bridgeFile"]!!.jsonPrimitive.content)
+        assertTrue(runCapturing("apps", jvmBridgeRoot = root).lines.let { it.size == 2 && it[0].startsWith("APP") && it[1].startsWith(APP) })
+
+        val post = postUser()
+        val list = runCapturing("list", "--json", jvmBridgeRoot = root)
+        assertEquals(ExitCode.OK, list.exitCode, list.toString())
+        assertEquals(post.id, parse(list.lines.single())["id"]!!.jsonPrimitive.content.toLong())
+
+        val narrowed = runCapturing("list", "--json", "--platform", "jvm", "--app", APP, jvmBridgeRoot = root)
+        assertEquals(ExitCode.OK, narrowed.exitCode, narrowed.toString())
+        assertEquals(ExitCode.NOT_REACHABLE, runCapturing("list", "--platform", "jvm", "--app", "dev.koga.absent", jvmBridgeRoot = root).exitCode)
+
+        val none = runCapturing("list", "--json", jvmBridgeRoot = root.resolve("dead"))
+        assertEquals(ExitCode.NOT_REACHABLE, none.exitCode, none.toString())
+        assertTrue("no app with a Hopi bridge found" in none.stderr, none.stderr)
+        assertEquals(listOf("no app with a Hopi bridge found: run a debug build of the app (hopi devices lists the targets)"), runCapturing("apps", jvmBridgeRoot = root.resolve("dead")).lines)
+
+        val second = JvmAgentBridge.start(HopiStore(), root.resolve("second"), app = "dev.koga.other")
+        try {
+            val several = runCapturing("list", jvmBridgeRoot = root)
+            assertEquals(ExitCode.USAGE, several.exitCode, several.toString())
+            assertTrue("several apps have a Hopi bridge, pass one: --app $APP --bridge-file $bridgeFile" in several.stderr, several.stderr)
+            assertTrue("--app dev.koga.other --bridge-file" in several.stderr, several.stderr)
+        } finally {
+            second.close()
+        }
+    }
+
+    @Test
+    fun exportWritesHarAndNdjsonWithHeadersAndBodies() {
+        val post = postUser()
+        val missing = getPath("/missing")
+        val har = cli("export", "--bridge-file", bridgeFile)
+        assertEquals(ExitCode.OK, har.exitCode, har.toString())
+        assertEquals("", har.stderr)
+        val log = parse(har.stdout)["log"]!!.jsonObject
+        assertEquals("1.2", log["version"]!!.jsonPrimitive.content)
+        val entries = log["entries"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(listOf(post.id, missing.id), entries.map { it["_hopiId"]!!.jsonPrimitive.content.toLong() })
+        val request = entries[0]["request"]!!.jsonObject
+        assertEquals("POST", request["method"]!!.jsonPrimitive.content)
+        assertTrue(request["headers"]!!.jsonArray.isNotEmpty())
+        assertEquals("""{"id":7,"name":"a'b"}""", entries[0]["response"]!!.jsonObject["content"]!!.jsonObject["text"]!!.jsonPrimitive.content)
+        // The app redacted the token; the export shows what the bridge sent.
+        assertFalse("secret-value" in har.stdout)
+
+        val filtered = parse(cli("export", "--bridge-file", bridgeFile, "--status", "4xx").stdout)["log"]!!.jsonObject["entries"]!!.jsonArray
+        assertEquals(listOf(missing.id), filtered.map { it.jsonObject["_hopiId"]!!.jsonPrimitive.content.toLong() })
+
+        val ndjson = cli("export", "--bridge-file", bridgeFile, "--format", "ndjson", "--limit", "1")
+        assertEquals(ExitCode.OK, ndjson.exitCode, ndjson.toString())
+        assertEquals(cli("get", missing.id.toString(), "--bridge-file", bridgeFile, "--json").lines, ndjson.lines)
+        assertTrue("--format must be har or ndjson" in cli("export", "--bridge-file", bridgeFile, "--format", "csv").stderr)
+    }
+
+    @Test
+    fun waitBlocksUntilANewMatchingTransactionEnds() {
+        getPath("/missing")
+        var run: CliRun? = null
+        val waiter = thread(name = "test-wait") { run = cli("wait", "--bridge-file", bridgeFile, "--status", "4xx", "--json", "--timeout", "20s") }
+        // The older 404 does not count; give wait time to connect, then make a new one.
+        Thread.sleep(500)
+        assertTrue(waiter.isAlive, "wait returned on an old transaction: $run")
+        getPath("/a")
+        val fresh = getPath("/missing")
+        waiter.join(20_000)
+        val done = assertNotNull(run)
+        assertEquals(ExitCode.OK, done.exitCode, done.toString())
+        assertEquals(fresh.id, parse(done.lines.single())["id"]!!.jsonPrimitive.content.toLong())
+
+        val timeout = cli("wait", "--bridge-file", bridgeFile, "--url", "/never", "--timeout", "300ms")
+        assertEquals(ExitCode.NOT_FOUND, timeout.exitCode, timeout.toString())
+        assertTrue("no matching transaction ended within 0.3s" in timeout.stderr, timeout.stderr)
+        // --since takes what is already there.
+        val old = cli("wait", "--bridge-file", bridgeFile, "--status", "404", "--since", "0", "--json", "--timeout", "5s")
+        assertEquals(ExitCode.OK, old.exitCode, old.toString())
+    }
+
+    @Test
+    fun getBodyPrintsTheRawBytes() {
+        val post = postUser()
+        val response = cli("get", post.id.toString(), "--bridge-file", bridgeFile, "--body", "response")
+        assertEquals(ExitCode.OK, response.exitCode, response.toString())
+        assertEquals("""{"id":7,"name":"a'b"}""", response.stdout)
+        assertEquals("""{"name":"a'b","tags":["x"]}""", cli("get", post.id.toString(), "--bridge-file", bridgeFile, "--body", "request").stdout)
+        assertTrue("--body must be" in cli("get", post.id.toString(), "--bridge-file", bridgeFile, "--body", "both").stderr)
+    }
+
+    @Test
     fun listHumanIsAlignedColumns() {
         postUser()
         getPath("/boom")
@@ -262,6 +381,31 @@ class CliBridgeTest {
         assertFalse(tail.isAlive)
         assertEquals(ExitCode.NOT_REACHABLE, exit)
         assertTrue(stderr.toString().startsWith("hopi: the app closed the bridge connection"), stderr.toString())
+    }
+
+    @Test
+    fun tailFullBodiesHoldsTheModeWhileItRunsAndPrintsNoAck() {
+        val before = postUser()
+        assertEquals(0, FullBodies.cap)
+        val lines = LinkedBlockingQueue<String>()
+        val tail = thread(name = "test-tail") {
+            runCli(
+                listOf("tail", "--bridge-file", bridgeFile, "--json", "--full-bodies"),
+                CliEnvironment(stdout = LineSink(lines), stderr = ByteArrayOutputStream(), shutdownHooks = RecordingShutdownHooks()),
+            )
+        }
+        // The first line is the backlog, not capture.set's answer.
+        val backlog = parse(assertNotNull(lines.poll(10, TimeUnit.SECONDS), "no backlog line"))
+        assertEquals("transaction", backlog["type"]!!.jsonPrimitive.content)
+        assertEquals(before.id, backlog["id"]!!.jsonPrimitive.content.toLong())
+        assertTrue(FullBodies.cap > 0, "tail --full-bodies holds the mode")
+        bridge.close()
+        tail.join(10_000)
+        assertFalse(tail.isAlive)
+        // The bridge's session thread gives the mode back as it ends.
+        val deadline = System.nanoTime() + 10_000_000_000
+        while (FullBodies.cap != 0 && System.nanoTime() < deadline) Thread.sleep(10)
+        assertEquals(0, FullBodies.cap, "the mode goes back when tail ends")
     }
 
     @Test

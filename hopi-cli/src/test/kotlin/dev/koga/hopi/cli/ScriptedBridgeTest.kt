@@ -73,6 +73,15 @@ class ScriptedBridgeTest {
     }
 
     @Test
+    fun tailFullBodiesOnAnAppWithoutThemIsUnsupportedAndSendsNothing() {
+        // hello without "fullBodies": the CLI sends only hello, then stops with exit 4.
+        val run = runCapturing("tail", "--bridge-file", bridge(hello(), requests = 1), "--json", "--full-bodies")
+        assertEquals(ExitCode.UNSUPPORTED, run.exitCode, run.toString())
+        assertEquals("", run.stdout)
+        assertTrue("does not offer full bodies" in run.stderr, run.stderr)
+    }
+
+    @Test
     fun listReportsDropsMadeBeforeItConnected() {
         val json = runCapturing("list", "--bridge-file", bridge(hello(dropped = 3), """{"type":"end"}"""), "--json")
         assertEquals(ExitCode.OK, json.exitCode, json.toString())

@@ -2203,7 +2203,10 @@ moved by text in a captured body cannot redirect the app's requests without a pe
   `{"type":"notice","dropped":N}` when `hello` reported N > 0 drops (those transactions stay
   `pending`); `tail` prints summaries and `{"type":"notice","dropped":N}` lines (the first one at
   once when drops happened before it connected), flushed one by one; `get` prints the one detail
-  line. Agents skip types they do not know.
+  line. Agents skip types they do not know. `--url`, `--method` and `--status` filter the
+  summaries on the host (`list` keeps the newest `--limit` that match); `tail --full-bodies` sends
+  `capture.set` after `hello` offered `fullBodies` (exit 4 when it did not) and never prints its
+  `capture` answer.
 - `clear`: `{"type":"ok","through":N}`, N being the last id the clear covers (a host viewer clears
   its own copy up to exactly that id, keeping what its tail brought from after the clear).
 - `devices`: one line per target,
@@ -2212,6 +2215,21 @@ moved by text in a captured body cannot redirect the app's requests without a pe
   a booted simulator has `"state":"booted"` and `os` like `"iOS 18.2"`; an iPhone on USB
   `"state":"usb"`, with `name` and `os` from devicectl, both null when it does not know the
   device, listed after the simulators. No target prints nothing.
+- `wait`: the first transaction to end (complete or failed) that passes the filters, as its
+  summary line, newer than `--since` or, without it, than the newest when `wait` connected; exit
+  3 when `--timeout` (30s) passes first. `get --body request|response` prints that body's bytes
+  alone (a truncated or skipped one is noted on stderr).
+- `export`: HAR 1.2 (one JSON document) or, with `--format ndjson`, one `get --json` line per
+  transaction, written by `SessionExport` (shared with the desktop viewer) over every retained
+  summary (or the newest `--limit`) that passes the filters, each completed with `get` within the
+  export budget; transactions left without bodies are counted in a `hopi: note:` on stderr.
+- `apps`: one line per app whose bridge answers,
+  `{"type":"app","app":"…","platform":"android"|"ios"|"jvm","device":"…"|null,"deviceName":"…","bridgeFile":"…"|null}`:
+  Android from each ready device's `@hopi.<app>` sockets, simulators and JVM processes from their
+  `bridge.json` once the bridge answers `hello` (which names the app); iPhones on USB are not
+  scanned. Every other command without `--app` (and without `--bridge-file`) uses the only app
+  this finds, narrowed by `--platform` and `--device`; several stop with exit 1 and the flags
+  for each, none with exit 2.
 - `curl` takes no `--json` (its output is one shell command, with any `# warning:`/`# note:` lines first).
   Control characters in the request are shown as `\uXXXX`, after a line
   `# warning: the request contains control characters, shown as \uXXXX escapes; this command does not send them as captured`.

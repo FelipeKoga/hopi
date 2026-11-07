@@ -7,6 +7,8 @@ import dev.koga.hopi.core.rules.MatchSpec
 import dev.koga.hopi.core.rules.Predicate
 import dev.koga.hopi.core.rules.RuleLimits
 import dev.koga.hopi.core.rules.RuleSource
+import java.net.URI
+import java.net.URISyntaxException
 
 /**
  * A rule from the command line, checked before anything connects: the match shorthand parsed by
@@ -17,7 +19,23 @@ import dev.koga.hopi.core.rules.RuleSource
 internal class RuleDraft private constructor(
     private val match: MatchSpec?,
     private val fields: (JsonWriter, BodyJson) -> Unit,
+    /** The shorthand parsed with the command line's --source, --query and --match-header. */
+    private val parseMatch: (String) -> MatchSpec,
 ) {
+    /** `mock add --from <id>` without --match: the match is made from that request once connected. */
+    val needsMatch: Boolean get() = match == null
+
+    /** This draft matching [method] and [url] exactly (any query), as the viewers' "Mock This Response". */
+    fun matchingExactly(method: String, url: String): RuleDraft = RuleDraft(
+        try {
+            parseMatch(exactShorthand(method, url))
+        } catch (e: IllegalArgumentException) {
+            throw usageError("cannot match that request exactly (${e.message}): pass --match")
+        },
+        fields,
+        parseMatch,
+    )
+
     /** Turns a body into its wire object (inline, or a blob it uploads). */
     internal fun interface BodyJson {
         fun of(bytes: ByteArray): String
@@ -37,15 +55,23 @@ internal class RuleDraft private constructor(
             val sources = args.values["--source"]?.let { list ->
                 list.split(',').map { name -> RuleSource.of(name.trim()) ?: throw usageError("--source: unknown source '$name' (ktor, okhttp, urlconnection, urlsession)") }.toSet()
             }
-            val match = try {
-                MatchShorthand.parse(
-                    checkNotNull(args.values["--match"]),
-                    sources,
-                    args.lists["--query"].orEmpty().map(MatchShorthand::predicate),
-                    args.lists["--match-header"].orEmpty().map(MatchShorthand::headerPredicate),
-                )
+            val queries = try {
+                args.lists["--query"].orEmpty().map(MatchShorthand::predicate)
             } catch (e: IllegalArgumentException) {
-                throw usageError("--match: ${e.message}")
+                throw usageError("--query: ${e.message}")
+            }
+            val headers = try {
+                args.lists["--match-header"].orEmpty().map(MatchShorthand::headerPredicate)
+            } catch (e: IllegalArgumentException) {
+                throw usageError("--match-header: ${e.message}")
+            }
+            val parseMatch = { shorthand: String -> MatchShorthand.parse(shorthand, sources, queries, headers) }
+            val match = args.values["--match"]?.let {
+                try {
+                    parseMatch(it)
+                } catch (e: IllegalArgumentException) {
+                    throw usageError("--match: ${e.message}")
+                }
             }
             val label = args.values["--label"]
             val times = args.values["--times"]?.let { int(it, "--times", 1..RuleLimits.MAX_TIMES) }
@@ -58,13 +84,14 @@ internal class RuleDraft private constructor(
                 Command.EditAdd -> edit(args, readBody)
                 else -> error("not a rule command: ${args.command}")
             }
-            return RuleDraft(match) { w, body ->
+            val fields = { w: JsonWriter, body: BodyJson ->
                 label?.let { w.field("label", it) }
                 times?.let { w.field("times", it) }
                 priority?.let { w.field("priority", it) }
                 if (disabled) w.field("enabled", false)
                 action(w, body)
             }
+            return RuleDraft(match, fields, parseMatch)
         }
 
         private fun mock(args: CliArgs, readBody: (String) -> ByteArray): (JsonWriter, BodyJson) -> Unit {
@@ -233,4 +260,21 @@ internal class RuleDraft private constructor(
             return ms
         }
     }
+}
+
+/**
+ * `GET https://api.example.com:8443/users/42`: [url] exactly, without its query (so any query
+ * matches), as the viewers write it for "Mock This Response".
+ */
+internal fun exactShorthand(method: String, url: String): String {
+    val uri = try {
+        URI(url)
+    } catch (_: URISyntaxException) {
+        null
+    }
+    val host = uri?.host ?: return "$method ${url.substringBefore('?')}"
+    val scheme = uri.scheme?.let { "$it://" }.orEmpty()
+    val port = if (uri.port != -1) ":${uri.port}" else ""
+    val path = uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/"
+    return "$method $scheme${host.lowercase()}$port$path"
 }

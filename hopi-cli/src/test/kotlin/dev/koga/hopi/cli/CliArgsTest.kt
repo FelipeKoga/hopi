@@ -41,6 +41,21 @@ class CliArgsTest {
     }
 
     @Test
+    fun filterValuesAreCheckedBeforeConnecting() {
+        fun filterUsage(vararg flags: String): String {
+            val failure = assertFailsWith<CliException> { TransactionFilter.of(parse("list", "--app", "com.example.app", *flags)) }
+            assertEquals(ExitCode.USAGE, failure.exitCode)
+            return failure.message.orEmpty()
+        }
+        assertTrue("--status takes codes" in filterUsage("--status", "6xx"))
+        assertTrue("--status takes codes" in filterUsage("--status", "error"))
+        assertTrue("--method takes methods" in filterUsage("--method", "GET POST"))
+        assertTrue("--url needs text" in filterUsage("--url="))
+        assertEquals(null, TransactionFilter.of(parse("list", "--app", "com.example.app")))
+        assertTrue("get does not take --status" in usage("get", "1", "--app", "com.example.app", "--status", "404"))
+    }
+
+    @Test
     fun defaults() {
         val args = parse("tail", "--app", "com.example:remote")
         assertNull(args.platform)
@@ -61,7 +76,7 @@ class CliArgsTest {
     @Test
     fun usageErrors() {
         assertTrue("unknown command" in usage("lst"))
-        assertTrue("needs --app" in usage("list"))
+        assertNull(parse("list").app)
         assertTrue("--limit" in usage("list", "--app", "a.b", "--limit", "0"))
         assertTrue("--limit" in usage("list", "--app", "a.b", "--limit", "10001"))
         assertTrue("--since" in usage("list", "--app", "a.b", "--since", "-1"))
@@ -75,7 +90,7 @@ class CliArgsTest {
         assertTrue("needs a value" in usage("list", "--app"))
         assertTrue("given twice" in usage("list", "--app", "a.b", "--app", "c.d"))
         assertTrue("--platform" in usage("list", "--app", "a.b", "--platform", "web"))
-        assertTrue("--bridge-file" in usage("list", "--platform", "jvm"))
+        assertEquals(Platform.Jvm, parse("list", "--platform", "jvm").platform)
         assertTrue("only for --platform jvm" in usage("list", "--app", "a.b", "--platform", "ios", "--bridge-file", "/x"))
         assertTrue("--device does not apply" in usage("list", "--bridge-file", "/x", "--device", "emulator-5554"))
         assertTrue("--json takes no value" in usage("list", "--app", "a.b", "--json=1"))

@@ -36,6 +36,7 @@ internal fun runCapturing(
     isMac: Boolean = false,
     executables: Set<Path> = emptySet(),
     usbmuxdSocket: Path = NO_USBMUXD,
+    jvmBridgeRoot: Path = Paths.get("/hopi-test/no-jvm-bridges"),
 ): CliRun {
     val stdout = ByteArrayOutputStream()
     val stderr = ByteArrayOutputStream()
@@ -50,6 +51,7 @@ internal fun runCapturing(
         shutdownHooks = hooks,
         readTimeoutMs = 10_000,
         usbmuxdSocket = usbmuxdSocket,
+        jvmBridgeRoot = jvmBridgeRoot,
     )
     val code = runCli(argv.toList(), environment)
     return CliRun(code, stdout.toString(Charsets.UTF_8), stderr.toString(Charsets.UTF_8))

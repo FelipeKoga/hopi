@@ -1,6 +1,11 @@
 package dev.koga.hopi.cli
 
 import dev.koga.hopi.connect.BridgeClient
+import dev.koga.hopi.connect.BridgeDecoder
+import dev.koga.hopi.connect.BridgeEndpoint
+import dev.koga.hopi.connect.ExportFormat
+import dev.koga.hopi.connect.SessionExport
+import dev.koga.hopi.connect.FoundApp
 import dev.koga.hopi.connect.CliException
 import dev.koga.hopi.connect.ExitCode
 import dev.koga.hopi.connect.Platform
@@ -19,6 +24,7 @@ import dev.koga.hopi.connect.RuleClient
 import dev.koga.hopi.connect.SlowClientException
 import dev.koga.hopi.connect.str
 import dev.koga.hopi.connect.long
+import dev.koga.hopi.connect.bool
 import dev.koga.hopi.connect.usageError
 import dev.koga.hopi.connect.notReachable
 import dev.koga.hopi.connect.visible
@@ -26,12 +32,14 @@ import dev.koga.hopi.core.bridge.BridgeSession
 import dev.koga.hopi.core.curl.toCurl
 import dev.koga.hopi.core.json.JsonWriter
 import dev.koga.hopi.core.redact.Redactor
+import dev.koga.hopi.core.rules.RuleLimits
 import java.io.IOException
 import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Paths
 import kotlin.system.exitProcess
+import kotlinx.serialization.json.JsonObject
 
 public fun main(args: Array<String>) {
     exitProcess(runCli(args.asList(), CliEnvironment.system()))
@@ -62,6 +70,8 @@ internal fun runCli(argv: List<String>, environment: CliEnvironment): Int {
     }
 }
 
+private const val NO_APPS = "no app with a Hopi bridge found: run a debug build of the app (hopi devices lists the targets)"
+
 /** Precedes a `curl` command whose request held control characters, now shown as `\uXXXX`. */
 internal const val CONTROL_CHARACTERS_WARNING: String =
     "# warning: the request contains control characters, shown as \\uXXXX escapes; this command does not send them as captured"
@@ -79,6 +89,9 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
     fun run() {
         when (args.command) {
             Command.Devices -> devices()
+            Command.Apps -> apps()
+            Command.Export -> export()
+            Command.Wait -> waitFor()
             Command.List -> list()
             Command.Tail -> tail()
             Command.Get -> get()
@@ -92,6 +105,7 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             Command.RulesEnable -> updateRules(enabled = true)
             Command.RulesDisable -> updateRules(enabled = false)
             Command.RulesReset -> updateRules(resetHits = true)
+            Command.RulesSet -> setRules()
             Command.PerfStart -> perfStart()
             Command.PerfStop -> perfStop()
             Command.PerfStatus -> perfStatus()
@@ -236,8 +250,26 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
 
     /** Validated before connecting; bodies are read now, uploaded (inline or as blobs) once connected. */
     private fun addRule() {
-        val draft = RuleDraft.rule(args, ::readBody)
-        withRules { rules ->
+        val parsed = RuleDraft.rule(args, ::readBody)
+        withBridge(request = null) { client ->
+            val rules = RuleClient(client)
+            val draft = if (parsed.needsMatch) {
+                // --from alone: match that request exactly, as the viewers' "Mock This Response".
+                val from = args.values.getValue("--from").toLong()
+                client.send(BridgeClient.request("get").field("id", from).endObject().toString())
+                val detail = try {
+                    client.reply().json
+                } catch (e: CliException) {
+                    if (e.exitCode == ExitCode.NOT_FOUND) throw CliException(ExitCode.NOT_FOUND, "transaction $from not found (hopi list shows what is retained)")
+                    throw e
+                }
+                val method = detail.str("method")
+                val url = detail.str("url")
+                if (method == null || url == null) throw notReachable("the bridge sent a transaction without its method or URL")
+                parsed.matchingExactly(method, url)
+            } else {
+                parsed
+            }
             val reply = rules.add(draft.json(rules::body))
             val rule = RemoteRule.decode(reply.json) ?: throw notReachable("the bridge sent a malformed rule")
             out.line(if (args.json) reply.raw else Render.ruleLine(rule))
@@ -286,6 +318,32 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             for (id in args.ids) {
                 val reply = try {
                     rules.update(id, enabled = enabled, resetHits = resetHits)
+                } catch (e: CliException) {
+                    if (e.exitCode == ExitCode.NOT_FOUND) throw CliException(ExitCode.NOT_FOUND, "rule $id not found (hopi rules ls shows the rules)")
+                    throw e
+                }
+                val rule = RemoteRule.decode(reply.json) ?: throw notReachable("the bridge sent a malformed rule")
+                out.line(if (args.json) reply.raw else Render.ruleLine(rule))
+            }
+        }
+    }
+
+    /** `rules set`: --times N or none (no limit), --priority N; checked before connecting. */
+    private fun setRules() {
+        val timesValue = args.values["--times"]
+        val clearTimes = timesValue == "none"
+        val times = if (timesValue == null || clearTimes) {
+            null
+        } else {
+            timesValue.toIntOrNull()?.takeIf { it in 1..RuleLimits.MAX_TIMES }
+                ?: throw usageError("--times must be 1..${RuleLimits.MAX_TIMES} or none")
+        }
+        val priority = args.values["--priority"]?.let { it.toIntOrNull() ?: throw usageError("--priority must be a whole number") }
+        if (timesValue == null && priority == null) throw usageError("rules set needs --times N|none or --priority N")
+        withRules { rules ->
+            for (id in args.ids) {
+                val reply = try {
+                    rules.update(id, priority = priority, times = times, clearTimes = clearTimes)
                 } catch (e: CliException) {
                     if (e.exitCode == ExitCode.NOT_FOUND) throw CliException(ExitCode.NOT_FOUND, "rule $id not found (hopi rules ls shows the rules)")
                     throw e
@@ -365,25 +423,12 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
 
     /** The newest [CliArgs.limit] transactions above `--since`, paging through the bridge oldest first. */
     private fun list() {
-        val kept = ArrayDeque<Reply>()
-        var since = args.since
+        val filter = TransactionFilter.of(args)
+        var kept = ArrayDeque<Reply>()
         var dropped = 0L
-        withBridge(listRequest(since)) { client ->
+        withBridge(listRequest(args.since)) { client ->
             dropped = client.hello.json.long("dropped") ?: 0
-            while (true) {
-                var page = 0
-                while (true) {
-                    val reply = client.reply()
-                    if (reply.type == "end") break
-                    if (reply.type != "transaction") continue
-                    page++
-                    since = reply.json.long("id") ?: since
-                    kept.addLast(reply)
-                    if (kept.size > args.limit) kept.removeFirst()
-                }
-                if (page < MAX_LIMIT) break
-                client.send(listRequest(since))
-            }
+            kept = summaries(client, filter, args.limit)
         }
         // Lost terminal writes leave transactions pending forever; say so, as tail's notice does.
         val notice = if (dropped > 0) BridgeSession.droppedNotice(dropped) else null
@@ -392,11 +437,63 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             kept.forEach { out.line(it.raw) }
         } else {
             if (kept.isEmpty()) {
-                out.line("no transactions")
+                out.line(if (filter != null) "no matching transactions" else "no transactions")
             } else {
                 Render.table(listOf(Render.SUMMARY_HEADER) + kept.map { Render.summaryCells(it.json) }).forEach(out::line)
             }
             if (notice != null) out.line(Render.droppedNotice(dropped))
+        }
+    }
+
+    /** The newest [limit] summaries above `--since` that pass [filter]; `list` was sent with the handshake. */
+    private fun summaries(client: BridgeClient, filter: TransactionFilter?, limit: Int): ArrayDeque<Reply> {
+        val kept = ArrayDeque<Reply>()
+        var since = args.since
+        while (true) {
+            var page = 0
+            while (true) {
+                val reply = client.reply()
+                if (reply.type == "end") break
+                if (reply.type != "transaction") continue
+                page++
+                since = reply.json.long("id") ?: since
+                if (filter != null && !filter.matches(reply.json)) continue
+                kept.addLast(reply)
+                if (kept.size > limit) kept.removeFirst()
+            }
+            if (page < MAX_LIMIT) return kept
+            client.send(listRequest(since))
+        }
+    }
+
+    /**
+     * HAR 1.2 or NDJSON on stdout, as the viewers export: every retained transaction (or the
+     * newest --limit) that passes the filters, each completed with `get` within the export budget.
+     */
+    private fun export() {
+        val format = when (val name = args.values["--format"] ?: "har") {
+            "har" -> ExportFormat.Har
+            "ndjson" -> ExportFormat.Ndjson
+            else -> throw usageError("--format must be har or ndjson, not '$name'")
+        }
+        val filter = TransactionFilter.of(args)
+        val limit = if (args.values["--limit"] != null) args.limit else MAX_LIMIT
+        val result = withBridge(listRequest(args.since)) { client ->
+            val transactions = summaries(client, filter, limit).mapNotNull { BridgeDecoder.summary(it.json, startedAtFallback = 0) }
+            val fetch = { id: Long ->
+                client.send(BridgeClient.request("get").field("id", id).endObject().toString())
+                try {
+                    BridgeDecoder.detail(client.reply().json)
+                } catch (e: CliException) {
+                    if (e.exitCode != ExitCode.NOT_FOUND) throw e
+                    null
+                }
+            }
+            // The bridge redacted every line already, as for curl.
+            SessionExport.write(format, transactions, Redactor.Disabled, out.writer(), fetch, creatorVersion = "hopi-cli")
+        }
+        if (result.withoutBodies > 0) {
+            printError(environment.stderr, "hopi: note: ${result.withoutBodies} of ${result.transactions} exported without bodies: over the export budget or gone from the app")
         }
     }
 
@@ -405,7 +502,17 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
 
     /** Runs until interrupted or until the app goes away; every line is flushed as it arrives. */
     private fun tail() {
-        withBridge(BridgeClient.request("tail").field("since", args.since).endObject().toString()) { client ->
+        val filter = TransactionFilter.of(args)
+        val request = BridgeClient.request("tail").field("since", args.since).endObject().toString()
+        val full = "--full-bodies" in args.switches
+        withBridge(if (full) null else request) { client ->
+            if (full) {
+                // An app whose hello does not offer it never gets the command, as in the viewers.
+                if (client.hello.json.bool("fullBodies") != true) {
+                    throw CliException(ExitCode.UNSUPPORTED, "this app's Hopi does not offer full bodies (an older version): tail without --full-bodies")
+                }
+                client.sendLines(BridgeClient.request("capture.set").field("fullBodies", true).endObject().toString() + "\n" + request + "\n")
+            }
             client.waitForever()
             if (!args.json) {
                 out.line(Render.tailRow(Render.SUMMARY_HEADER))
@@ -414,6 +521,9 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             while (true) {
                 val reply = client.reply(closedMessage = "the app closed the bridge connection (app stopped?)")
                 when {
+                    // capture.set's answer, not part of the stream.
+                    reply.type == "capture" -> continue
+                    reply.type == "transaction" && filter != null && !filter.matches(reply.json) -> continue
                     args.json -> out.line(reply.raw)
                     reply.type == "transaction" -> out.line(Render.tailRow(Render.summaryCells(reply.json)))
                     reply.type == "notice" -> out.line(Render.droppedNotice(reply.json.long("dropped") ?: 0))
@@ -425,8 +535,68 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
     }
 
     private fun get() {
+        val part = args.values["--body"]?.also {
+            if (it != "request" && it != "response") throw usageError("--body must be request or response, not '$it'")
+            if (args.json) throw usageError("--body prints raw bytes: leave out --json")
+        }
         val detail = fetch()
-        out.line(if (args.json) detail.raw else Render.detail(detail.json))
+        if (part == null) {
+            out.line(if (args.json) detail.raw else Render.detail(detail.json))
+            return
+        }
+        val body = ((detail.json[part] as? JsonObject)?.get("body") as? JsonObject)?.let(Render::capturedBody)
+        when {
+            body == null -> printError(environment.stderr, "hopi: note: no $part body")
+            body.skippedReason != null -> printError(environment.stderr, "hopi: note: the $part body was not captured: ${visible(body.skippedReason!!)}")
+            body.truncated -> printError(environment.stderr, "hopi: note: the $part body is truncated: ${body.bytes.size} of ${body.totalBytes ?: "unknown"} bytes captured (tail --full-bodies keeps whole ones)")
+        }
+        body?.let { out.bytes(it.bytes) }
+    }
+
+    /**
+     * Blocks until a transaction that passes the filters ends (complete or failed), prints it and
+     * exits 0; exit 3 when --timeout passes first. Without --since only transactions newer than
+     * the newest one when it starts count, so an agent starts it, then triggers the request.
+     */
+    private fun waitFor() {
+        val timeoutMs = args.values["--timeout"]?.let(::waitTimeout) ?: 30_000L
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000
+        val filter = TransactionFilter.of(args)
+        val explicit = args.values["--since"] != null
+        withBridge(if (explicit) null else listRequest(0)) { client ->
+            val since = if (explicit) args.since else summaries(client, null, 1).lastOrNull()?.json?.long("id") ?: 0
+            client.send(BridgeClient.request("tail").field("since", since).endObject().toString())
+            while (true) {
+                val left = (deadline - System.nanoTime()) / 1_000_000
+                if (left <= 0) throw timedOut(timeoutMs)
+                client.readTimeout(left.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                val reply = try {
+                    client.reply(closedMessage = "the app closed the bridge connection (app stopped?)")
+                } catch (e: CliException) {
+                    if (System.nanoTime() >= deadline) throw timedOut(timeoutMs)
+                    throw e
+                }
+                if (reply.type != "transaction" || reply.json.str("state") == "pending") continue
+                if (filter != null && !filter.matches(reply.json)) continue
+                out.line(if (args.json) reply.raw else Render.table(listOf(Render.SUMMARY_HEADER, Render.summaryCells(reply.json))).joinToString("\n"))
+                return@withBridge
+            }
+        }
+    }
+
+    private fun timedOut(timeoutMs: Long) =
+        CliException(ExitCode.NOT_FOUND, "no matching transaction ended within ${timeoutMs / 1000.0}s".replace(".0s", "s"))
+
+    /** 500ms, 30s, 2m; at most an hour. */
+    private fun waitTimeout(text: String): Long {
+        val ms = when {
+            text.endsWith("ms") -> text.dropLast(2).toLongOrNull()
+            text.endsWith("s") -> text.dropLast(1).toLongOrNull()?.times(1000)
+            text.endsWith("m") -> text.dropLast(1).toLongOrNull()?.times(60_000)
+            else -> null
+        }
+        if (ms == null || ms !in 1..3_600_000) throw usageError("--timeout takes 500ms, 30s or 2m (at most 60m), not '$text'")
+        return ms
     }
 
     private fun curl() {
@@ -461,8 +631,49 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
         }
     }
 
+    private fun apps() {
+        val found = Targets(environment).apps(args.platform, args.device)
+        if (args.json) {
+            found.forEach { out.line(appLine(it)) }
+        } else if (found.isEmpty()) {
+            out.line(NO_APPS)
+        } else {
+            Render.apps(found.map { listOf(it.app, it.platform.id, it.device ?: it.bridgeFile.toString(), it.deviceName) }).forEach(out::line)
+        }
+    }
+
+    private fun appLine(app: FoundApp): String = JsonWriter().beginObject()
+        .field("type", "app")
+        .field("app", app.app)
+        .field("platform", app.platform.id)
+        .field("device", app.device)
+        .field("deviceName", app.deviceName)
+        .field("bridgeFile", app.bridgeFile?.toString())
+        .endObject()
+        .toString()
+
+    /**
+     * The endpoint the command line names; without --app (and no --bridge-file), the only app
+     * [Targets.apps] finds, narrowed by --platform and --device. A JVM app without --bridge-file is
+     * found the same way, by --app when given. Several or none stop with the list.
+     */
+    private fun openTarget(): BridgeEndpoint {
+        val targets = Targets(environment)
+        if (args.bridgeFile != null || args.app != null && args.platform != Platform.Jvm) return targets.open(args)
+        val found = targets.apps(args.platform, args.device).filter { args.app == null || it.app == args.app }
+        val app = when (found.size) {
+            1 -> found[0]
+            0 -> throw notReachable("${args.command.wireName}: $NO_APPS; an iPhone on USB needs --app")
+            else -> throw usageError(
+                "several apps have a Hopi bridge, pass one: " +
+                    found.joinToString("; ") { "--app ${it.app} " + if (it.bridgeFile != null) "--bridge-file ${it.bridgeFile}" else "--platform ${it.platform.id} --device ${it.device}" },
+            )
+        }
+        return targets.open(app.platform, app.app, app.device, app.bridgeFile)
+    }
+
     private inline fun <T> withBridge(request: String?, block: (BridgeClient) -> T): T =
-        Targets(environment).open(args).use { endpoint ->
+        openTarget().use { endpoint ->
             BridgeClient.connect(endpoint, environment.readTimeoutMs).use { client ->
                 client.handshake(request)
                 block(client)

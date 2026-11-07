@@ -41,6 +41,10 @@ final class Viewer {
     /// A mock to make from a request: set by "Mock This Response", read by the rules view.
     var draftMock: Summary?
 
+    /// What `hopi viewer --app … --platform … --device …` asked for: attached as soon as a scan
+    /// finds it, then forgotten, so later scans keep whatever is selected.
+    @ObservationIgnored private var launch = LaunchTarget(arguments: ProcessInfo.processInfo.arguments)
+
     private(set) var targets: [Target] = []
     private(set) var scanning = false
     private(set) var session: Session?
@@ -70,6 +74,13 @@ final class Viewer {
         scanning = true
         targets = await Discovery.scan()
         scanning = false
+        if !launch.isEmpty {
+            // The named app only: another one attached instead would read as the one asked for.
+            guard let match = targets.first(where: launch.matches) else { return }
+            launch = LaunchTarget(arguments: [])
+            selectedTarget = match.id
+            return
+        }
         if selectedTarget == nil || !targets.contains(where: { $0.id == selectedTarget }) {
             selectedTarget = targets.first?.id
         }
@@ -103,5 +114,51 @@ final class Viewer {
         let perf = PerfSession(target: session.target)
         self.perf = perf
         perf.start()
+    }
+}
+
+/// The target named on the command line, as `hopi viewer` passes it through `open --args`:
+/// `--app <id>`, `--platform android|ios|jvm`, `--device <serial or UDID>` (also `--flag=value`).
+nonisolated struct LaunchTarget: Sendable, Equatable {
+    var app: String?
+    var platform: String?
+    var device: String?
+
+    init(arguments: [String]) {
+        var values: [String: String] = [:]
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            index += 1
+            guard argument.hasPrefix("--") else { continue }
+            if let equals = argument.firstIndex(of: "=") {
+                values[String(argument[..<equals])] = String(argument[argument.index(after: equals)...])
+            } else if index < arguments.count, !arguments[index].hasPrefix("--") {
+                values[argument] = arguments[index]
+                index += 1
+            }
+        }
+        app = values["--app"]
+        platform = values["--platform"]
+        device = values["--device"]
+    }
+
+    var isEmpty: Bool { app == nil && platform == nil && device == nil }
+
+    func matches(_ target: Target) -> Bool {
+        if let app, target.app != app { return false }
+        if let platform {
+            let kinds: Set<Target.Kind> = switch platform {
+            case "android": [.android]
+            case "ios": [.iphone, .simulator]
+            case "jvm": [.jvm]
+            default: []
+            }
+            if !kinds.contains(target.kind) { return false }
+        }
+        // Android ids are `android:<serial>:<app>`, USB iPhones `usb:<udid>:<app>`, a simulator's
+        // its bridge.json path under `Devices/<udid>/`.
+        if let device, !target.id.contains(":\(device):"), !target.id.contains("/\(device)/") { return false }
+        return true
     }
 }

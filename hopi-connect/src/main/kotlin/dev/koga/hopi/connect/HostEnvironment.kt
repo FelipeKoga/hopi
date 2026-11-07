@@ -118,6 +118,8 @@ public class HostEnvironment(
     public val streams: StreamStarter = SystemStreamStarter,
     /** usbmuxd's socket, through which iPhones on USB are listed and reached (macOS with Xcode only). */
     public val usbmuxdSocket: Path = USBMUXD_SOCKET,
+    /** Where JVM processes on this host write `<pid>/bridge.json` (the JVM bridge's default directory). */
+    public val jvmBridgeRoot: Path = Paths.get(System.getProperty("java.io.tmpdir") ?: "/tmp", "hopi"),
 ) {
     public companion object {
         /** Where macOS's usbmuxd (launchd starts it on demand) listens. */

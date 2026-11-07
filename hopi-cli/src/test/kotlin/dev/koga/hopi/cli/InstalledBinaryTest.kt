@@ -67,10 +67,10 @@ class InstalledBinaryTest {
         assertEquals(ExitCode.OK, help.exitCode, help.toString())
         assertTrue(help.stdout.startsWith("Usage: hopi <command> [options]"), help.stdout)
 
-        val usage = run("list")
+        val usage = run("list", "--limit", "0")
         assertEquals(ExitCode.USAGE, usage.exitCode, usage.toString())
         assertEquals("", usage.stdout)
-        assertEquals("hopi: list needs --app <applicationId or bundleId> (see hopi --help)\n", usage.stderr)
+        assertEquals("hopi: --limit must be 1..10000 (see hopi --help)\n", usage.stderr)
     }
 
     @Test

@@ -84,6 +84,8 @@ class RuleCliTest {
         assertTrue("needs a subcommand" in usage("mock"))
         assertTrue("unknown command 'mock list'" in usage("mock", "list", "--app", "a.b"))
         assertTrue("needs --match" in usage("mock", "add", "--app", "a.b", "--status", "500"))
+        assertTrue("(or --from <id> alone)" in usage("mock", "add", "--app", "a.b", "--status", "500"))
+        assertEquals(Command.MockAdd, parse("mock", "add", "--app", "a.b", "--from", "3").command)
         assertTrue("needs a rule id" in usage("rules", "rm", "--app", "a.b"))
         assertTrue("rule id" in usage("rules", "rm", "x", "--app", "a.b"))
         assertTrue("does not take --status" in usage("fail", "add", "--app", "a.b", "--match", "/a", "--status", "500"))
@@ -222,6 +224,44 @@ class RuleCliTest {
         )
         runBlocking { withTimeout(10_000) { store.transactions.first { list -> list.any { it.id == id } } } }
         return id
+    }
+
+    @Test
+    fun mockFromARequestAloneMatchesItExactly() {
+        val id = recorded()
+        val run = cli("mock", "add", "--from", id.toString(), "--json")
+        assertEquals(ExitCode.OK, run.exitCode, run.toString())
+        val rule = assertNotNull(first("GET", "https://api.example.com/users/1?page=2"))
+        assertEquals("x", rule.mock?.body?.bytes?.decodeToString())
+        assertEquals(500, rule.mock?.status)
+        assertEquals(null, first("GET", "https://api.example.com/users/2"))
+        assertEquals(null, first("POST", "https://api.example.com/users/1"))
+        // --status still overrides the captured one.
+        RuleEngine.resetForTests()
+        assertEquals(ExitCode.OK, cli("mock", "add", "--from", id.toString(), "--status", "200").exitCode)
+        assertEquals(200, first("GET", "https://api.example.com/users/1")?.mock?.status)
+
+        val missing = cli("mock", "add", "--from", "999999")
+        assertEquals(ExitCode.NOT_FOUND, missing.exitCode, missing.toString())
+        assertTrue("transaction 999999 not found" in missing.stderr, missing.stderr)
+        assertEquals("GET https://[::1]:8443/a%20b", exactShorthand("GET", "https://[::1]:8443/a%20b?q=1"))
+        assertEquals("GET https://h.example/", exactShorthand("GET", "https://H.example"))
+    }
+
+    @Test
+    fun rulesSetChangesTimesAndPriority() {
+        cli("mock", "add", "--match", "/a", "--status", "500", "--times", "2")
+        val id = RuleEngine.list().single().id
+        val set = cli("rules", "set", id.toString(), "--times", "5", "--priority", "7", "--json")
+        assertEquals(ExitCode.OK, set.exitCode, set.toString())
+        assertEquals(5, RuleEngine.get(id)?.spec?.times)
+        assertEquals(7, RuleEngine.get(id)?.spec?.priority)
+        assertEquals(ExitCode.OK, cli("rules", "set", id.toString(), "--times", "none").exitCode)
+        assertEquals(null, RuleEngine.get(id)?.spec?.times)
+        assertEquals(7, RuleEngine.get(id)?.spec?.priority)
+        assertTrue("needs --times" in cli("rules", "set", id.toString()).stderr)
+        assertTrue("--times must be" in cli("rules", "set", id.toString(), "--times", "0").stderr)
+        assertEquals(ExitCode.NOT_FOUND, cli("rules", "set", "999", "--priority", "1").exitCode)
     }
 
     @Test

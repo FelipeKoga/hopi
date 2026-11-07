@@ -13,7 +13,9 @@ simulators and JVM apps (`bridge.json` plus token). Three views, ⌘1 to ⌘3:
   janky frames, stalls and memory signals with their stacks. Monitors started here stop when the
   viewer leaves.
 
-Not yet: iPhones over USB, export.
+Launched with `--app <id>` (and optionally `--platform android|ios|jvm`, `--device <serial or
+UDID>`), as `hopi viewer --app <id>` does, it attaches that app as soon as a scan finds it, and
+no other one meanwhile.
 
 ```bash
 cd hopi-mac

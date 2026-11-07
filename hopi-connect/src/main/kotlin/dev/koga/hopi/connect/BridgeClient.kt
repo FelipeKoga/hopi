@@ -91,6 +91,11 @@ public class BridgeClient private constructor(
     /** Sends [lines], each already ending in `\n`, in one write (a pipelined window of requests). */
     public fun sendLines(lines: CharSequence): Unit = write(lines)
 
+    /** Waits at most [ms] for each following reply (`hopi wait`'s deadline). */
+    public fun readTimeout(ms: Int) {
+        socket.soTimeout = ms.coerceAtLeast(1)
+    }
+
     /** Lets `tail` wait for events as long as it takes. */
     public fun waitForever() {
         socket.soTimeout = 0

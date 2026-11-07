@@ -1,5 +1,7 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.connect.ExportFormat
+import dev.koga.hopi.connect.ExportResult
 import dev.koga.hopi.ui.desktop.HopiDesktopMotion
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn

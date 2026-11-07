@@ -1,5 +1,7 @@
 package dev.koga.hopi.desktop
 
+import dev.koga.hopi.connect.ExportFormat
+import dev.koga.hopi.connect.SessionExport
 import dev.koga.hopi.connect.AdbDevice
 import dev.koga.hopi.connect.BridgeEndpoint
 import dev.koga.hopi.connect.CliException
@@ -199,7 +201,7 @@ internal class Viewer(
                 _notice.value = "Exporting to ${file.fileName}…"
                 _notice.value = try {
                     val result = Files.newBufferedWriter(file).use { out ->
-                        SessionExport.write(format, session.store.value, out, fetch = session::fetch)
+                        SessionExport.write(format, session.store.value, out, fetch = session::fetch, creatorVersion = viewerVersion())
                     }
                     result.describe(file)
                 } catch (e: IOException) {
@@ -490,3 +492,6 @@ internal class Viewer(
         val ANDROID_SETTLE_DELAYS_MS: List<Long> = listOf(300, 700, 1_500, 3_000)
     }
 }
+
+/** The packaged app's version (its jar manifest), else "dev". */
+internal fun viewerVersion(): String = Viewer::class.java.`package`?.implementationVersion ?: "dev"

@@ -34,8 +34,14 @@ internal class CliEnvironment(
     val stdin: InputStream = InputStream.nullInputStream(),
     /** usbmuxd's socket, for iPhones on USB. */
     usbmuxdSocket: Path = HostEnvironment.USBMUXD_SOCKET,
+    /** Where JVM processes write `<pid>/bridge.json`, for `hopi apps`. */
+    jvmBridgeRoot: Path? = null,
 ) {
-    val host: HostEnvironment = HostEnvironment(processes, env, userHome, isMac, isExecutable, shutdownHooks, usbmuxdSocket = usbmuxdSocket)
+    val host: HostEnvironment = if (jvmBridgeRoot == null) {
+        HostEnvironment(processes, env, userHome, isMac, isExecutable, shutdownHooks, usbmuxdSocket = usbmuxdSocket)
+    } else {
+        HostEnvironment(processes, env, userHome, isMac, isExecutable, shutdownHooks, usbmuxdSocket = usbmuxdSocket, jvmBridgeRoot = jvmBridgeRoot)
+    }
 
     companion object {
         /**
@@ -60,7 +66,7 @@ internal fun Targets.open(args: CliArgs): BridgeEndpoint = open(args.platform, a
 internal class StdoutClosedException(cause: IOException) : Exception(cause)
 
 /** Buffered UTF-8 line output. A write error means the reader went away. */
-internal class LineOutput(stream: OutputStream) {
+internal class LineOutput(private val stream: OutputStream) {
     private val writer = BufferedWriter(OutputStreamWriter(stream, Charsets.UTF_8), 64 * 1024)
 
     fun line(text: String) {
@@ -70,6 +76,32 @@ internal class LineOutput(stream: OutputStream) {
         } catch (e: IOException) {
             throw StdoutClosedException(e)
         }
+    }
+
+    /** Raw bytes (a body), after the text written so far. */
+    fun bytes(data: ByteArray) {
+        flush()
+        try {
+            stream.write(data)
+            stream.flush()
+        } catch (e: IOException) {
+            throw StdoutClosedException(e)
+        }
+    }
+
+    /** A [java.io.Writer] onto the same buffer, for output written in pieces (an export). */
+    fun writer(): java.io.Writer = object : java.io.Writer() {
+        override fun write(cbuf: CharArray, off: Int, len: Int) {
+            try {
+                this@LineOutput.writer.write(cbuf, off, len)
+            } catch (e: IOException) {
+                throw StdoutClosedException(e)
+            }
+        }
+
+        override fun flush() = this@LineOutput.flush()
+
+        override fun close() = this@LineOutput.flush()
     }
 
     fun flush() {
