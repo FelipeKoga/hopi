@@ -172,7 +172,8 @@ private struct ChartCard: View {
                 Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
                 if let last = points.last {
-                    Text(String(format: format, last.value))
+                    // Small values keep a decimal: 0.4 % is not 0 %.
+                    Text(String(format: last.value < 10 && last.value != last.value.rounded() ? "%.1f" : format, last.value))
                         .font(.title2.monospacedDigit().weight(.semibold))
                     Text(unit).font(.caption).foregroundStyle(.secondary)
                 }
