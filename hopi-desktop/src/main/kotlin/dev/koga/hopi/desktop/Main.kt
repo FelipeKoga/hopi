@@ -2,7 +2,9 @@ package dev.koga.hopi.desktop
 
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
@@ -13,6 +15,9 @@ import dev.koga.hopi.connect.Targets
 import dev.koga.hopi.ui.desktop.rememberHopiPanesState
 import java.awt.FileDialog
 import java.awt.Frame
+import java.awt.Taskbar
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
 import dev.koga.hopi.core.body.formatBytes
 import dev.koga.hopi.core.rules.RuleLimits
 import java.io.IOException
@@ -31,6 +36,12 @@ public fun main(args: Array<String>) {
     // SIGTERM and SIGINT too: the adb tracking subprocesses would otherwise outlive the viewer.
     Runtime.getRuntime().addShutdownHook(Thread(viewer::close, "hopi-desktop-shutdown"))
     viewer.start()
+    val icon = appIcon()
+    // The Dock's icon when run from Gradle; a packaged app takes Hopi.icns from its bundle.
+    if (icon != null && Taskbar.isTaskbarSupported() && Taskbar.getTaskbar().isSupported(Taskbar.Feature.ICON_IMAGE)) {
+        Taskbar.getTaskbar().iconImage = icon
+    }
+    val iconPainter = icon?.let { BitmapPainter(it.toComposeImageBitmap()) }
     application {
         val window = rememberWindowState(width = 1280.dp, height = 820.dp)
         val panes = rememberHopiPanesState()
@@ -42,6 +53,7 @@ public fun main(args: Array<String>) {
                 exitApplication()
             },
             title = "Hopi",
+            icon = iconPainter,
             state = window,
         ) {
             val chooseFile = remember(this.window) { { format: ExportFormat, name: String -> saveDialog(this.window, format, name) } }
@@ -117,3 +129,7 @@ private fun saveDialog(owner: Frame, format: ExportFormat, name: String): Path? 
     val file = dialog.file ?: return null
     return Paths.get(dialog.directory.orEmpty(), file)
 }
+
+/** The app's icon (`hopi-desktop/icon/Hopi.svg`, rendered by `scripts/desktop-icon.swift`). */
+private fun appIcon(): BufferedImage? =
+    Thread.currentThread().contextClassLoader.getResourceAsStream("hopi-icon.png")?.use(ImageIO::read)

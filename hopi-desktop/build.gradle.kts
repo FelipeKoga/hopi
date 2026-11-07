@@ -78,6 +78,8 @@ compose.desktop {
             modules("jdk.unsupported")
             macOS {
                 bundleID = "dev.koga.hopi.desktop"
+                // Rendered from icon/Hopi.svg by scripts/desktop-icon.swift.
+                iconFile.set(project.file("icon/Hopi.icns"))
             }
         }
     }
