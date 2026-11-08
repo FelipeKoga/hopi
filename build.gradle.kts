@@ -327,6 +327,11 @@ abstract class PublicationCheck : DefaultTask() {
 // hopi-start, the iOS entry a Debug framework exports and the JVM entry, brings hopi-network and
 // hopi-perf; hopi-network's JVM target holds the Ktor plugin's recorder.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
+// Kotlin/Native builds the iOS targets on a Mac only (their Objective-C cinterop needs Xcode): on
+// another host, CI's Linux runner, :checkPublication expects the JVM and Android files alone, and a
+// release build (-Phopi.release=true) refuses to start, since its bundle would have no iOS artifacts.
+val appleHost = System.getProperty("os.name").startsWith("Mac")
+fun buildableTargets(targets: List<String>) = if (appleHost) targets else targets.filter { it == "android" || it == "jvm" }
 val publishedModules = mapOf(
     "hopi-api" to allTargets,
     "hopi-core" to allTargets,
@@ -417,8 +422,11 @@ val checkPublication = tasks.register<PublicationCheck>("checkPublication") {
     // The release build (docs/RELEASING.md) signs every file, which this check then requires;
     // gradle/maven-central.gradle.kts fails it at once without a signing key.
     release.set(providers.gradleProperty("hopi.release").map { it.toBoolean() }.orElse(false))
+    if (!appleHost && providers.gradleProperty("hopi.release").orNull.toBoolean()) {
+        throw GradleException("A release build runs on a Mac only: on ${System.getProperty("os.name")} it would publish no iOS artifacts")
+    }
     expectedFiles.set(
-        publishedModules.flatMap { (module, targets) -> expectedPublication(module, targets) } +
+        publishedModules.flatMap { (module, targets) -> expectedPublication(module, buildableTargets(targets)) } +
             listOf("hopi-gradle-plugin", "hopi-instrument").flatMap { artifact ->
                 listOf(".jar", ".pom", "-sources.jar", "-javadoc.jar").map { "$artifact/$publishedVersion/$artifact-$publishedVersion$it" }
             }.map { "io/github/felipekoga/hopi/$it" } +

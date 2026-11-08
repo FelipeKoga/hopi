@@ -1,8 +1,9 @@
 name: Release
 
+# By hand only, on a v* tag: a release runs on the owner's Mac, scripts/release-local.sh
+# (docs/RELEASING.md), since the iOS klibs build on macOS alone and the repository's CI is Linux.
+# This workflow is the fallback for a macOS runner the account can pay for.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       publishing_type:

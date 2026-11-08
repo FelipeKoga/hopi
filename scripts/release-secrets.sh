@@ -5,16 +5,16 @@
 # `release` environment (create it first, docs/RELEASING.md):
 #
 #   SIGNING_KEY              the ASCII-armored secret key (the release build's signingInMemoryKey)
-#   SIGNING_KEY_PASSWORD     its passphrase, generated here (signingInMemoryKeyPassword)
+#   SIGNING_KEY_PASSWORD     its passphrase, the one you choose (signingInMemoryKeyPassword)
 #   MAVEN_CENTRAL_USERNAME   the Central Portal user token's username
 #   MAVEN_CENTRAL_PASSWORD   and its password (scripts/central-release.sh)
 #
 # Needs gpg (brew install gnupg) and gh, signed in with access to the repository (gh auth login).
 # It asks for the key's user ID (default "koga (Hopi release signing)": no email unless you type
-# one) and for the user token (central.sonatype.com, Account, Generate User Token), then generates
-# an RSA 4096 signing key with no expiry. The key stays in your keyring ($GNUPGHOME, ~/.gnupg by
-# default), and gpg keeps its revocation certificate in $GNUPGHOME/openpgp-revocs.d; the passphrase
-# goes nowhere but the secret. Run again with another user ID (gpg keeps one key per user ID here),
+# one), for the key's passphrase and for the user token (central.sonatype.com, Account, Generate User Token), then generates
+# an RSA 4096 signing key with no expiry, protected by a passphrase you choose and keep (the local
+# release, scripts/release-local.sh, asks for it). The key stays in your keyring ($GNUPGHOME,
+# ~/.gnupg by default), and gpg keeps its revocation certificate in $GNUPGHOME/openpgp-revocs.d. Run again with another user ID (gpg keeps one key per user ID here),
 # it makes a new key and replaces the four secrets.
 #
 # RELEASE_SECRETS_OFFLINE=<directory> is a dry run, for testing this script: it sends nothing to a
@@ -47,14 +47,16 @@ uid=${uid:-$default_uid}
 if gpg --list-keys "=$uid" > /dev/null 2>&1; then
     fail "your keyring has a key for \"$uid\" already: type another user ID, or delete that key first"
 fi
+read -r -s -p "The signing key's passphrase (keep it in your password manager; scripts/release-local.sh asks for it): " passphrase || true
+echo >&2
+read -r -s -p "The passphrase again: " again || true
+echo >&2
+[ "$passphrase" = "$again" ] || fail "the two passphrases differ"
+[ "${#passphrase}" -ge 16 ] || fail "the passphrase needs 16 characters or more"
 read -r -p "Central Portal user token, username: " central_user || true
 read -r -s -p "Central Portal user token, password: " central_password || true
 echo >&2
 [ -n "$central_user" ] && [ -n "$central_password" ] || fail "the user token needs both its username and its password"
-
-# 40 random letters and digits, from 48 random bytes.
-random=$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=')
-passphrase=${random:0:40}
 
 # The passphrase reaches gpg on a file descriptor, never on a command line.
 status=$(mktemp)

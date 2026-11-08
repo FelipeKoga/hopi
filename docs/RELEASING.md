@@ -4,7 +4,7 @@ Every Hopi artifact, the Gradle plugin and its marker included, goes to Maven Ce
 group `io.github.felipekoga.hopi`, in the namespace `io.github.felipekoga` that the Central
 Publisher Portal grants the FelipeKoga GitHub account. The plugin is not on the Gradle Plugin
 Portal: apps resolve it from `mavenCentral()` (README, "Quick start"). A release is a tag: the
-release workflow (`.github/workflows/`) builds, signs and uploads it, and the owner presses Publish.
+owner's Mac builds, signs and uploads it (`scripts/release-local.sh`), and the owner presses Publish.
 
 ## Once, by the owner
 
@@ -19,35 +19,44 @@ release workflow (`.github/workflows/`) builds, signs and uploads it, and the ow
    pattern `v*`. Its secrets are readable by the release job alone, and only once you approve
    the run: a pushed tag waits for you before anything is built, signed or uploaded.
 6. Run `scripts/release-secrets.sh`. It generates the signing key (RSA 4096, no expiry; it asks for
-   the user ID, default `koga (Hopi release signing)`, with no email unless you type one), sends
+   the user ID, default `koga (Hopi release signing)`, with no email unless you type one, and for
+   its passphrase, which you keep in your password manager: the local release asks for it), sends
    the public key to keyserver.ubuntu.com and keys.openpgp.org, where Maven Central looks it up,
    asks for the token, and sets the `release` environment's four secrets: `SIGNING_KEY`,
    `SIGNING_KEY_PASSWORD`, `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD`. The key stays in
-   your keyring (`~/.gnupg`) with its revocation certificate in `~/.gnupg/openpgp-revocs.d`; the
-   passphrase is only in the secret. Run again with another user ID, it makes a new key and
+   your keyring (`~/.gnupg`) with its revocation certificate in `~/.gnupg/openpgp-revocs.d`. Run again with another user ID, it makes a new key and
    replaces the secrets.
 
 ## Each release
 
+A release runs on the owner's Mac: Kotlin/Native builds the iOS klibs on macOS alone (their
+Objective-C cinterop needs Xcode), and the repository's CI runs on Linux, so it checks the JVM,
+Android and Gradle plugin halves only. `scripts/release-local.sh` runs the iOS half and the release.
+
 1. Set `hopi.version` in `gradle.properties` (`0.1.0`, then `0.1.1`, `0.2.0`, …): the plugin holds
    every Hopi module of a debuggable build type at that version, so every artifact moves together. Commit and push it, with CI
    green.
-2. Tag the commit `v<hopi.version>`: `git tag v0.1.0` (the workflow refuses a tag that is not
-   `v` and `hopi.version`).
-3. Push the tag: `git push origin v0.1.0`, then approve the run (Actions, the Release run,
-   Review deployments): it waits for you. The release workflow first runs the release guards on
-   the tagged commit (`verifyReleaseHasNoRuntime`, `verifyIosReleaseExcludesCapture`, the plugin's
-   functional tests), with no cache, then the release build,
-   `./gradlew --no-configuration-cache checkPublication -Phopi.release=true`, signed with
-   `SIGNING_KEY`, then `scripts/central-release.sh`, which uploads
-   `build/central/hopi-<hopi.version>-bundle.zip` and waits until the portal has validated it
-   (`VALIDATED`), or prints the portal's errors and fails.
+2. Tag the commit `v<hopi.version>`: `git tag v0.1.0`, and push the tag: `git push origin v0.1.0`.
+3. Run `scripts/release-local.sh` on that commit, with a clean tree. It asks for the signing key's
+   passphrase and the Central Portal user token, then runs the iOS simulator tests and the release
+   guards (`verifyReleaseHasNoRuntime`, `verifyIosReleaseExcludesCapture`, the plugin's functional
+   tests) with no build cache, then the release build,
+   `./gradlew --no-configuration-cache checkPublication -Phopi.release=true`, signed with the key
+   from your gpg keyring (`HOPI_SIGNING_KEY`, default `koga (Hopi release signing)`), then
+   `scripts/central-release.sh`, which uploads `build/central/hopi-<hopi.version>-bundle.zip` and
+   waits until the portal has validated it (`VALIDATED`), or prints the portal's errors and fails.
+   `--dry-run` stops before the upload and lists the bundle.
 4. Press Publish for the deployment at
    [central.sonatype.com/publishing/deployments](https://central.sonatype.com/publishing/deployments),
    after a look at its files. Maven Central serves the release some minutes later.
 
 A version, once published, can never be replaced or deleted: fix and release the next one. A
 deployment that failed or that you do not want can be dropped on the same page before Publish.
+
+The release workflow (`.github/workflows/release.yml`) does the same on a macOS runner, by hand
+only (Actions, Release, Run workflow, on the tag), with the `release` environment's secrets: a
+fallback for when the account pays for one. On another host than a Mac, `-Phopi.release=true`
+refuses to start, and `:checkPublication` expects the JVM and Android files alone.
 
 ## The release, locally (a dry run)
 
