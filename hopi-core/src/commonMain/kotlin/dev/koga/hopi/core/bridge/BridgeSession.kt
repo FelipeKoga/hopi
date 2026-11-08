@@ -281,7 +281,8 @@ public class BridgeSession(
                         // a string several times its body.
                         enqueue(Outgoing.Detail(transaction))
                         // The reply holds this snapshot, so the store's copy can go back to the cap.
-                        if (command.trim) store.trimBodies(command.id, FullBodies.trimTo)
+                        // Only an ended one: a pending entry's end replaces it with uncut bodies.
+                        if (command.trim && transaction.state.isTerminal) store.trimBodies(command.id, FullBodies.trimTo)
                     }
                 }
                 is BridgeCommand.Tail -> {

@@ -72,6 +72,15 @@ public class AgentBridgeServer(
                 continue
             }
             track(connection, add = true)
+            if (closed.load()) {
+                // close() ran between the check above and track: it shut down the connections it
+                // saw, not this one.
+                track(connection, add = false)
+                clients.decrementAndFetch()
+                connection.shutdown()
+                connection.close()
+                continue
+            }
             try {
                 startBridgeThread("hopi-bridge-client") {
                     try {

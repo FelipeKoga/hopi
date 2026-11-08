@@ -181,6 +181,9 @@ public class HangDetector(
 
     private fun detect(now: Long, seq: Long, threshold: Long) {
         val existing = current
+        // Before the walk: a unit that ends during it records its end (BusyState.end records one
+        // only while a hang is ongoing), so the hang's duration never includes the walk.
+        if (existing == null) busy.setHangOngoing(true)
         val debugger = existing?.debugger ?: platform.debuggerAttached()
         var stack: List<String>? = null
         var captureUs: Long? = null
@@ -216,7 +219,6 @@ public class HangDetector(
                 heartbeat = heartbeat,
             )
             current = event
-            busy.setHangOngoing(true)
             data.recordHang(event)
         } else {
             val stacks = if (stack != null) existing.stacks + listOf(stack) else existing.stacks

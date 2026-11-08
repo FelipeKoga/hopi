@@ -458,8 +458,17 @@ public class HopiStore(
         val done = applied ?: return false
         if (closed) return false
         applyWaiters.incrementAndFetch()
-        wake()
         val nanos = timeoutMillis * 1_000_000
+        if (closed) {
+            // Closed between the check and the count: the consumer's last release may have run
+            // before this call was counted. Withdraw it, or take the permit that release left.
+            while (true) {
+                val waiting = applyWaiters.load()
+                if (waiting == 0) return done.tryAcquire(nanos)
+                if (applyWaiters.compareAndSet(waiting, waiting - 1)) return true
+            }
+        }
+        wake()
         if (done.tryAcquire(nanos)) return true
         while (true) {
             val waiting = applyWaiters.load()
@@ -666,6 +675,10 @@ public class HopiStore(
             // The lanes can deliver a pending snapshot after its terminal one, which was kept or evicted.
             val stale = if (existing >= 0) buffer[existing].state.isTerminal else write.id <= evictedThrough
             if (stale) return changed
+        } else if (existing >= 0 && buffer[existing].state.isTerminal) {
+            // A request ends once: a second end (a recorder's bug) would be a second summary line
+            // and tail event, and would undo a trim of the first.
+            return changed
         }
         // A withdrawn record's late start (its lane can deliver it after the withdrawal) brings nothing back.
         if (withdrawnIds.isNotEmpty() && write.id in withdrawnIds) return changed
@@ -716,6 +729,8 @@ public class HopiStore(
         val existing = buffer.binarySearchById(trim.id)
         if (existing < 0) return false
         val old = buffer[existing]
+        // A pending entry's terminal snapshot replaces it whole: a cut now would be undone.
+        if (!old.state.isTerminal) return false
         val request = old.requestBody?.cutTo(trim.maxBytes)
         val response = old.responseBody?.cutTo(trim.maxBytes)
         if (request === old.requestBody && response === old.responseBody) return false
