@@ -23,6 +23,9 @@ public open class CliException(public val exitCode: Int, message: String) : Exce
  * (null when the bridge did not say) loses nothing the client was owed.
  */
 @HopiInternalApi
+/** No reply within the read timeout in force (the default, or `hopi wait`'s [BridgeClient.readTimeout]). */
+public class BridgeTimeoutException(message: String) : CliException(ExitCode.NOT_REACHABLE, message)
+
 public class SlowClientException(public val since: Long?, message: String) : CliException(ExitCode.NOT_REACHABLE, message)
 
 @HopiInternalApi

@@ -7,6 +7,8 @@ import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -159,22 +161,28 @@ public class Targets(private val environment: HostEnvironment) {
         )
         val socketName = "hopi.$app"
         val unreachable = "app not running or agentBridge = false: nothing serves localabstract:$socketName on $serial"
-        // The hook is registered before the forward exists, so a SIGINT right after adb printed the
-        // port still removes it; it does nothing until the port is known.
+        // The hook is registered before the forward exists. A SIGINT while adb forward runs reaches
+        // the hook before the port is known: it waits for adb's answer (briefly), then removes it.
         val port = AtomicInteger(0)
+        val known = CountDownLatch(1)
         val removed = AtomicBoolean(false)
         val remove = {
             val forwarded = port.get()
             if (forwarded != 0 && removed.compareAndSet(false, true)) adb.removeForward(serial, forwarded)
         }
-        val hook = Thread(remove, "hopi-cli-unforward")
+        val hook = Thread({
+            known.await(FORWARD_WAIT_MS, TimeUnit.MILLISECONDS)
+            remove()
+        }, "hopi-cli-unforward")
         environment.shutdownHooks.add(hook)
         try {
             port.set(adb.forward(serial, socketName))
         } catch (e: Throwable) {
+            known.countDown()
             environment.shutdownHooks.remove(hook)
             throw e
         }
+        known.countDown()
         // The key is the connection's first line, so it is read before connecting. No file, no bridge.
         val secrets = try {
             adb.readProof(serial, app) ?: throw notReachable(unreachable)
@@ -401,6 +409,9 @@ public class Targets(private val environment: HostEnvironment) {
         public const val IOS_BRIDGE_FILE: String = "Library/Caches/hopi/bridge.json"
 
         private const val PROBE_TIMEOUT_MS = 1_000
+
+        // How long a shutdown hook waits for adb forward to print the port it is removing.
+        private const val FORWARD_WAIT_MS = 2_000L
 
         private const val NO_XCODE = "iOS simulators need macOS with Xcode: /usr/bin/xcrun not found"
         private const val NO_XCODE_USB = "iPhones on USB need macOS with Xcode 15 or later: /usr/bin/xcrun not found"

@@ -132,7 +132,9 @@ public class BridgeClient private constructor(
         val line = try {
             input.readLine()
         } catch (_: SocketTimeoutException) {
-            throw notReachable("the bridge did not answer within ${readTimeoutMs / 1000} s")
+            // The timeout in force, which readTimeout may have changed since the connection opened.
+            val ms = socket.soTimeout.takeIf { it > 0 } ?: readTimeoutMs
+            throw BridgeTimeoutException("the bridge did not answer within ${if (ms % 1000 == 0) "${ms / 1000} s" else "$ms ms"}")
         } catch (_: IOException) {
             // A reset is the same as a close: the peer is gone.
             null

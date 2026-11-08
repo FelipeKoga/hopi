@@ -1,6 +1,7 @@
 package dev.koga.hopi.cli
 
 import dev.koga.hopi.connect.BridgeClient
+import dev.koga.hopi.connect.BridgeTimeoutException
 import dev.koga.hopi.connect.BridgeDecoder
 import dev.koga.hopi.connect.BridgeEndpoint
 import dev.koga.hopi.connect.ExportFormat
@@ -512,6 +513,11 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
                     throw CliException(ExitCode.UNSUPPORTED, "this app's Hopi does not offer full bodies (an older version): tail without --full-bodies")
                 }
                 client.sendLines(BridgeClient.request("capture.set").field("fullBodies", true).endObject().toString() + "\n" + request + "\n")
+                // capture.set's answer comes before the stream; an error reply is reported, not skipped.
+                val ack = client.reply()
+                if (ack.type != "capture" || ack.json.bool("fullBodies") != true) {
+                    throw CliException(ExitCode.UNSUPPORTED, "the app did not keep full bodies for this connection")
+                }
             }
             client.waitForever()
             if (!args.json) {
@@ -521,8 +527,6 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             while (true) {
                 val reply = client.reply(closedMessage = "the app closed the bridge connection (app stopped?)")
                 when {
-                    // capture.set's answer, not part of the stream.
-                    reply.type == "capture" -> continue
                     reply.type == "transaction" && filter != null && !filter.matches(reply.json) -> continue
                     args.json -> out.line(reply.raw)
                     reply.type == "transaction" -> out.line(Render.tailRow(Render.summaryCells(reply.json)))
@@ -567,11 +571,14 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             val since = if (explicit) args.since else summaries(client, null, 1).lastOrNull()?.json?.long("id") ?: 0
             client.send(BridgeClient.request("tail").field("since", since).endObject().toString())
             while (true) {
-                val left = (deadline - System.nanoTime()) / 1_000_000
+                // Rounded up: a timeout that fires before the deadline would read as a lost bridge.
+                val left = (deadline - System.nanoTime() + 999_999) / 1_000_000
                 if (left <= 0) throw timedOut(timeoutMs)
                 client.readTimeout(left.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
                 val reply = try {
                     client.reply(closedMessage = "the app closed the bridge connection (app stopped?)")
+                } catch (_: BridgeTimeoutException) {
+                    throw timedOut(timeoutMs)
                 } catch (e: CliException) {
                     if (System.nanoTime() >= deadline) throw timedOut(timeoutMs)
                     throw e
