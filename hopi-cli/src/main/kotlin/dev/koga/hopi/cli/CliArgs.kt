@@ -117,7 +117,7 @@ internal sealed interface Invocation {
 internal const val DEFAULT_LIMIT: Int = 100
 internal const val MAX_LIMIT: Int = 10_000
 
-/** Shared with the desktop viewer's picker (see [TargetIds]). */
+/** The `--app` pattern (see [TargetIds]). */
 private val APP_ID = TargetIds.APP
 
 private val DEVICE_ID = TargetIds.DEVICE
@@ -222,7 +222,7 @@ internal val USAGE_TEXT: String = """
     |  clear                   drop every recorded transaction
     |  export [--format har|ndjson]   every retained transaction (or the newest --limit) with headers
     |                          and bodies, on stdout: HAR 1.2 (default) or one get --json line each
-    |  viewer                  open the desktop viewer (macOS); with --app it connects to that app
+    |  viewer                  open the macOS viewer (Hopi.app); with --app it connects to that app
     |
     |Rules (in the app's memory only; gone when it restarts):
     |  mock add  --match M --status N [--header 'K: V']... [--body B] [--from <id>] [--delay D]

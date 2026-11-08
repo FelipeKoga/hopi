@@ -5,7 +5,7 @@ import dev.koga.hopi.api.HopiRuntimes
 /**
  * Rules for this process's HTTP traffic (docs/design/rules.md): a rule matches a request and
  * mocks, fails, delays or edits it, on every source Hopi records, each as far as it can without
- * weakening the app's security. For tests and debug menus; the CLI and the desktop viewer reach the
+ * weakening the app's security. For tests and debug menus; the CLI and the macOS viewer reach the
  * same rules over the bridge. Rules live in memory for this process only, are never persisted, and
  * apply from the moment a call returns. `match` is the shorthand `[METHODS ]URL-PATTERN`
  * (docs/design/rules.md, "Shorthand"): methods such as `GET` or `GET|POST`, then

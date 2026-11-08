@@ -1,10 +1,5 @@
-package dev.koga.hopi.desktop
+package dev.koga.hopi.connect
 
-import dev.koga.hopi.connect.ExportBudget
-import dev.koga.hopi.connect.ExportFormat
-import dev.koga.hopi.connect.ExportResult
-import dev.koga.hopi.connect.SessionExport
-import dev.koga.hopi.connect.BridgeDecoder
 import dev.koga.hopi.core.json.TransactionJson
 import dev.koga.hopi.core.model.CapturedBody
 import dev.koga.hopi.core.model.HttpTransaction
@@ -31,12 +26,12 @@ import kotlinx.serialization.json.long
 class SessionExportTest {
     private val png = ByteArray(300) { (it * 7).toByte() }
     private val session = listOf(
-        completeTx(1),
-        completeTx(2, method = "POST", url = "https://user:pw@api.example.com/upload", requestBody = textBody("""{"name":"ü"}"""), code = 201),
-        completeTx(3, url = "https://cdn.example.com/a.png", responseBody = binaryBody(png)),
-        pendingTx(4, method = "PUT", body = textBody("partial")),
-        pendingTx(5).failed("connect timed out", 10),
-        completeTx(6, responseBody = textBody("x".repeat(100), contentType = "text/plain", truncated = true, total = 5000)),
+        exportTx(1),
+        exportTx(2, method = "POST", url = "https://user:pw@api.example.com/upload", requestBody = textBody("""{"name":"ü"}"""), code = 201),
+        exportTx(3, url = "https://cdn.example.com/a.png", responseBody = binaryBody(png)),
+        exportPending(4, method = "PUT", body = textBody("partial")),
+        exportPending(5).failed("connect timed out", 10),
+        exportTx(6, responseBody = textBody("x".repeat(100), contentType = "text/plain", truncated = true, total = 5000)),
     )
 
     private fun export(
@@ -98,8 +93,8 @@ class SessionExportTest {
     @Test
     fun harMarksWhatARuleDid() {
         val marked = listOf(
-            completeTx(1).copy(ruleId = 3, ruleApplied = "delay,mock"),
-            completeTx(2),
+            exportTx(1).copy(ruleId = 3, ruleApplied = "delay,mock"),
+            exportTx(2),
         )
         val (text, _) = export(ExportFormat.Har, marked)
         assertEquals(emptyList(), validateHar(har(text)))
@@ -111,8 +106,8 @@ class SessionExportTest {
 
     @Test
     fun summariesAreFetchedWithinTheBudgetAndTheRestKeepsSizes() {
-        val small = completeTx(1, responseBody = textBody("small"))
-        val giant = completeTx(2, responseBody = textBody("g".repeat(4096)))
+        val small = exportTx(1, responseBody = textBody("small"))
+        val giant = exportTx(2, responseBody = textBody("g".repeat(4096)))
         val fetched = mutableListOf<Long>()
         val details = listOf(small, giant).associateBy { it.id }
         val (text, result) = export(
@@ -139,9 +134,9 @@ class SessionExportTest {
      */
     @Test
     fun truncatedAndSkippedBodiesCountWhatTheAppHoldsNotTheirWireSize() {
-        val truncated = completeTx(1, responseBody = textBody("t".repeat(256), truncated = true, total = 50L * 1024 * 1024))
-        val skipped = completeTx(2, responseBody = CapturedBody.skipped("binary content type", "video/mp4", 100L * 1024 * 1024))
-        val after = completeTx(3, responseBody = textBody("after"))
+        val truncated = exportTx(1, responseBody = textBody("t".repeat(256), truncated = true, total = 50L * 1024 * 1024))
+        val skipped = exportTx(2, responseBody = CapturedBody.skipped("binary content type", "video/mp4", 100L * 1024 * 1024))
+        val after = exportTx(3, responseBody = textBody("after"))
         val details = listOf(truncated, skipped, after).associateBy { it.id }
         // As the viewer's store holds them: decoded from the bridge's own summary lines.
         val summaries = details.values.map { tx ->
@@ -167,7 +162,7 @@ class SessionExportTest {
 
     @Test
     fun aRowGoneFromTheAppIsExportedWithoutBodiesAndSaysWhy() {
-        val gone = completeTx(1).copy(requestHeaders = emptyList(), responseHeaders = emptyList(), requestBody = CapturedBody.gone(0), responseBody = CapturedBody.gone(11))
+        val gone = exportTx(1).copy(requestHeaders = emptyList(), responseHeaders = emptyList(), requestBody = CapturedBody.gone(0), responseBody = CapturedBody.gone(11))
         val fetched = mutableListOf<Long>()
         val (text, result) = export(ExportFormat.Har, listOf(gone)) { id -> null.also { fetched += id } }
         assertEquals(emptyList(), fetched, "the app said NOT_FOUND already: not asked again")
@@ -197,7 +192,7 @@ class SessionExportTest {
 
     @Test
     fun ndjsonFetchesSummariesToo() {
-        val full = completeTx(1, responseBody = textBody("body"))
+        val full = exportTx(1, responseBody = textBody("body"))
         val (text, _) = export(ExportFormat.Ndjson, listOf(summaryOnly(full))) { full }
         val decoded = BridgeDecoder.detail(Json.parseToJsonElement(text.trim()).jsonObject)!!
         assertEquals("body", decoded.responseBody!!.bytes.decodeToString())
@@ -206,7 +201,7 @@ class SessionExportTest {
     @Test
     fun aBodyOverOneSliceStreamsIntact() {
         val big = "é".repeat(100_000)
-        val (text, _) = export(ExportFormat.Har, listOf(completeTx(1, responseBody = textBody(big, contentType = "text/plain"))))
+        val (text, _) = export(ExportFormat.Har, listOf(exportTx(1, responseBody = textBody(big, contentType = "text/plain"))))
         val root = har(text)
         assertEquals(emptyList(), validateHar(root))
         assertEquals(big, root["log"]!!.jsonObject["entries"]!!.jsonArray[0].jsonObject["response"]!!.jsonObject["content"]!!.jsonObject.string("text"))
@@ -328,3 +323,35 @@ internal fun validateHar(root: JsonObject): List<String> {
     }
     return problems
 }
+
+// The export's fixtures: a credential in the request headers and a cookie in the response, so
+// redaction shows; a query that needs decoding. textBody is BridgeDecoderTest's.
+
+private fun binaryBody(bytes: ByteArray, contentType: String = "image/png") =
+    CapturedBody(bytes, bytes.size.toLong(), truncated = false, contentType, skippedReason = null)
+
+private fun exportPending(
+    id: Long,
+    method: String = "GET",
+    url: String = "https://api.example.com/users?page=2&q=a%20b",
+    body: CapturedBody? = null,
+    startedAt: Long = 1_700_000_000_000 + id,
+) = HttpTransaction.pending(id, startedAt, method, url, listOf("Accept" to "application/json", "Authorization" to "Bearer secret"), body)
+
+private fun exportTx(
+    id: Long,
+    url: String = "https://api.example.com/users?page=2&q=a%20b",
+    method: String = "GET",
+    requestBody: CapturedBody? = null,
+    code: Int = 200,
+    responseBody: CapturedBody? = textBody("""{"ok":true}"""),
+) = exportPending(id, method, url, requestBody).completed(code, listOf("Content-Type" to "application/json", "Set-Cookie" to "s=1"), responseBody, 42, "HTTP/2")
+
+/** What a viewer holds before `get`: sizes only, as `BridgeDecoder.summary` builds it. */
+private fun summaryOnly(transaction: HttpTransaction) = transaction.copy(
+    requestHeaders = emptyList(),
+    requestBody = CapturedBody.notFetched(transaction.requestBody?.reportedBytes ?: 0, transaction.requestBody?.heldBytes ?: 0),
+    responseHeaders = emptyList(),
+    responseBody = transaction.responseBody?.let { CapturedBody.notFetched(it.reportedBytes, it.heldBytes) },
+    protocol = null,
+)

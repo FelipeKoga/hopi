@@ -9,7 +9,7 @@ import dev.koga.hopi.core.start.HopiToolContext
  * `hopi-perf`'s tool in the iOS start sequence: `hopi-start`'s `Hopi.start` lists it unless its
  * `perf` is false, with its `perfRemoteControl`. It creates the controller with the default
  * threshold and interval and the start's `summaryLog`, registers it for remote control (`hopi perf
- * start`, the desktop viewer's Perf panel) and as `HopiPerf`'s runtime ([PerfRuntime.registerApi]),
+ * start`, the macOS viewer's Perf panel) and as `HopiPerf`'s runtime ([PerfRuntime.registerApi]),
  * and starts only the monitors a `-hopiPerf` launch argument names, read once ([PerfRuntime.install]).
  * Nothing else: no note in the start line, and no bridge (the start sequence's `agentBridge` starts
  * it). Android's tool of the same name takes the plugin's `perf { }` values.

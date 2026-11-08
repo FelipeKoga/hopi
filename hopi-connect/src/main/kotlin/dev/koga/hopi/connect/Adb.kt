@@ -2,7 +2,6 @@ package dev.koga.hopi.connect
 
 import dev.koga.hopi.api.HopiInternalApi
 import java.io.IOException
-import java.io.InputStream
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -60,33 +59,7 @@ internal fun parseUnixSocketBridges(output: String): List<String> = output.lineS
     .sorted()
     .toList()
 
-/**
- * One message of an adb tracking service (`track-devices`, `track-jdwp`): four hex digits giving
- * the length, then that many bytes. Null at the end of the stream or on anything else.
- */
-internal fun readTrackFrame(input: InputStream): String? {
-    val header = input.readExactly(4) ?: return null
-    val length = header.decodeToString().toIntOrNull(16)?.takeIf { it in 0..MAX_TRACK_FRAME } ?: return null
-    return input.readExactly(length)?.decodeToString()
-}
-
-/** `track-jdwp`: one pid per line. */
-internal fun parseJdwpPids(frame: String): Set<Int> =
-    frame.lineSequence().mapNotNull { it.trim().toIntOrNull() }.toSet()
-
-private fun InputStream.readExactly(count: Int): ByteArray? {
-    val bytes = ByteArray(count)
-    var read = 0
-    while (read < count) {
-        val n = read(bytes, read, count - read)
-        if (n < 0) return null
-        read += n
-    }
-    return bytes
-}
-
 private const val BRIDGE_SOCKET_PREFIX = "@hopi."
-private const val MAX_TRACK_FRAME = 0xffff
 
 private val WHITESPACE = Regex("\\s+")
 private val PROOF = Regex("[0-9a-f]{64}")
@@ -183,9 +156,6 @@ internal class Adb(private val path: Path, private val processes: ProcessRunner)
         if (result.exitCode != 0) return emptyList()
         return parseUnixSocketBridges(result.stdout)
     }
-
-    /** The argument array of a long-running adb service (`track-devices`, `track-jdwp`). */
-    fun command(vararg args: String): List<String> = listOf(path.toString()) + args
 
     private fun run(vararg args: String): ProcessResult {
         val command = listOf(path.toString()) + args

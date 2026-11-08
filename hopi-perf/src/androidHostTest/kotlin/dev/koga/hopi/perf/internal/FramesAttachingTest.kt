@@ -12,7 +12,7 @@ import kotlin.test.assertEquals
 /**
  * A frames start with a resumed activity attaches with one main-thread message, and until that
  * message ran frames' details say `attaching`, so the start's reply does not report the attach as
- * missing (the CLI's and the desktop viewer's "attach when an activity next starts" hint). On the
+ * missing (the CLI's and the macOS viewer's "attach when an activity next starts" hint). On the
  * host the message never runs (`Handler` is a stub), so this sees the pending half only: reported
  * while frames runs, not once it stopped. That the posted block clears it, also for a frames
  * stopped and started again, is checked on a device (the runtime-split plan's P5 check).

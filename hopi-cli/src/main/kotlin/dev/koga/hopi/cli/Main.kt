@@ -120,7 +120,7 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
      * own window (`-n`), and with none it brings up the viewer already running.
      */
     private fun viewer() {
-        if (!environment.host.isMac) throw usageError("viewer is macOS only: run ./gradlew :hopi-desktop:run in Hopi's repository")
+        if (!environment.host.isMac) throw usageError("viewer is macOS only: the viewer is a macOS app; on other systems use list, tail and get")
         val target = listOfNotNull(
             args.app?.let { listOf("--app", it) },
             args.platform?.let { listOf("--platform", it.id) },
@@ -133,7 +133,7 @@ private class Cli(private val environment: CliEnvironment, private val out: Line
             false
         }
         if (!opened) {
-            throw notReachable("Hopi.app is not installed: run ./gradlew :hopi-desktop:packageDmg in Hopi's repository and drag the app to Applications")
+            throw notReachable("Hopi.app is not installed: download the .dmg from https://github.com/FelipeKoga/hopi/releases (or build it with scripts/mac-dmg.sh in Hopi's repository) and drag the app to Applications")
         }
     }
 

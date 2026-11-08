@@ -4,8 +4,7 @@
 # drives the Compose compiler and the serialization plugin, here and in the included plugin build.
 kotlin = "2.2.21"
 agp = "9.4.0"
-# The Compose Gradle plugin and the desktop viewer's screens (hopi-ui, hopi-desktop: JVM only, whose
-# 1.12.0 jars carry Kotlin metadata 2.2.0).
+# The Compose Gradle plugin, which the sample applies (its libraries are compose-multiplatform-sample).
 compose-multiplatform = "1.12.0"
 # The sample's Compose (sample/shared and sample/androidApp): the newest release whose iOS klibs are at
 # abi_version 2.2.0 (1.11 and 1.12's are at 2.3.0, which Kotlin/Native 2.2.21 skips).
@@ -35,8 +34,6 @@ okio-okhttp3-old = "1.15.0"
 okhttp3-last = "3.14.9"
 okio-okhttp3-last = "1.17.2"
 okio-okhttp5 = "3.17.0"
-# The skiko native runtime that compose-multiplatform 1.12.0 resolves; JVM UI tests only.
-skiko = "0.150.1"
 
 # The io.github.felipekoga.hopi plugin's floor: the oldest Gradle, AGP and Kotlin Gradle plugin it runs on. It
 # compiles against the oldest APIs it calls (compileOnly: the consumer's build supplies them; Gradle's
@@ -63,8 +60,6 @@ android-targetSdk = "37"
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
-# Dispatchers.Main on the AWT event thread; the desktop viewer only.
-kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
@@ -77,11 +72,6 @@ ktor-client-encoding = { module = "io.ktor:ktor-client-encoding", version.ref = 
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 
-compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
-compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
-compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
-compose-animation = { module = "org.jetbrains.compose.animation:animation", version.ref = "compose-multiplatform" }
-compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "compose-multiplatform" }
 # The sample's Compose (compose-multiplatform-sample).
 compose-sample-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform-sample" }
 compose-sample-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform-sample" }

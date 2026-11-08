@@ -87,4 +87,4 @@ Inspired by [Pulse](https://github.com/kean/Pulse), [Chucker](https://github.com
 [Pluto](https://github.com/androidPluto/pluto), [netfox](https://github.com/kasketis/netfox) and
 [Wormholy](https://github.com/pmusolino/Wormholy).
 
-Apache-2.0 ([LICENSE](LICENSE)); `hopi-ui`'s Open Runde fonts are under the SIL OFL 1.1.
+Apache-2.0 ([LICENSE](LICENSE)).

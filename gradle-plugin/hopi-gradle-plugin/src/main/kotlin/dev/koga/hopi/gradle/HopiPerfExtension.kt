@@ -24,7 +24,7 @@ public abstract class HopiPerfExtension {
 
     /**
      * True (the default) lets the bridge start and stop the monitors (`hopi perf start` and `stop`,
-     * a tail's start, the desktop viewer's switches); false refuses those, while reads still work
+     * a tail's start, the macOS viewer's switches); false refuses those, while reads still work
      * and code (`HopiPerf.start`) and [autoStart] still start monitors.
      */
     public abstract val remoteControl: Property<Boolean>

@@ -144,7 +144,7 @@ public class RuleClient(private val client: BridgeClient) {
     }
 }
 
-/** A `{"type":"rule",…}` line, decoded for display (the CLI's lists, the desktop panel). */
+/** A `{"type":"rule",…}` line, decoded for display (the CLI's lists). */
 @HopiInternalApi
 public class RemoteRule(
     public val id: Long,

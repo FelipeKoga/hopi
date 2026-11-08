@@ -6,7 +6,6 @@ import dev.koga.hopi.core.model.HttpTransaction
 import dev.koga.hopi.core.store.HopiStore
 import dev.koga.hopi.fake.FakeUsbmuxd
 import dev.koga.hopi.fake.FakeXcrun
-import java.io.IOException
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
@@ -71,7 +70,6 @@ class UsbIphoneTargetsTest {
             isMac = isMac,
             isExecutable = { it.toString() in executables },
             shutdownHooks = hooks,
-            streams = { throw IOException("no long-running subprocess in this test") },
             usbmuxdSocket = socket,
         ),
     )
@@ -112,8 +110,6 @@ class UsbIphoneTargetsTest {
         assertNull(targets(isMac = false).usbIphones(), "not macOS")
         assertNull(targets(executables = emptySet()).usbIphones(), "no Xcode")
         assertNull(targets(socket = Paths.get("/hopi-test/no-usbmuxd")).usbIphones(), "no usbmuxd")
-        val noXcode = assertFailsWith<CliException> { targets(isMac = false).openUsbIphone(APP, UDID) }
-        assertEquals("iPhones on USB need macOS with Xcode 15 or later: /usr/bin/xcrun not found", noXcode.message)
     }
 
     @Test
@@ -148,7 +144,7 @@ class UsbIphoneTargetsTest {
         val refused = assertFailsWith<CliException> { BridgeClient.connect(endpoint, 10_000).use { it.handshake(null) } }
         assertEquals("the bridge reports platform jvm, not ios", refused.message)
 
-        // Two connections at once, as RemoteSession opens them; each is a Connect of its own.
+        // Two connections at once, as a viewer opens them; each is a Connect of its own.
         val asJvm = BridgeEndpoint(endpoint.port, endpoint.token, Platform.Jvm, APP, "nothing serves $APP")
         BridgeClient.connect(asJvm, 10_000).use { first ->
             BridgeClient.connect(asJvm, 10_000).use { second ->
@@ -302,13 +298,6 @@ class UsbIphoneTargetsTest {
             }
         }
         assertTrue(usbmuxd.requests.count { it.messageType == "ListDevices" } >= 3)
-
-        // The viewer's own entry for a phone it listed: never the simulators' path.
-        val unplugged = assertFailsWith<CliException> { targets().openUsbIphone(APP, UDID) }
-        assertEquals("$UDID (USB) is not attached (usbmuxd does not list it): plug it in, then reconnect", unplugged.message)
-        usbmuxd.attach(6, UDID)
-        targets().openUsbIphone(APP, UDID.lowercase()).use { assertEquals(Platform.Ios, it.platform) }
-        assertEquals(UDID, xcrun.devicectlCalls.last { it[1] == "device" }[5])
     }
 
     private object NoShutdownHooks : ShutdownHooks {

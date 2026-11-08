@@ -120,7 +120,7 @@ public object HopiStart {
     /**
      * The installation the first recorded request would make (the store with the preset caps, the
      * redaction, the summary sink with `summaryLog`, the bridge), made at once on a thread of its
-     * own, so the CLI and the desktop viewer can connect before any request. A recorder's own
+     * own, so the CLI and the macOS viewer can connect before any request. A recorder's own
      * installation later finds each part done: each runs once per process.
      */
     private fun installNow(config: StartConfig, emit: ((String) -> Unit)?) {

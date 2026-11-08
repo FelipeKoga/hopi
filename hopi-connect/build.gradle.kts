@@ -5,7 +5,7 @@ plugins {
 }
 
 // How a host tool reaches an app's bridge: adb, simctl and USB iPhone (usbmuxd, devicectl) targets, bridge.json, the bridge client
-// and its proof check. Shared by the CLI and the desktop viewer; never a dependency of an app.
+// and its proof check. The CLI's host side; never a dependency of an app.
 kotlin {
     explicitApi()
 
@@ -31,7 +31,7 @@ dependencies {
 }
 
 sourceSets.test {
-    // FakeUsbmuxd and FakeXcrun, also compiled into the CLI's and the desktop viewer's tests.
+    // FakeUsbmuxd and FakeXcrun, also compiled into the CLI's tests.
     kotlin.srcDir("src/testShared/kotlin")
 }
 

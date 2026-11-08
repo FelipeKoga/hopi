@@ -33,7 +33,7 @@ public class HopiStartConfig internal constructor() {
      */
     public var summaryLog: Boolean = true
 
-    /** Starts the device-local agent bridge at start, before any request, so the CLI and the desktop viewer can connect; on by default. */
+    /** Starts the device-local agent bridge at start, before any request, so the CLI and the macOS viewer can connect; on by default. */
     public var agentBridge: Boolean = true
 
     /**
@@ -53,7 +53,7 @@ public class HopiStartConfig internal constructor() {
     public var network: Boolean = true
 
     /**
-     * Registers the performance monitors for remote control (`hopi perf start`, the desktop
+     * Registers the performance monitors for remote control (`hopi perf start`, the macOS
      * viewer's Perf panel) and for `HopiPerf` from code, and starts none: a monitor costs nothing
      * until it starts. On iOS a `-hopiPerf frames,hangs` launch argument starts those at launch; on
      * the JVM only CPU and memory exist. False leaves perf out of the start, and `HopiPerf` then
@@ -63,7 +63,7 @@ public class HopiStartConfig internal constructor() {
 
     /**
      * Lets the bridge start and stop the monitors (`hopi perf start` and `stop`, a tail's start, the
-     * desktop viewer's switches); false refuses those, while reads still work and code and
+     * macOS viewer's switches); false refuses those, while reads still work and code and
      * `-hopiPerf` still start monitors. Set at start only.
      */
     public var perfRemoteControl: Boolean = true

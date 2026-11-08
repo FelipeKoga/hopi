@@ -16,7 +16,7 @@ import java.util.Collections
  * instead and succeeds. Every command is kept in [calls], with what each copy's destination
  * directory held in [copiedInto] so a test can check it is gone afterwards.
  *
- * Compiled into the tests of hopi-connect, the CLI and the desktop viewer.
+ * Compiled into the tests of hopi-connect and the CLI.
  */
 internal class FakeXcrun(
     @Volatile var simulators: String = NO_SIMULATORS,

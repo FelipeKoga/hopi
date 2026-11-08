@@ -33,7 +33,7 @@ sourceSets.test {
 }
 
 dependencies {
-    // Targets, adb and simctl, bridge.json and the bridge client: shared with the desktop viewer.
+    // Targets, adb and simctl, bridge.json and the bridge client (hopi-connect).
     implementation(project(":hopi-connect"))
     // cURL export, JSON writer, body helpers and the bridge itself (tests); never reimplemented here.
     implementation(project(":hopi-core"))

@@ -1,7 +1,7 @@
 # Hopi guide
 
 The full reference behind the [README](../README.md): how each platform is set up, every `hopi { }`
-option, rules, the performance monitors, the CLI, the desktop viewer, what was measured,
+option, rules, the performance monitors, the CLI, the macOS viewer, what was measured,
 troubleshooting and building from source. The design contract is
 [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -19,7 +19,7 @@ troubleshooting and building from source. The design contract is
 - [The Ktor plugin](#the-ktor-plugin)
 - [What reaches a release build](#what-reaches-a-release-build)
 - [Log stream and CLI (for AI agents)](#log-stream-and-cli-for-ai-agents)
-- [Desktop viewer](#desktop-viewer)
+- [macOS viewer](#macos-viewer)
 - [Rules: mock, fail, delay, edit](#rules-mock-fail-delay-edit)
 - [Performance monitors: frames, hangs, CPU, memory](#performance-monitors-frames-hangs-cpu-memory)
 - [Measured performance](#measured-performance)
@@ -36,7 +36,7 @@ the same places, none of them inside the app:
 
 - one NDJSON line per event in logcat or the iOS unified log,
 - a host CLI, `hopi`, whose `--json` output is a stable contract for AI coding agents,
-- a desktop viewer (Compose Desktop, macOS first) that shows the same data on your screen.
+- a native macOS viewer that shows the same data on your screen.
 
 The tools so far:
 
@@ -191,7 +191,7 @@ records Ktor's engines without it, and it is what records on the JVM (see
 | Artifact | What it is |
 | --- | --- |
 | `io.github.felipekoga.hopi` (Gradle plugin) | On Android, adds no runtime: in a debuggable variant that declares `hopi-network` or `hopi-perf` it generates the start configuration with their tools and, with `hopi-network`, rewrites OkHttp and `HttpURLConnection` for automatic capture; it fails a release (non-debuggable) variant that resolves a runtime. In a KMP module it reads the same `debugImplementation` declarations, adds `hopi-start` to Debug frameworks when a runtime is declared, and generates `Hopi`, which starts the declared runtimes' tools |
-| `hopi-api` | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS, and on the JVM through `hopi-start`), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. It comes with `hopi-ktor` too. The CLI and the desktop viewer need no dependency for rules or perf |
+| `hopi-api` | `HopiRules`, rules from Kotlin or Swift code (tests, debug menus), and `HopiPerf`, the performance monitors from code; the same artifact in every build: until a debug build's start registers the runtime behind each (on Android and iOS, and on the JVM through `hopi-start`), every `HopiRules` call returns `-1`, `false` or an empty list and every `HopiPerf` call does nothing. It comes with `hopi-ktor` too. The CLI and the macOS viewer need no dependency for rules or perf |
 | `hopi-start` | `Hopi.start { }`, the iOS and JVM start: URLSession capture on iOS, the Ktor plugin's recorder on the JVM, and the performance monitors, from one call; Debug frameworks and JVM apps that record only |
 | `hopi-ktor` | The Ktor client plugin, the same thin artifact in every build: it installs the recorder a debug build's network runtime registered (Android with the Gradle plugin and `hopi-network` declared, the JVM after `Hopi.start`) and nothing elsewhere (a release build, iOS); no `hopi-core`. It brings `hopi-api` |
 | `hopi-network` | The network runtime: automatic OkHttp and `HttpURLConnection` capture on Android, URLSession capture on iOS, and their rules, plus the Ktor plugin's recorder on Android and the JVM: named by the app as `debugImplementation` (Android, and a KMP module for iOS, where `hopi-start` brings it to Debug frameworks); brought by `hopi-start` on the JVM |
@@ -271,7 +271,7 @@ Optional settings:
 
 ```kotlin
 hopi {
-    agentBridge = false                 // no bridge for the CLI and the desktop viewer (default true)
+    agentBridge = false                 // no bridge for the CLI and the macOS viewer (default true)
     maxBodyBytes = 256L * 1024
     redactHeaders("X-Api-Key")
     network {
@@ -285,7 +285,7 @@ hopi {
 The store, redaction, log and bridge settings are the start's, at the top; capture's own are in
 `network { }`, the monitors' in `perf { }` (see
 [Performance monitors](#performance-monitors-frames-hangs-cpu-memory)). The bridge the CLI and
-the desktop viewer connect to is on by default in debug builds (`agentBridge`), and every
+the macOS viewer connect to is on by default in debug builds (`agentBridge`), and every
 connection is authenticated. The tools are the runtimes you declare, and nothing else turns one on
 or off: without `hopi-network` there is no rewrite and no network tool, so the Ktor plugin records
 nothing either (its recorder is the network tool's); with only `hopi-perf` the start runs perf's
@@ -376,7 +376,7 @@ Settings, all optional, in the same `hopi { }` block as Android's; `Hopi` passes
 
 ```kotlin
 hopi {
-    agentBridge = false                 // no bridge for the CLI and the desktop viewer (default true)
+    agentBridge = false                 // no bridge for the CLI and the macOS viewer (default true)
     maxBodyBytes = 256L * 1024          // and maxEntries, maxTotalBytes: the store's caps
     redactHeaders("X-Tenant-Secret")    // added to the defaults (Authorization, Cookie, X-Api-Key…)
     redactQueryParameters("otp")        // added to the defaults (access_token, code, key, signatures…)
@@ -406,7 +406,7 @@ recorded.
 A Debug Kotlin/Native framework links every wrapper of each platform library it uses, built
 against the SDK Xcode builds with, so a symbol newer than your deployment target becomes a strong
 import. Built with Xcode 27.1, the sample's Debug app aborted in dyld before `main` on iOS 18.2:
-first `_kCGAdaptiveMaximumBitDepth` (CoreGraphics, which `hopi-ui` then used), then libresolv's
+first `_kCGAdaptiveMaximumBitDepth` (CoreGraphics, which Hopi's in-app UI then used), then libresolv's
 `___res_9_p_cert_syms`. If yours does, weak-link the library dyld names in the app target's
 `OTHER_LDFLAGS`, as `sample/iosApp/project.yml` does (`-weak_framework CoreGraphics -weak-lresolv`).
 A weak-linked symbol is NULL on the older runtime, so Kotlin code must check the OS version
@@ -462,7 +462,7 @@ rules added before it), the performance monitors (CPU and memory, none started) 
 plugin's recorder (on the JVM the tools are chosen in code: `network = false` or `perf = false` in
 the start's block leaves that one out); with `agentBridge` (the default) it starts the bridge at once, advertised in
 `<java.io.tmpdir>/hopi/<pid>/bridge.json` under the app id of `-Dhopi.appId` (default `jvm`). The
-CLI reads it with `hopi … --bridge-file <path>` and the desktop viewer lists JVM processes with a
+CLI reads it with `hopi … --bridge-file <path>` and the macOS viewer finds JVM processes with a
 bridge. The JVM writes no start line. Records carry `"source":"ktor"`; other JVM HTTP stacks are not
 recorded.
 
@@ -607,7 +607,7 @@ simulators, iPhones over USB). Build it with `./gradlew :hopi-cli:installDist`; 
 ```bash
 hopi devices --json                        # reachable targets
 hopi apps --json                           # apps whose bridge answers; with one, --app may be left out
-hopi viewer --app <id>                     # the desktop viewer on that app (macOS)
+hopi viewer --app <id>                     # the macOS viewer on that app
 hopi list --app <applicationId or bundle id> --json --limit 20
 hopi list --app <id> --json --status 4xx,5xx,failed --url /users   # filters: --url, --method, --status
 hopi tail --app <id> --json                # live, one line per event, until interrupted
@@ -650,56 +650,19 @@ This is tested on the Mac side only, against a stand-in usbmuxd (and its framing
 daemon with no phone attached); the phone side waits for a run on hardware, as does an Android
 phone over USB or wireless adb (no code of its own: it is an adb device like an emulator).
 
-## Desktop viewer
+## macOS viewer
 
-`hopi-desktop` shows a running app's traffic in a window on your Mac: the list and detail side by
-side, over the same bridge as the CLI (`agentBridge`, on by default in debug builds). The app
-needs nothing new, and a connected viewer costs it what a connected `hopi tail` does. Run it
-from the repository, or build a `.dmg` (unsigned, about 65 MB with its own Java runtime):
+The viewer is a native SwiftUI app for macOS 26 or later
+([`hopi-mac/README.md`](../hopi-mac/README.md)). It reads a running app over the same bridge as
+the CLI (`agentBridge`, on by default in debug builds), so the app needs nothing new. It reaches
+apps on Android emulators and devices, booted iOS simulators and JVM processes with a bridge, and
+has three views, ⌘1 to ⌘3: Requests (the live list, filtered by search and status, the selected
+request in the inspector; right-click one to mock its response), Rules and Performance.
 
-```bash
-./gradlew :hopi-desktop:run
-./gradlew :hopi-desktop:packageDmg   # hopi-desktop/build/compose/binaries/main/dmg/Hopi-1.0.0.dmg
-```
-
-Installed in Applications, `hopi viewer` opens it from a terminal, and `hopi viewer --app <id>`
-also connects: to the one ready device, or to the one `--platform` or `--device` names. With several
-devices and neither flag, the app id is filled in and the picker is yours. A named target opens its
-own window, since one window views one app.
-
-Pick a device (adb devices and emulators, booted iOS simulators, iPhones on USB, JVM processes
-with a bridge), enter the app's id (on Android the bridges listening on the device are offered),
-and connect. While the viewer is attached the app keeps whole bodies, up to an eighth of its heap
-(8 to 64 MB), and the viewer fetches each one as its request ends, as a proxy would show it; the
-app then cuts its own copy back to its cap (`maxBodyBytes`, 256 KB by default). A request that
-ended before the viewer attached keeps that cap. A JSON body is shown in colors; the ⤢
-button opens it over the whole window, with a search (Enter, ⇧Enter step through the matches, Esc
-closes it). When the app restarts, or adb resets, the viewer
-reconnects by itself; on an iPhone over USB nothing on the Mac sees the app restart, so press ⌘R
-once it runs.
-
-| Keys | |
-| --- | --- |
-| ↓ / ↑ | next / previous request |
-| Enter, Esc | select the first request, clear the selection |
-| ⌘F | search |
-| ⌘K | clear (the app's store too) |
-| ⌘E, ⇧⌘E | export the session as HAR 1.2, as NDJSON (`hopi get --json` lines) |
-| ⌘R | reconnect |
-| ⌘L | the Rules panel |
-| ⌘P | the Performance screen, in place of Network; again to go back |
-
-Ctrl replaces ⌘ on Linux and Windows. An export fetches the bodies not opened yet, up to 32 MB
-per request and 256 MB in all; larger ones keep their sizes and a comment.
-
-The viewer follows the system's light or dark appearance and uses a shadcn/ui-style design system: shadcn/ui
-zinc neutrals, and the Open Runde typeface (SIL Open Font License 1.1), bundled with its license in
-`hopi-ui/src/jvmMain/resources/dev/koga/hopi/ui/font/`. Color carries status and only status (the
-owner's decision of 2026-10-28): HTTP status badges by class, the rule tags (MOCK violet, EDIT
-fuchsia, FAIL red, DELAY amber), the connection dot, and the Perf panel's series (janky frames
-red, CPU blue, memory violet, its events amber). Every status also reads without color: 2xx and
-3xx badges are tinted, 4xx outlined, 5xx and failures solid, pending dashed, and the dot is filled
-only while connected.
+Download the `.dmg` from the GitHub Releases page. It is not signed yet, so the first time,
+right-click the app and choose Open. Or build it with `scripts/mac-dmg.sh` (Xcode 26 or later, on
+macOS 26). From a terminal, `hopi viewer --app <id>` opens it on that app (with `--platform` and
+`--device` to pick the target), and it attaches that app as soon as a scan finds it.
 
 ## Rules: mock, fail, delay, edit
 
@@ -735,9 +698,9 @@ text itself (up to 1 MiB; a large one is uploaded in pieces). A part of a rule a
 apply is printed as `hopi: warning: …` when it is added. `hopi list` marks a ruled record
 `[delay,mock #3]`.
 
-In the desktop viewer, ⌘L (or the Rules menu) opens the Rules panel: every rule with its switch,
-hits and warnings, forms for mock, fail, delay and edit (headers as a table, a body from a file),
-and on a selected request "Mock this response". Replay (Hopi re-sending a recorded request) is
+The [macOS viewer](#macos-viewer) has a Rules view, to mock, fail, delay or edit matching
+requests and to see each rule's hits, limit, enable and remove it; right-click a request there
+to mock its response. Replay (Hopi re-sending a recorded request) is
 not part of the product; it is in the backlog with no priority ([`docs/ROADMAP.md`](ROADMAP.md)).
 
 From code, for tests and debug menus (`hopi-api`; with no runtime registered, as in a release
@@ -821,7 +784,7 @@ bounded rings in memory.
 
 Android, with the `io.github.felipekoga.hopi` plugin: declare
 `debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")` and the plugin lists perf's
-tool in debug builds, which registers the monitors, so the CLI, the desktop viewer and `HopiPerf`
+tool in debug builds, which registers the monitors, so the CLI, the macOS viewer and `HopiPerf`
 can start them with no other code; without it `HopiPerf` does nothing in any build, since only
 perf's tool registers its runtime. `perf { }` holds the monitors' settings only. `autoStart`
 starts some at launch; its
@@ -844,7 +807,7 @@ hopi {
 
 iOS: `Hopi.shared.start()` (see [iOS](#ios-every-urlsession-request-automatically)) registers
 the monitors, none started, only when the shared module declares
-`debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")`, as on Android, so the CLI, the desktop viewer and `HopiPerf` can start them with no other code
+`debugImplementation("io.github.felipekoga.hopi:hopi-perf:0.1.0")`, as on Android, so the CLI, the macOS viewer and `HopiPerf` can start them with no other code
 (`perf { remoteControl = false }` refuses the bridge's starts and stops); with it,
 `xcrun simctl launch booted <bundle id> -hopiPerf frames,hangs` starts monitors at launch.
 
@@ -899,8 +862,9 @@ to a dialog's, bottom sheet's or popup's own window is not bracketed (no public 
 a click that blocks there is caught only with `hangHeartbeat = true` (`perf.status` says
 `"inputWindows":"activities only"`).
 
-The desktop viewer has a Performance screen (⌘P), which replaces Network, with charts of FPS, CPU, memory and requests on one timeline (drag over them to sum up a stretch: its peaks, hangs, stalls, requests and the threads that used the CPU; a hang's Inspect selects the seconds around it), each monitor's owners,
-and the hangs with their stacks.
+The [macOS viewer](#macos-viewer) has a Performance view: CPU, memory, frames per second and
+janky frames as live charts, and hangs, janky frames, stalls and memory signals with their
+stacks. Monitors started there stop when the viewer leaves.
 
 The sample's perf lab injects known jank, hangs, CPU burn and allocations and checks Hopi's record
 against them; see [Sample app](#sample-app) and `benchmark/perf/`.
@@ -920,8 +884,8 @@ the benchmark scripts call that arm, the build with no runtime, `nohopi` since 2
 | Copy cURL of a 16 MB request body, JVM (2026-10-23) | 0.4–1 ms, 0.05–0.15x the body (was 9–25 ms, 4–10x), cut inside a closed quote with a warning line |
 | Giant bodies, bridge `get` of a 16 MB body (2026-10-23) | 1.0x an ASCII body allocated in the app (was 7.9x), transient 18 MB (was 80–130 MB); CJK/emoji 3.3x, base64 2.7x |
 | A tail client that stops reading (2026-10-23) | holds body-free events only (was up to ~2,400 full snapshots, 600 MB at the default cap) |
-| Desktop viewer connected to an idle app, JVM bridge in-process (`ViewerTest`, 2026-10-23) | the app's 5 bridge threads (accept, a reader and a writer per connection) 0 ns CPU over 3 s; exactly 2 connections |
-| Desktop viewer connected to the sample, Android emulator (API 35, `DeviceViewerUiTest`, 2026-10-23) | Hopi's 5 threads 0 CPU ticks over 60 s idle; 2 connections on the app side, never more through a force-stop, a relaunch and an adb server reset; 500 `POST /items` through the Ktor plugin while the recorder lived inside it, 2660 to 2781 ms connected, 2526 to 2704 ms disconnected |
+| The Compose Desktop viewer (removed 2026-11-07) connected to an idle app, JVM bridge in-process (2026-10-23) | the app's 5 bridge threads (accept, a reader and a writer per connection) 0 ns CPU over 3 s; exactly 2 connections |
+| The Compose Desktop viewer connected to the sample, Android emulator (API 35, 2026-10-23) | Hopi's 5 threads 0 CPU ticks over 60 s idle; 2 connections on the app side, never more through a force-stop, a relaunch and an adb server reset; 500 `POST /items` through the Ktor plugin while the recorder lived inside it, 2660 to 2781 ms connected, 2526 to 2704 ms disconnected |
 | Release APK of the sample | 32 Hopi classes, all of `hopi-api` and `hopi-ktor`; no runtime type defined or referenced and no Hopi manifest component, whatever `-Phopi.enabled` says (2026-10-29, `verifyReleaseHasNoRuntime`). Dated history: 12 Hopi classes (the noop twins) and 0 from `hopi-core` without the flag, 345 and 97 with it, before the Gradle plugin (2026-10-23); 13 noop classes with it, whatever the flag (2026-10-24) |
 | Automatic Android capture, emulator (API 35), debuggable builds, small loopback GET | +22.5 to +24 µs of the calling thread's CPU and +12 to +27 µs median wall per request against the noop build (2026-10-27, after the bug fixes, medians of 8 rounds; +85 to +95 µs and +350 to +390 µs at the first measurement, 2026-10-24) (`benchmark/android-capture/`) |
 | Performance monitors, emulator (API 35, debug build), perf lab against outside references | 28 of 28 checks: 30 frames blocked 50 or 100 ms are 31 janky each (gfxinfo 29 to 30); hangs of 300 ms to 3 s and a 600 ms spin inside a Compose `onClick` caught once each within 0 to 5 ms, with stacks naming the lab's function; 2 burning threads 198 % (`/proc` 199 %); 64 MB heap and native allocations +64 MB; three trim levels. Rerun 2026-10-26 after the stage 5 fixes: 28 of 28 again; iPhone 17 simulator 21 of 21 (a 300 ms hang reads 300 to 302 ms on fresh installs, once Hopi names stacks only after the hang ended). Android again 28 of 28 on 2026-10-27, after the bug fixes; iOS not rerun |
@@ -1014,7 +978,7 @@ the current build no longer does, since the app target weak-links CoreGraphics a
 
 Each symptom points at the section that covers it.
 
-- **The CLI or the desktop viewer finds no app** (the CLI exits with 2, not reachable): the app
+- **The CLI or the macOS viewer finds no app** (the CLI exits with 2, not reachable): the app
   serves them over its bridge, which needs a debug build with a runtime (on Android,
   `hopi-network` or `hopi-perf` declared as `debugImplementation`) and `agentBridge` left on (the
   default). See
@@ -1046,8 +1010,6 @@ Each symptom points at the section that covers it.
   [iOS](#ios-every-urlsession-request-automatically).
 - **The iOS Debug app aborts in dyld before `main` on an older iOS**: weak-link the library dyld
   names in the app target's `OTHER_LDFLAGS`. See [iOS](#ios-every-urlsession-request-automatically).
-- **The desktop viewer does not see an iPhone app restart over USB**: press ⌘R once the app runs.
-  See [Desktop viewer](#desktop-viewer).
 - **The build script cannot assign `enabled = true`** (Gradle before 8.2): write
   `enabled.set(true)`. See [Requirements](#requirements).
 - **A KMP module's build stops with the plugin's message**: the Kotlin Gradle plugin is older than
@@ -1081,7 +1043,7 @@ scripts. What changed, by the plan's stage:
   name `hopi-api`, `hopi-start` and `hopi-ktor` as above; the Gradle plugin added the runtimes to
   debuggable variants itself (until 2026-11-05, see above).
 - Stage 5 (2026-10-28): no in-app UI. `HopiScreen`, `HopiLauncher` with its floating button, the
-  perf HUD and the in-app rules list are gone; the CLI and the desktop viewer are the surfaces.
+  perf HUD and the in-app rules list are gone; the CLI and the desktop viewer (now the macOS viewer) are the surfaces.
 - Stages 7 and 8 (2026-10-28 and 29): `HopiRules` and `HopiPerf` are in `hopi-api`, with the same
   packages and names. `HopiRules` needs a start: a JVM process without `Hopi.start` and an Android
   host unit test now get `-1`, where `hopi-rules` worked with no start. `HopiPerf.install` is gone,
@@ -1159,7 +1121,7 @@ requires each one's `.asc` ([`docs/RELEASING.md`](RELEASING.md)).
 build refuses a `-Phopi.version` that differs from it. The artifacts are published by
 `gradle/publishing.gradle.kts`, which each published module applies, and what Maven Central
 requires of them and of the plugin comes from `gradle/maven-central.gradle.kts`; `hopi-connect`,
-the CLI, the desktop viewer with its screens (`hopi-ui`) and the sample are not published.
+the CLI and the sample are not published (nor is the macOS viewer, an Xcode project).
 
 The consumer floors under [Requirements](#requirements) are checked after `:checkPublication` by
 `compat/run.sh`, which builds the apps in `compat/` on the oldest and the newest toolchains it
@@ -1169,7 +1131,6 @@ own; see [`compat/README.md`](../compat/README.md)), and by
 Gradle 8.0.2, AGP 8.0.2 and the Kotlin Gradle plugin 2.2.0; neither is part of `check`.
 
 The giant-body benchmarks are opt-in and slow (minutes): run one module at a time with
-`./gradlew :hopi-network:jvmGiantBodyBenchmark` (the Ktor plugin's recorder; also `:hopi-core:` and
-`:hopi-ui:`), `./gradlew :hopi-cli:testGiantBodyBenchmark` or
+`./gradlew :hopi-network:jvmGiantBodyBenchmark` (the Ktor plugin's recorder; also `:hopi-core:`), `./gradlew :hopi-cli:testGiantBodyBenchmark` or
 `./gradlew :hopi-network:androidHostGiantBodyBenchmark` (automatic Android capture, OkHttp and
 `HttpURLConnection`); tables land in `<module>/build/giant-body/`.

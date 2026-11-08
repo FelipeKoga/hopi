@@ -60,7 +60,7 @@ val hopiCapture: Boolean = providers.gradleProperty("sample.hopiCapture").map { 
 
 hopi {
     enabled.set(hopiCapture)
-    // The CLI and the desktop viewer reach the app through its bridge.
+    // The CLI and the macOS viewer reach the app through its bridge.
     agentBridge.set(true)
     // Capture's caps, read at build time and preset for the store at start: the giant-body
     // measurements and DeviceViewerUiTest's 5 MB body install the debug build with

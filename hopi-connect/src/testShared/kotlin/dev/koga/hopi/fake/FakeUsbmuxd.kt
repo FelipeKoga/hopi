@@ -31,7 +31,7 @@ import kotlin.concurrent.thread
  * reply's header. [detach] drops a device and cuts its relays, as unplugging it would. Every
  * request is kept in [requests], with the body its header's length took (a test parses it whole).
  *
- * Compiled into the tests of hopi-connect, the CLI and the desktop viewer (their build files add
+ * Compiled into the tests of hopi-connect and the CLI (their build files add
  * this directory), so it uses only the JDK.
  */
 internal class FakeUsbmuxd : AutoCloseable {

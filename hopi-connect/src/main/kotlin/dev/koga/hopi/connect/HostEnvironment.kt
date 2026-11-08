@@ -50,40 +50,6 @@ public object SystemProcessRunner : ProcessRunner {
     private fun InputStream.readText(): String = use { it.readBytes().decodeToString() }
 }
 
-/**
- * A subprocess that runs until closed (`adb track-devices`): [input] is its stdout, read by one
- * thread blocked on it. [close] ends the process, which ends [input].
- */
-@HopiInternalApi
-public interface StreamingProcess : AutoCloseable {
-    public val input: InputStream
-}
-
-/** Starts a [StreamingProcess] from an argument array, never through a shell. Injected for tests. */
-@HopiInternalApi
-public fun interface StreamStarter {
-    /** Throws [IOException] when the program cannot be started. */
-    public fun start(command: List<String>): StreamingProcess
-}
-
-@HopiInternalApi
-public object SystemStreamStarter : StreamStarter {
-    override fun start(command: List<String>): StreamingProcess {
-        val process = ProcessBuilder(command)
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start()
-        process.outputStream.close()
-        return object : StreamingProcess {
-            override val input: InputStream = process.inputStream
-
-            override fun close() {
-                process.destroy()
-                input.close()
-            }
-        }
-    }
-}
-
 /** JVM shutdown hooks, so a SIGINT during `tail` still removes the adb forward. */
 @HopiInternalApi
 public interface ShutdownHooks {
@@ -114,8 +80,6 @@ public class HostEnvironment(
     public val isMac: Boolean = System.getProperty("os.name").orEmpty().startsWith("Mac"),
     public val isExecutable: (Path) -> Boolean = { Files.isRegularFile(it) && Files.isExecutable(it) },
     public val shutdownHooks: ShutdownHooks = RuntimeShutdownHooks,
-    /** Long-running subprocesses (the desktop viewer's `adb track-devices`); the CLI starts none. */
-    public val streams: StreamStarter = SystemStreamStarter,
     /** usbmuxd's socket, through which iPhones on USB are listed and reached (macOS with Xcode only). */
     public val usbmuxdSocket: Path = USBMUXD_SOCKET,
     /** Where JVM processes on this host write `<pid>/bridge.json` (the JVM bridge's default directory). */

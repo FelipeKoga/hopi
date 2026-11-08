@@ -38,7 +38,7 @@ class ViewerCommandTest {
     fun aMissingAppSaysHowToInstallIt() {
         val run = viewer(exitCode = 1)
         assertEquals(ExitCode.NOT_REACHABLE, run.exitCode)
-        assertTrue("packageDmg" in run.stderr, run.toString())
+        assertTrue("releases" in run.stderr, run.toString())
     }
 
     @Test

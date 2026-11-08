@@ -319,8 +319,8 @@ abstract class PublicationCheck : DefaultTask() {
 }
 
 // Every library a consumer needs (docs/GUIDE.md, "Install"), by its targets and the cinterop klibs
-// of its main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI, the
-// desktop viewer with its screens (hopi-ui) and the sample are not published. The
+// of its main compilation; each applies gradle/publishing.gradle.kts. hopi-connect, the CLI and the
+// sample are not published (the macOS viewer, hopi-mac, is an Xcode project). The
 // io.github.felipekoga.hopi plugin injects the network runtime (hopi-network), hopi-core and, with
 // `perf { enabled }`, hopi-perf into debuggable build types only and aligns hopi-api (HopiRules,
 // HopiPerf) and hopi-ktor (the thin Ktor plugin) with its own version, all of them listed here.

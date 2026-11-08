@@ -18,7 +18,7 @@ plugins {
 }
 
 // The start's settings, which Hopi passes to Hopi.start in a Debug build: the Android app's
-// (sample/androidApp). The CLI and the desktop viewer reach the app through its bridge; the
+// (sample/androidApp). The CLI and the macOS viewer reach the app through its bridge; the
 // giant-body measurements set the caps at build time (`-Psample.maxBodyBytes=8388608`, through the
 // Xcode build phase's SAMPLE_GRADLE_ARGS); the monitors are registered, none started.
 hopi {

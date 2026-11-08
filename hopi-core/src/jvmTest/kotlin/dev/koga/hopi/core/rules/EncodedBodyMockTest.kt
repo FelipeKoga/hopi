@@ -48,7 +48,7 @@ class EncodedBodyMockTest {
                 assertEquals(listOf("Content-Type" to "application/json", "X-Kept" to "1"), copied.headers, "$source $encoding")
             }
         }
-        // The bridge's `fromTransaction` (the desktop's "Mock this response", the CLI's `--from`) builds it the same way in the app.
+        // The bridge's `fromTransaction` (the viewer's "Mock this response", the CLI's `--from`) builds it the same way in the app.
         val context = object : RuleJsonContext {
             override fun blob(id: Long): ByteArray? = null
 

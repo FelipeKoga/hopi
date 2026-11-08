@@ -16,7 +16,7 @@ that wake threads. Anything that has to sample states its interval and its overh
 line between Hopi and DebugSwift, which slows apps down by running every monitor at once.
 
 Every tool exposes its data on three surfaces: the realtime log line, the bridge/CLI for AI agents,
-and the desktop viewer. There is no in-app screen (decided 2026-10-28; the in-app UI was removed in
+and the macOS viewer. There is no in-app screen (decided 2026-10-28; the in-app UI was removed in
 the plan's stage 5).
 
 ## Backlog
@@ -87,7 +87,7 @@ per-provider constraints, so bad events are caught in debug instead of silently 
   prefixes, max params per event, max param key / string value length, allowed value types,
   required params per event, max user properties. Example: Firebase limits event names to 40 chars,
   params to 25 per event, and string values to 100 chars.
-- **Output.** Each event is shown with violations highlighted in the desktop viewer, emitted as an
+- **Output.** Each event is shown with violations highlighted in the macOS viewer, emitted as an
   NDJSON log line (`"violations":[…]`), and available through the bridge/CLI
   (`hopi events --violations --json`) so an AI agent can audit tracking in a test run.
 - **Cost.** Validation runs off the caller's thread, only for events Hopi receives; bounded ring
@@ -117,57 +117,28 @@ ViewModel receives, every UiState it emits, and every one-off event (navigation,
 - Open questions: time travel (replaying an old state into the UI) vs read-only in v1; how to
   capture states that are not data classes; privacy redaction of fields.
 
-### Desktop viewer
-Built in v1 (`hopi-desktop`, see the architecture doc's "Desktop viewer" section). A
-Compose Desktop app (macOS first, an unsigned `.dmg`) that shows the app's traffic on the
-developer's screen instead of inside the emulator, over the existing bridge protocol (plus two
-additive fields: `reqHeld`/`resHeld` on summaries of cut bodies, `through` on the `clear` reply),
-so the app pays no extra cost.
-- **Connection (built).** The CLI's target code in the shared JVM module `hopi-connect`:
-  `adb forward` + proof check on Android, `bridge.json` + token on the iOS simulator and the JVM,
-  and on an iPhone over USB `bridge.json` copied with `devicectl` + a relay through usbmuxd (built
-  2026-10-30, the runtime-split plan's stage 12; architecture doc, "iPhone over USB"),
-  a device and app picker (Android lists the bridges listening on the device), auto-reconnect
-  when the app restarts or adb resets. Reconnects are event-driven: `adb track-devices`, `adb
-  track-jdwp` and a watch on the `bridge.json` directory, never a polling loop (the JDK's watch
-  service polls on macOS, so a watch runs only while the viewer waits for the app, or for the
-  picker's JVM processes while the window has focus and nothing is connected). On Android a
-  bounded settle (at most 4 attempts over 5.5 s) follows an event, because the process appears
-  before its bridge binds.
-- **UI (built).** `hopi-ui`'s list/detail composables on the JVM target (`HopiPanes`),
-  list and detail side by side, keyboard navigation (↓/↑, Enter, Esc, ⌘F, ⌘K, ⌘E, ⌘R), a status
-  bar, the Rules (⌘L) and Perf (⌘P) panels; a shadcn/ui-style design system, light or dark with the system,
-  with color for status only (the owner's decision of 2026-10-28). Later: multiple windows/tabs per
-  device, larger bodies shown more comfortably.
-- **Desktop extras.** Built: export a session as HAR 1.2 and NDJSON (bodies fetched on demand,
-  bounded), copy as cURL. Later: open a body in an external editor, diff two transactions, filter
-  by app when several are connected.
-- **Bodies (built).** Fetched on demand with `get` only for the selected transaction; the list
-  streams summaries via `tail`, so a giant body never crosses the bridge unless opened.
-- **Distribution.** Built: an unsigned `.dmg` (`:hopi-desktop:packageDmg`, 65 MB). Later:
-  signing and notarization, `jpackage` builds for Linux/Windows. Never shipped as a dependency of
-  the app.
-- **Cost on the app.** Same as a connected CLI `tail`: measured on the JVM bridge, the app's
-  bridge threads take 0 ns CPU while the viewer is connected and idle; on the API 35 emulator
-  (`DeviceViewerUiTest`, 2026-10-23, before automatic capture) the sample's 5 Hopi threads took
-  0 ticks over 60 s with the viewer connected (6 threads, 0 ticks on 2026-10-27 and 2026-10-28),
-  and 500 `POST /items` took 2660 to 2781 ms connected against 2526 to 2704 ms disconnected (3
-  alternating rounds each; 2627 to 2744 against 2529 to 2696 ms on 2026-10-28).
-- **`DeviceViewerUiTest` on Android, fixed 2026-10-28** (the runtime-split plan's stage 4; stale
-  from 2026-10-27, 17 of 18): "5 MB body opens" failed because OkHttp capture recorded the giant
-  GET at the `hopi { }` cap, which `--el maxBodyBytes` never reached; the test now needs the debug
-  build installed with `-Psample.maxBodyBytes=8388608`, which the start presets. Its overhead step
-  counted the POSTs in a stale `build/evidence/desktop/devserver.log` and looked for the result
-  line below the fold of the Diagnostics tab; it now counts them in `<evidence>/devserver.ndjson`
-  and reads the line from logcat. Its adb reset accepts a server that another adb client started
-  first. 18 of 18 pass with figures.
+### macOS viewer
+Built as a native SwiftUI app (`hopi-mac`, see `hopi-mac/README.md` and the architecture doc's
+"macOS viewer" section) that shows the app's traffic, rules and performance on the developer's
+screen instead of inside the emulator, over the existing bridge protocol, so the app pays no extra
+cost. It reaches Android emulators and devices, booted iOS simulators and JVM apps, and
+`hopi viewer --app <id>` opens it on an app. The Compose Desktop viewer it replaced (`hopi-desktop`
+and its screens, `hopi-ui`) was removed on 2026-11-07; the host code it used stays in
+`hopi-connect` for the CLI. Measured with that viewer (2026-10-23), a connected viewer costs the
+app what a connected CLI `tail` does: the app's bridge threads took 0 ns CPU while it was
+connected and idle, and on the API 35 emulator 500 `POST /items` took 2660 to 2781 ms connected
+against 2526 to 2704 ms disconnected.
+- **Distribution.** Built: a `.dmg` from CI (`scripts/mac-dmg.sh`, `.github/workflows/mac-app.yml`),
+  attached to each tagged release; unsigned for now, signed and notarized once the Apple secrets
+  are configured (`docs/RELEASING.md`, "The macOS viewer"). Never shipped as a dependency of the
+  app.
+- Later: open a body in an external editor, diff two transactions, larger bodies shown more
+  comfortably.
 - Open: an iPhone over USB is tested against a stand-in usbmuxd only (and the framing against
   Apple's daemon with no phone attached): the run on a phone, which also settles what the
   architecture doc lists as assumed there, is the owner's, as is an Android phone over USB and
-  wireless adb. usbmuxd's attach and detach events (`Listen`) are not used, so the viewer sees
-  neither a phone plugged in nor its app starting: Refresh and Reconnect (⌘R) do it by hand.
-  (Whether the in-app screen becomes optional is settled: it was removed on 2026-10-28, and the
-  desktop viewer and the CLI are the surfaces.)
+  wireless adb. (Whether the in-app screen becomes optional is settled: it was removed on
+  2026-10-28, and the viewer and the CLI are the surfaces.)
 
 ### Automatic platform capture (every request, third-party SDKs included)
 - **iOS, URLSession (built).** `hopi-network` (since the runtime-split plan's stage 9),
@@ -240,7 +211,7 @@ so the app pays no extra cost.
 - Surfaces: bridge write commands (after a verified `hello`, never pipelined), blobs for large
   bodies, `hello.rules`, rules notices on `tail`; the CLI (`mock|fail|delay|edit add`,
   `rules ls|rm|clear|enable|disable|reset`, exit code 4); `HopiRules` (Kotlin, Swift
-  `HopiRules.shared`); the desktop Rules panel (⌘L), "Mock this response"; the in-app rules list
+  `HopiRules.shared`); the macOS viewer's Rules view and its mock of a request's response; the in-app rules list
   and "Mock this response" (removed with the in-app UI in the runtime-split plan's stage 5). The
   sample's rules self-test and
   host targets (`--es rulesVerify all`, `-verifyRules`) drive every action on every source.
@@ -309,8 +280,7 @@ kotlinx-serialization 1.10 are built by 2.3). Left:
   Android target on the floor.
 
 ### License, Maven Central and CI
-Done (Release R1, 2026-11-04): Hopi is Apache-2.0 (`LICENSE`; `hopi-ui`'s Open Runde fonts keep
-the SIL OFL 1.1). Every artifact and the Gradle plugin go to Maven Central, from the first tagged
+Done (Release R1, 2026-11-04): Hopi is Apache-2.0 (`LICENSE`). Every artifact and the Gradle plugin go to Maven Central, from the first tagged
 release on, under `io.github.felipekoga.hopi`, now the group and the plugin id (the Kotlin packages
 stay `dev.koga.hopi`): each POM carries the project's information, every publication a sources and
 an empty javadoc jar, and the release build signs every file; `:checkPublication` checks Maven
@@ -320,7 +290,7 @@ macOS on every push and pull request. Left:
 - Real API docs in the javadoc jars (Dokka), which are empty placeholders.
 - The Gradle Plugin Portal, for apps that resolve plugins from it alone.
 - A `CHANGELOG.md` and a `SECURITY.md`.
-- The CLI and the desktop viewer as downloads (a CLI archive, a signed DMG).
+- The CLI as a download (a CLI archive), and the macOS viewer's DMG signed and notarized.
 
 ### Replay (no priority)
 Backlog, no priority. Re-sending a recorded request (optionally edited) through the app's own

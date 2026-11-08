@@ -98,68 +98,6 @@ public class Targets(private val environment: HostEnvironment) {
     public fun androidBridges(serial: String): List<String> = adb?.bridges(serial).orEmpty()
 
     /**
-     * Follows `adb track-devices`: [onDevices] gets adb's device list at once and whenever it
-     * changes (a device attached, detached, gone offline, an adb reset), on one thread blocked on
-     * adb's output, never a poll. [onEnd] is called when adb ends the stream (the adb server
-     * stopped), not after [AutoCloseable.close]. Null when adb is not installed.
-     */
-    public fun trackAndroidDevices(onDevices: (List<AdbDevice>) -> Unit, onEnd: () -> Unit): AutoCloseable? {
-        val adb = adb ?: return null
-        // `-l` as `adb devices -l`: with the model, so an update does not drop what the list showed.
-        return track(adb.command("track-devices", "-l"), "hopi-adb-track-devices", onEnd) { frame ->
-            onDevices(parseAdbDevices(frame))
-        }
-    }
-
-    /**
-     * Follows `adb -s <serial> track-jdwp`, the debuggable processes of [serial]: [onChange] is
-     * called whenever one starts or ends after the first list (an app restart; Hopi's bridge
-     * only serves debuggable builds). The process may not have bound its bridge yet when it is
-     * listed. [onEnd] as in [trackAndroidDevices]. Null when adb is not installed.
-     */
-    public fun trackDebuggableProcesses(serial: String, onChange: () -> Unit, onEnd: () -> Unit): AutoCloseable? {
-        val adb = adb ?: return null
-        var last: Set<Int>? = null
-        return track(adb.command("-s", serial, "track-jdwp"), "hopi-adb-track-jdwp", onEnd) { frame ->
-            val pids = parseJdwpPids(frame)
-            val previous = last
-            last = pids
-            if (previous != null && previous != pids) onChange()
-        }
-    }
-
-    private fun track(command: List<String>, name: String, onEnd: () -> Unit, onFrame: (String) -> Unit): AutoCloseable {
-        val process = try {
-            environment.streams.start(command)
-        } catch (e: IOException) {
-            throw notReachable("cannot run adb at ${command.first()}: ${e.message}")
-        }
-        val closed = AtomicBoolean(false)
-        Thread({
-            try {
-                while (true) onFrame(readTrackFrame(process.input) ?: break)
-            } catch (_: IOException) {
-                // Closed, or adb went away: both end the stream.
-            }
-            process.close()
-            if (!closed.get()) onEnd()
-        }, name).apply { isDaemon = true }.start()
-        return AutoCloseable {
-            if (closed.compareAndSet(false, true)) process.close()
-        }
-    }
-
-    /**
-     * Where [app]'s bridge on the booted simulator [device] (the only one when null) writes its
-     * `bridge.json`; the file need not exist. Throws [CliException] like [open]. A USB iPhone's is
-     * on the device: there is none on the host.
-     */
-    public fun iosBridgeFile(app: String, device: String?): Path {
-        val simctl = simctl ?: throw notReachable(NO_XCODE)
-        return simulatorBridge(simctl, simctl.booted(), app, device).first
-    }
-
-    /**
      * The bridge of [app] on [platform] (inferred from the attached targets when null), on [device]
      * when several are attached; a JVM bridge is found by its [bridgeFile] and accepts any app when
      * [app] is null. The caller closes the endpoint (Android: it removes the adb forward).
@@ -170,18 +108,6 @@ public class Targets(private val environment: HostEnvironment) {
             Platform.Ios -> openIos(requireApp(app), device)
             Platform.Jvm -> openJvm(bridgeFile ?: throw usageError("--platform jvm needs --bridge-file <path>"), app)
         }
-
-    /**
-     * The bridge of [app] on the USB iPhone [udid], never a simulator: what the desktop viewer
-     * opens for an iPhone it listed, so an unplugged one says so. Throws [CliException] like [open].
-     */
-    public fun openUsbIphone(app: String, udid: String): BridgeEndpoint {
-        if (devicectl == null) throw notReachable(NO_XCODE_USB)
-        val attached = usbDevices() ?: throw notReachable("usbmuxd is not running: no socket at ${environment.usbmuxdSocket}")
-        val device = attached.firstOrNull { sameUdid(it.udid, udid) }
-            ?: throw notReachable("${usbLabel(udid)} is not attached (usbmuxd does not list it): plug it in, then reconnect")
-        return openUsb(app, device)
-    }
 
     private fun requireApp(app: String?): String = app ?: throw usageError("android and ios targets need --app <id>")
 

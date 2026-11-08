@@ -1,6 +1,6 @@
 # Hopi for macOS
 
-The desktop viewer as a native SwiftUI app (macOS 26 or later, Liquid Glass). It talks to an app's
+Hopi's viewer: a native SwiftUI app (macOS 26 or later, Liquid Glass). It talks to an app's
 bridge over the same NDJSON protocol as the CLI (docs/ARCHITECTURE.md, "Wire protocol").
 
 Reaches apps on Android emulators and devices (`adb forward`, with the app's proof), booted iOS

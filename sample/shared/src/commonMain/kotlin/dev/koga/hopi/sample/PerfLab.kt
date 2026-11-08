@@ -312,7 +312,7 @@ internal fun PerfLabScreen(verify: Set<String>?, onVerifyStarted: () -> Unit, on
             SampleButton("Stop every monitor", primary = false, modifier = Modifier.fillMaxWidth(), onClick = { HopiPerf.stop() })
             Caption(
                 "Each run starts every monitor (frames, hangs, CPU, memory) and leaves them running. " +
-                    "Read the result in the desktop viewer's Perf panel, with `hopi perf snapshot` or `hopi hangs`.",
+                    "Read the result in the macOS viewer's Perf panel, with `hopi perf snapshot` or `hopi hangs`.",
             )
             lines.forEach { Body(it) }
         }

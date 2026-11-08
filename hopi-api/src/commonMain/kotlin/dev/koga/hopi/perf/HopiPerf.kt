@@ -8,7 +8,7 @@ import dev.koga.hopi.api.HopiRuntimes
  * and opt-in on its own, and a monitor that is off costs nothing: no thread, no listener, no timer,
  * no class of its own loaded. A monitor that is on states its cost in the design's budget table.
  * Data stays in memory, in bounded rings, and is never persisted or sent anywhere; it reaches the
- * realtime log (`HopiPerf` lines) and the bridge (`hopi perf …`, the desktop viewer's Perf panel).
+ * realtime log (`HopiPerf` lines) and the bridge (`hopi perf …`, the macOS viewer's Perf panel).
  *
  * Every call does nothing until a debug build's start registers the perf runtime, as in a release
  * build: on Android the Gradle plugin's `perf { enabled = true }`, on iOS `Hopi.shared.start` and on

@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
  * The Ktor plugin's recorder (docs/ARCHITECTURE.md, "Ktor plugin"): what `hopi-ktor`'s thin `Hopi`
  * installs on a client through the hooks the network tool registered ([KtorHooks]). It records
  * every exchange of that client into the process-wide Hopi store, for the platform log and the
- * agent bridge (the CLI and the desktop viewer), and applies the rules to them.
+ * agent bridge (the CLI and the macOS viewer), and applies the rules to them.
  */
 internal object KtorRecorder {
     /**

@@ -239,7 +239,7 @@ class PerfBridgeSessionTest {
     }
 
     /**
-     * A stream resumed from the highest seq seen (the desktop's reopen, a CLI resume) still gets the
+     * A stream resumed from the highest seq seen (the viewer's reopen, a CLI resume) still gets the
      * later versions of a hang at or below it: a hang is updated in place under its seq.
      */
     @Test

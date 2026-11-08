@@ -8,7 +8,7 @@ struct IOSApp: App {
         // generates Hopi into sample/shared). In a Debug build it starts Hopi with
         // sample/shared's hopi { } block: every URLSession request of the process is recorded from
         // here on, the app's own and those of SDKs it does not own, the bridge is up, and the
-        // performance monitors are registered for the bridge (`hopi perf start`, the desktop
+        // performance monitors are registered for the bridge (`hopi perf start`, the macOS
         // viewer's Perf panel) and for HopiPerf, the code API, none started (each costs nothing
         // until one is; `-hopiPerf frames,hangs` starts monitors at launch). In a Release build,
         // or one built with -Phopi.enabled=false, it does nothing.

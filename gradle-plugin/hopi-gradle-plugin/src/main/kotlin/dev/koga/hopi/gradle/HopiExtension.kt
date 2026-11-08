@@ -56,7 +56,7 @@ public abstract class HopiExtension {
     public abstract val summaryLog: Property<Boolean>
 
     /**
-     * The device-local bridge the CLI and the desktop viewer connect to, in debug builds only; on
+     * The device-local bridge the CLI and the macOS viewer connect to, in debug builds only; on
      * by default (it authenticates every connection, and a release build has no runtime to serve it).
      */
     public abstract val agentBridge: Property<Boolean>
