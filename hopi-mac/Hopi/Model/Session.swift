@@ -27,6 +27,10 @@ final class Session {
     /// One per command sent, in order: each takes reply lines until it returns true (done).
     @ObservationIgnored private var waiting: [(Data?) -> Bool] = []
     @ObservationIgnored private var nextBlob: Int64 = 0
+    /// The command connection that holds the blobs [ruleBody] uploaded: the app keeps blobs per
+    /// connection, so a rule naming them must be added on that one.
+    @ObservationIgnored private weak var blobsOn: CommandLine?
+    @ObservationIgnored private var blobsPending = false
     /// Set by [stop]: no command connection opens again, and every request returns nil.
     @ObservationIgnored private var stopped = false
     /// The last `clear`'s `through`: a tail line for a cleared id that arrives after it is dropped.
@@ -60,12 +64,25 @@ final class Session {
         failWaiting()
     }
 
-    /// The whole transaction, bodies included; nil when it is gone or the app went away.
-    func detail(_ id: Int64) async -> Detail? {
-        guard let data = await request(["cmd": "get", "id": id]) else { return nil }
-        return await Task.detached(priority: .userInitiated) {
+    enum Fetched {
+        case found(Detail)
+        /// The app no longer holds it (evicted or cleared).
+        case gone
+        /// The connection closed, or the reply could not be read: worth trying again.
+        case failed(String)
+    }
+
+    /// The whole transaction, bodies included.
+    func detail(_ id: Int64) async -> Fetched {
+        guard let data = await request(["cmd": "get", "id": id]) else { return .failed(Self.gone.message) }
+        if (try? JSONDecoder().decode(WireType.self, from: data))?.type == "error" {
+            let error = try? JSONDecoder().decode(WireError.self, from: data)
+            return error?.code == "NOT_FOUND" ? .gone : .failed(error?.message ?? "The app refused get.")
+        }
+        let detail = await Task.detached(priority: .userInitiated) {
             try? JSONDecoder().decode(Detail.self, from: data)
         }.value
+        return detail.map(Fetched.found) ?? .failed("The app's reply could not be read.")
     }
 
     /// The `get` reply as the app sent it: one NDJSON export line.
@@ -93,6 +110,12 @@ final class Session {
     /// Adds [rule], the wire object of `rules.add`. Bodies too long for one line go up as blobs first.
     @discardableResult
     func addRule(_ rule: [String: Any]) async throws -> Rule {
+        if blobsPending {
+            blobsPending = false
+            guard let blobsOn, blobsOn === commands else {
+                throw WireError(code: "GONE", message: "The connection dropped while the body was uploading: save again.")
+            }
+        }
         guard let line = await request(["cmd": "rules.add", "rule": rule]) else { throw Self.gone }
         return try Self.rule(line)
     }
@@ -134,6 +157,8 @@ final class Session {
             offset += Data(base64Encoded: chunk)?.count ?? 0
             start = end
         }
+        blobsOn = commands
+        blobsPending = true
         return ["blob": blob, "size": bytes.count]
     }
 

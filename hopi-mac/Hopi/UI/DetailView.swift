@@ -13,6 +13,7 @@ struct DetailView: View {
 
     @State private var detail: Detail?
     @State private var loaded = false
+    @State private var failure: String?
     @State private var side: Side = .response
 
     /// The summary's state, so a pending request is fetched again once it ends.
@@ -24,6 +25,9 @@ struct DetailView: View {
         Group {
             if let detail {
                 content(detail)
+            } else if let failure {
+                ContentUnavailableView("Could Not Load", systemImage: "exclamationmark.triangle",
+                                       description: Text(failure))
             } else if loaded {
                 ContentUnavailableView("Request Gone", systemImage: "questionmark.circle",
                                        description: Text("The app no longer holds this request."))
@@ -32,7 +36,19 @@ struct DetailView: View {
             }
         }
         .task(id: state) {
-            detail = await session.detail(id)
+            let fetched = await session.detail(id)
+            guard !Task.isCancelled else { return }
+            switch fetched {
+            case .found(let found):
+                detail = found
+                failure = nil
+            case .gone:
+                detail = nil
+                failure = nil
+            case .failed(let message):
+                // A refetch that failed keeps what is shown; only an empty inspector says so.
+                if detail == nil { failure = message }
+            }
             loaded = true
         }
         .toolbar {
@@ -244,9 +260,11 @@ private struct BodySection: View {
         guard let text = content?.text else { return }
         let contentType = content?.contentType
         let key = key
-        let result = await Task.detached(priority: .userInitiated) {
+        let work = Task.detached(priority: .userInitiated) {
             RenderedBody.make(text, contentType: contentType)
-        }.value
+        }
+        // Another selection cancels this one: the formatting stops between its steps.
+        let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
         guard !Task.isCancelled else { return }
         rendered = result
         renderedKey = key

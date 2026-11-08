@@ -34,6 +34,7 @@ final class PerfSession {
     private(set) var screen: String?
 
     @ObservationIgnored private var connection: LineConnection?
+    @ObservationIgnored private var hello: Hello?
     @ObservationIgnored private var lastSeq: Int64 = 0
     private static let window = 300
 
@@ -42,7 +43,7 @@ final class PerfSession {
     }
 
     /// Whether this viewer may start and stop monitors.
-    var canControl: Bool { perf?.remoteControl == true }
+    var canControl: Bool { hello?.perfControl != false && perf?.remoteControl == true }
 
     func start() {
         open(holding: holding)
@@ -79,6 +80,13 @@ final class PerfSession {
                     guard let hello = try? JSONDecoder().decode(Hello.self, from: data),
                           self.target.endpoint.accepts(hello) else {
                         self.status = .unavailable("This is not \(self.target.app)'s bridge: its hello lacks the app's proof.")
+                        connection.close()
+                        return
+                    }
+                    self.hello = hello
+                    // Nothing perf.* goes to an app that does not offer it (an older Hopi says nothing: tried).
+                    if hello.perf == false {
+                        self.status = .unavailable("This build of \(self.target.app) has no performance monitors (add hopi-perf).")
                         connection.close()
                         return
                     }
@@ -128,7 +136,12 @@ final class PerfSession {
             }
         case "error":
             let error = try? decoder.decode(WireError.self, from: data)
-            status = .unavailable(error?.message ?? "The app refused perf.tail.")
+            if error?.code == "SLOW_CLIENT" {
+                // Not a refusal: the stream fell behind. Reconnect resumes after the last event seen.
+                status = .closed(error?.message)
+            } else {
+                status = .unavailable(error?.message ?? "The app refused perf.tail.")
+            }
             connection?.close()
         default:
             break

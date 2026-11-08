@@ -49,8 +49,13 @@ final class Viewer {
     private(set) var scanning = false
     private(set) var session: Session?
     var selectedTarget: Target.ID? {
-        didSet { if selectedTarget != oldValue { attach() } }
+        didSet {
+            // A choice made by hand wins over the app named at launch, even before it shows up.
+            if !scanSelecting { launch = LaunchTarget(arguments: []) }
+            if selectedTarget != oldValue { attach() }
+        }
     }
+    @ObservationIgnored private var scanSelecting = false
     var selectedTransaction: Summary.ID?
     var search = ""
     /// Bumped by ⌘F; the list focuses its search field.
@@ -74,6 +79,8 @@ final class Viewer {
         scanning = true
         targets = await Discovery.scan()
         scanning = false
+        scanSelecting = true
+        defer { scanSelecting = false }
         if !launch.isEmpty {
             // The named app only: another one attached instead would read as the one asked for.
             guard let match = targets.first(where: launch.matches) else { return }
@@ -81,13 +88,23 @@ final class Viewer {
             selectedTarget = match.id
             return
         }
-        if selectedTarget == nil || !targets.contains(where: { $0.id == selectedTarget }) {
+        if selectedTarget == nil {
+            selectedTarget = targets.first?.id
+        } else if !targets.contains(where: { $0.id == selectedTarget }), session?.status != .live {
+            // A probe that missed a live session (2 s timeout) does not tear it down.
             selectedTarget = targets.first?.id
         }
     }
 
+    /// Scans again first: after an app restart its port, token or proof changed, and the last
+    /// scan's endpoint would only fail.
     func reconnect() {
-        attach()
+        Task {
+            let before = selectedTarget
+            await scan()
+            // A scan that changed the selection attached already.
+            if selectedTarget == before { attach() }
+        }
     }
 
     private func attach() {

@@ -14,14 +14,19 @@ struct RulesView: View {
 
     var body: some View {
         Group {
-            if session.hello?.rules == false {
+            if session.hello == nil {
+                ProgressView("Connecting…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if session.hello?.rules != true {
                 ContentUnavailableView("No Rules Here", systemImage: "slider.horizontal.3",
                                        description: Text("This build of \(session.target.app) has no rule engine."))
             } else {
                 table
             }
         }
-        .task(id: session.rulesRevision) { await load() }
+        // Only once the hello said the app has rules: before it, rules.list could only be refused.
+        .task(id: [session.rulesRevision, session.hello?.rules == true ? 1 : 0]) {
+            if session.hello?.rules == true { await load() }
+        }
         .onAppear(perform: takeDraftMock)
         .onChange(of: viewer.draftMock) { takeDraftMock() }
         .sheet(item: $form) { draft in
@@ -179,8 +184,8 @@ struct RulesView: View {
                 try await change()
             } catch {
                 problem = error.localizedDescription
+                await load()
             }
-            await load()
         }
     }
 }

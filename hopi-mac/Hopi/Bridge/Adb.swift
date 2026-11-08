@@ -29,9 +29,13 @@ nonisolated enum Adb {
         for (serial, model) in devices(adb) {
             let forwards = existingForwards(adb, serial: serial)
             for app in bridges(adb, serial: serial) {
+                let remote = "localabstract:hopi.\(app)"
+                // Only a forward this viewer made is reused: one the CLI made goes when the command ends.
+                let mine = Forwards.port(serial: serial, remote: remote).flatMap { forwards[remote] == $0 ? $0 : nil }
                 guard let secrets = readProof(adb, serial: serial, app: app),
-                      let port = forwards["localabstract:hopi.\(app)"] ?? forward(adb, serial: serial, app: app)
+                      let port = mine ?? forward(adb, serial: serial, app: app)
                 else { continue }
+                Forwards.remember(serial: serial, remote: remote, port: port)
                 let endpoint = BridgeEndpoint(port: port, token: secrets.key, proof: secrets.proof)
                 guard let hello = await Discovery.probe(endpoint), hello.app == app else { continue }
                 found.append(Target(kind: .android, app: hello.app, device: model ?? serial,
@@ -89,6 +93,21 @@ nonisolated enum Adb {
     private static func forward(_ adb: String, serial: String, app: String) -> UInt16? {
         Shell.text(adb, ["-s", serial, "forward", "tcp:0", "localabstract:hopi.\(app)"])
             .flatMap { UInt16($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+}
+
+/// The forwards this viewer created, by device and remote socket: reused across scans so they do
+/// not pile up, while a forward another process made (and may remove) never is.
+nonisolated enum Forwards {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var ports: [String: UInt16] = [:]
+
+    static func port(serial: String, remote: String) -> UInt16? {
+        lock.withLock { ports["\(serial) \(remote)"] }
+    }
+
+    static func remember(serial: String, remote: String, port: UInt16) {
+        lock.withLock { ports["\(serial) \(remote)"] = port }
     }
 }
 

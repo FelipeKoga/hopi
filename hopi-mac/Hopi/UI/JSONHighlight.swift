@@ -16,6 +16,7 @@ nonisolated struct RenderedBody: @unchecked Sendable {
 
     static func make(_ text: String, contentType: String?) -> RenderedBody {
         let pretty = text.utf8.count <= prettyLimit ? Format.prettyBody(text, contentType: contentType) : text
+        if Task.isCancelled { return RenderedBody(text: NSAttributedString(), omitted: 0) }
         let isJSON = pretty != text || contentType?.contains("json") == true
         let units = pretty.utf16
         let shown: String
@@ -63,7 +64,10 @@ nonisolated enum JSONHighlight {
 
         result.beginEditing()
         var i = 0
+        var steps = 0
         while i < u.count {
+            steps += 1
+            if steps & 0xFFFF == 0, Task.isCancelled { break }
             let c = u[i]
             if c == quote {
                 var j = i + 1
