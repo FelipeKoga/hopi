@@ -13,6 +13,7 @@ public final class dev/koga/hopi/connect/BridgeClient : java/lang/AutoCloseable 
 	public fun close ()V
 	public final fun getHello ()Ldev/koga/hopi/connect/Reply;
 	public final fun handshake (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;
+	public final fun readTimeout (I)V
 	public final fun reply (Ljava/lang/String;)Ldev/koga/hopi/connect/Reply;
 	public static synthetic fun reply$default (Ldev/koga/hopi/connect/BridgeClient;Ljava/lang/String;ILjava/lang/Object;)Ldev/koga/hopi/connect/Reply;
 	public final fun send (Ljava/lang/String;)V
@@ -59,6 +60,10 @@ public final class dev/koga/hopi/connect/BridgeSecrets {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class dev/koga/hopi/connect/BridgeTimeoutException : dev/koga/hopi/connect/CliException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
 public class dev/koga/hopi/connect/CliException : java/lang/Exception {
 	public fun <init> (ILjava/lang/String;)V
 	public final fun getExitCode ()I
@@ -80,15 +85,50 @@ public final class dev/koga/hopi/connect/ExitCode {
 	public static final field USAGE I
 }
 
+public final class dev/koga/hopi/connect/ExportBudget {
+	public fun <init> ()V
+	public fun <init> (JJ)V
+	public synthetic fun <init> (JJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getMaxTotalBytes ()J
+	public final fun getMaxTransactionBytes ()J
+}
+
+public final class dev/koga/hopi/connect/ExportFormat : java/lang/Enum {
+	public static final field Har Ldev/koga/hopi/connect/ExportFormat;
+	public static final field Ndjson Ldev/koga/hopi/connect/ExportFormat;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getExtension ()Ljava/lang/String;
+	public final fun getLabel ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Ldev/koga/hopi/connect/ExportFormat;
+	public static fun values ()[Ldev/koga/hopi/connect/ExportFormat;
+}
+
+public final class dev/koga/hopi/connect/ExportResult {
+	public fun <init> (III)V
+	public final fun describe (Ljava/nio/file/Path;)Ljava/lang/String;
+	public final fun getFetched ()I
+	public final fun getTransactions ()I
+	public final fun getWithoutBodies ()I
+}
+
+public final class dev/koga/hopi/connect/FoundApp {
+	public fun <init> (Ldev/koga/hopi/connect/Platform;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/nio/file/Path;)V
+	public final fun getApp ()Ljava/lang/String;
+	public final fun getBridgeFile ()Ljava/nio/file/Path;
+	public final fun getDevice ()Ljava/lang/String;
+	public final fun getDeviceName ()Ljava/lang/String;
+	public final fun getPlatform ()Ldev/koga/hopi/connect/Platform;
+}
+
 public final class dev/koga/hopi/connect/HostEnvironment {
 	public static final field Companion Ldev/koga/hopi/connect/HostEnvironment$Companion;
 	public fun <init> ()V
-	public fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ldev/koga/hopi/connect/StreamStarter;Ljava/nio/file/Path;)V
-	public synthetic fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ldev/koga/hopi/connect/StreamStarter;Ljava/nio/file/Path;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ljava/nio/file/Path;Ljava/nio/file/Path;)V
+	public synthetic fun <init> (Ldev/koga/hopi/connect/ProcessRunner;Ljava/util/Map;Ljava/lang/String;ZLkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ShutdownHooks;Ljava/nio/file/Path;Ljava/nio/file/Path;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getEnv ()Ljava/util/Map;
+	public final fun getJvmBridgeRoot ()Ljava/nio/file/Path;
 	public final fun getProcesses ()Ldev/koga/hopi/connect/ProcessRunner;
 	public final fun getShutdownHooks ()Ldev/koga/hopi/connect/ShutdownHooks;
-	public final fun getStreams ()Ldev/koga/hopi/connect/StreamStarter;
 	public final fun getUsbmuxdSocket ()Ljava/nio/file/Path;
 	public final fun getUserHome ()Ljava/lang/String;
 	public final fun isExecutable ()Lkotlin/jvm/functions/Function1;
@@ -172,23 +212,9 @@ public final class dev/koga/hopi/connect/RemoteFrameSecond$Companion {
 }
 
 public final class dev/koga/hopi/connect/RemotePerf {
-	public static final field Companion Ldev/koga/hopi/connect/RemotePerf$Companion;
-	public static final field MAX_HANGS I
-	public static final field MAX_MEMORY_EVENTS I
-	public static final field MAX_POINTS I
-	public static final field MAX_STALLS I
-	public final fun getView ()Lkotlinx/coroutines/flow/StateFlow;
-	public final fun setMonitor (Ljava/lang/String;Z)Ljava/util/concurrent/CompletableFuture;
-	public final fun stopAll ()Ljava/util/concurrent/CompletableFuture;
-	public final fun watch (Z)Ljava/lang/AutoCloseable;
-	public static synthetic fun watch$default (Ldev/koga/hopi/connect/RemotePerf;ZILjava/lang/Object;)Ljava/lang/AutoCloseable;
-	public final fun watchThreads (Z)Ljava/util/concurrent/CompletableFuture;
-}
-
-public final class dev/koga/hopi/connect/RemotePerf$Companion {
+	public static final field INSTANCE Ldev/koga/hopi/connect/RemotePerf;
 	public final fun framesOf (Ldev/koga/hopi/connect/RemotePerfSeries;)Ljava/util/List;
 	public final fun samplesOf (Ldev/koga/hopi/connect/RemotePerfSeries;Ldev/koga/hopi/connect/RemotePerfSeries;)Ljava/util/List;
-	public final fun threadsBetween (Ljava/util/List;JJ)Ljava/util/List;
 }
 
 public final class dev/koga/hopi/connect/RemotePerfEvent {
@@ -314,29 +340,6 @@ public final class dev/koga/hopi/connect/RemotePerfThread$Companion {
 	public final fun decodeAll (Lkotlinx/serialization/json/JsonObject;)Ljava/util/List;
 }
 
-public final class dev/koga/hopi/connect/RemotePerfView {
-	public static final field Companion Ldev/koga/hopi/connect/RemotePerfView$Companion;
-	public fun <init> (ZZLdev/koga/hopi/connect/RemotePerfStatus;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;Ljava/util/List;JJLjava/util/List;Ljava/util/List;ZLjava/lang/String;)V
-	public final fun getControl ()Z
-	public final fun getFrames ()Ljava/util/List;
-	public final fun getHangs ()Ljava/util/List;
-	public final fun getJanks ()J
-	public final fun getMemoryEvents ()Ljava/util/List;
-	public final fun getMessage ()Ljava/lang/String;
-	public final fun getSamples ()Ljava/util/List;
-	public final fun getStallEvents ()Ljava/util/List;
-	public final fun getStalls ()J
-	public final fun getStatus ()Ldev/koga/hopi/connect/RemotePerfStatus;
-	public final fun getStreaming ()Z
-	public final fun getSupported ()Z
-	public final fun getThreadTicks ()Ljava/util/List;
-	public final fun getThreads ()Ljava/util/List;
-}
-
-public final class dev/koga/hopi/connect/RemotePerfView$Companion {
-	public final fun getNONE ()Ldev/koga/hopi/connect/RemotePerfView;
-}
-
 public final class dev/koga/hopi/connect/RemoteRule {
 	public static final field Companion Ldev/koga/hopi/connect/RemoteRule$Companion;
 	public fun <init> (JLjava/lang/String;ZILjava/lang/Long;JZLjava/lang/String;Ljava/util/Set;Ljava/lang/String;Ljava/util/List;)V
@@ -356,109 +359,6 @@ public final class dev/koga/hopi/connect/RemoteRule {
 
 public final class dev/koga/hopi/connect/RemoteRule$Companion {
 	public final fun decode (Lkotlinx/serialization/json/JsonObject;)Ldev/koga/hopi/connect/RemoteRule;
-}
-
-public final class dev/koga/hopi/connect/RemoteRules {
-	public static final field Companion Ldev/koga/hopi/connect/RemoteRules$Companion;
-	public fun <init> (ZLjava/util/List;)V
-	public final fun getRules ()Ljava/util/List;
-	public final fun getSupported ()Z
-}
-
-public final class dev/koga/hopi/connect/RemoteRules$Companion {
-	public final fun getNONE ()Ldev/koga/hopi/connect/RemoteRules;
-}
-
-public final class dev/koga/hopi/connect/RemoteSession : java/lang/AutoCloseable {
-	public static final field Companion Ldev/koga/hopi/connect/RemoteSession$Companion;
-	public static final field DEFAULT_MAX_ENTRIES I
-	public static final field DEFAULT_MAX_TOTAL_BYTES J
-	public static final field DEFAULT_READ_TIMEOUT_MS I
-	public fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)V
-	public synthetic fun <init> (Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun addRule (Lkotlin/jvm/functions/Function1;)Ljava/util/concurrent/CompletableFuture;
-	public final fun clear ()Ljava/util/concurrent/Future;
-	public final fun clearRules ()Ljava/util/concurrent/CompletableFuture;
-	public fun close ()V
-	public final fun connect ()V
-	public final fun fetch (J)Ldev/koga/hopi/core/model/HttpTransaction;
-	public final fun getDropped ()Lkotlinx/coroutines/flow/StateFlow;
-	public final fun getPerf ()Ldev/koga/hopi/connect/RemotePerf;
-	public final fun getRules ()Lkotlinx/coroutines/flow/StateFlow;
-	public final fun getState ()Lkotlinx/coroutines/flow/StateFlow;
-	public final fun getStore ()Lkotlinx/coroutines/flow/StateFlow;
-	public final fun removeRule (J)Ljava/util/concurrent/CompletableFuture;
-	public final fun select (Ljava/lang/Long;)V
-	public final fun updateRule (JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZ)Ljava/util/concurrent/CompletableFuture;
-	public static synthetic fun updateRule$default (Ldev/koga/hopi/connect/RemoteSession;JLjava/lang/Boolean;Ljava/lang/Integer;Ljava/lang/Integer;ZZILjava/lang/Object;)Ljava/util/concurrent/CompletableFuture;
-}
-
-public final class dev/koga/hopi/connect/RemoteSession$Companion {
-}
-
-public abstract interface class dev/koga/hopi/connect/RemoteState {
-}
-
-public final class dev/koga/hopi/connect/RemoteState$Connected : dev/koga/hopi/connect/RemoteState {
-	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
-	public final fun component1 ()Ljava/lang/String;
-	public final fun component2 ()Ljava/lang/String;
-	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Ldev/koga/hopi/connect/RemoteState$Connected;
-	public static synthetic fun copy$default (Ldev/koga/hopi/connect/RemoteState$Connected;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ldev/koga/hopi/connect/RemoteState$Connected;
-	public fun equals (Ljava/lang/Object;)Z
-	public final fun getApp ()Ljava/lang/String;
-	public final fun getPlatform ()Ljava/lang/String;
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
-}
-
-public final class dev/koga/hopi/connect/RemoteState$Connecting : dev/koga/hopi/connect/RemoteState {
-	public static final field INSTANCE Ldev/koga/hopi/connect/RemoteState$Connecting;
-	public fun equals (Ljava/lang/Object;)Z
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
-}
-
-public final class dev/koga/hopi/connect/RemoteState$Disconnected : dev/koga/hopi/connect/RemoteState {
-	public fun <init> (Ljava/lang/String;)V
-	public final fun component1 ()Ljava/lang/String;
-	public final fun copy (Ljava/lang/String;)Ldev/koga/hopi/connect/RemoteState$Disconnected;
-	public static synthetic fun copy$default (Ldev/koga/hopi/connect/RemoteState$Disconnected;Ljava/lang/String;ILjava/lang/Object;)Ldev/koga/hopi/connect/RemoteState$Disconnected;
-	public fun equals (Ljava/lang/Object;)Z
-	public final fun getMessage ()Ljava/lang/String;
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
-}
-
-public final class dev/koga/hopi/connect/RemoteState$Idle : dev/koga/hopi/connect/RemoteState {
-	public static final field INSTANCE Ldev/koga/hopi/connect/RemoteState$Idle;
-	public fun equals (Ljava/lang/Object;)Z
-	public fun hashCode ()I
-	public fun toString ()Ljava/lang/String;
-}
-
-public final class dev/koga/hopi/connect/RemoteThreadLoad {
-	public fun <init> (JLjava/lang/String;ZJJ)V
-	public final fun getCpuMs ()J
-	public final fun getHopi ()Z
-	public final fun getName ()Ljava/lang/String;
-	public final fun getSinceMs ()J
-	public final fun getTid ()J
-}
-
-public final class dev/koga/hopi/connect/RemoteThreadTick {
-	public fun <init> (JLjava/util/List;)V
-	public final fun getAtMs ()J
-	public final fun getLoads ()Ljava/util/List;
-}
-
-public final class dev/koga/hopi/connect/RemoteThreadUse {
-	public fun <init> (JLjava/lang/String;ZDD)V
-	public final fun getCpuMs ()D
-	public final fun getHopi ()Z
-	public final fun getName ()Ljava/lang/String;
-	public final fun getPercent ()D
-	public final fun getTid ()J
 }
 
 public final class dev/koga/hopi/connect/RemoteUnsupported {
@@ -500,6 +400,15 @@ public final class dev/koga/hopi/connect/RuntimeShutdownHooks : dev/koga/hopi/co
 	public fun remove (Ljava/lang/Thread;)V
 }
 
+public final class dev/koga/hopi/connect/SessionExport {
+	public static final field INSTANCE Ldev/koga/hopi/connect/SessionExport;
+	public final fun queryString (Ljava/lang/String;)Ljava/util/List;
+	public final fun write (Ldev/koga/hopi/connect/ExportFormat;Ldev/koga/hopi/core/store/HopiStore;Ljava/io/Writer;Lkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ExportBudget;Ljava/lang/String;)Ldev/koga/hopi/connect/ExportResult;
+	public final fun write (Ldev/koga/hopi/connect/ExportFormat;Ljava/util/List;Ldev/koga/hopi/core/redact/Redactor;Ljava/io/Writer;Lkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ExportBudget;Ljava/lang/String;)Ldev/koga/hopi/connect/ExportResult;
+	public static synthetic fun write$default (Ldev/koga/hopi/connect/SessionExport;Ldev/koga/hopi/connect/ExportFormat;Ldev/koga/hopi/core/store/HopiStore;Ljava/io/Writer;Lkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ExportBudget;Ljava/lang/String;ILjava/lang/Object;)Ldev/koga/hopi/connect/ExportResult;
+	public static synthetic fun write$default (Ldev/koga/hopi/connect/SessionExport;Ldev/koga/hopi/connect/ExportFormat;Ljava/util/List;Ldev/koga/hopi/core/redact/Redactor;Ljava/io/Writer;Lkotlin/jvm/functions/Function1;Ldev/koga/hopi/connect/ExportBudget;Ljava/lang/String;ILjava/lang/Object;)Ldev/koga/hopi/connect/ExportResult;
+}
+
 public abstract interface class dev/koga/hopi/connect/ShutdownHooks {
 	public abstract fun add (Ljava/lang/Thread;)V
 	public abstract fun remove (Ljava/lang/Thread;)V
@@ -518,22 +427,9 @@ public final class dev/koga/hopi/connect/SlowClientException : dev/koga/hopi/con
 	public final fun getSince ()Ljava/lang/Long;
 }
 
-public abstract interface class dev/koga/hopi/connect/StreamStarter {
-	public abstract fun start (Ljava/util/List;)Ldev/koga/hopi/connect/StreamingProcess;
-}
-
-public abstract interface class dev/koga/hopi/connect/StreamingProcess : java/lang/AutoCloseable {
-	public abstract fun getInput ()Ljava/io/InputStream;
-}
-
 public final class dev/koga/hopi/connect/SystemProcessRunner : dev/koga/hopi/connect/ProcessRunner {
 	public static final field INSTANCE Ldev/koga/hopi/connect/SystemProcessRunner;
 	public fun run (Ljava/util/List;)Ldev/koga/hopi/connect/ProcessResult;
-}
-
-public final class dev/koga/hopi/connect/SystemStreamStarter : dev/koga/hopi/connect/StreamStarter {
-	public static final field INSTANCE Ldev/koga/hopi/connect/SystemStreamStarter;
-	public fun start (Ljava/util/List;)Ldev/koga/hopi/connect/StreamingProcess;
 }
 
 public final class dev/koga/hopi/connect/TargetIds {
@@ -548,12 +444,10 @@ public final class dev/koga/hopi/connect/Targets {
 	public fun <init> (Ldev/koga/hopi/connect/HostEnvironment;)V
 	public final fun androidBridges (Ljava/lang/String;)Ljava/util/List;
 	public final fun androidDevices ()Ljava/util/List;
-	public final fun iosBridgeFile (Ljava/lang/String;Ljava/lang/String;)Ljava/nio/file/Path;
+	public final fun apps (Ldev/koga/hopi/connect/Platform;Ljava/lang/String;)Ljava/util/List;
+	public static synthetic fun apps$default (Ldev/koga/hopi/connect/Targets;Ldev/koga/hopi/connect/Platform;Ljava/lang/String;ILjava/lang/Object;)Ljava/util/List;
 	public final fun open (Ldev/koga/hopi/connect/Platform;Ljava/lang/String;Ljava/lang/String;Ljava/nio/file/Path;)Ldev/koga/hopi/connect/BridgeEndpoint;
-	public final fun openUsbIphone (Ljava/lang/String;Ljava/lang/String;)Ldev/koga/hopi/connect/BridgeEndpoint;
 	public final fun simulators ()Ljava/util/List;
-	public final fun trackAndroidDevices (Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function0;)Ljava/lang/AutoCloseable;
-	public final fun trackDebuggableProcesses (Ljava/lang/String;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;)Ljava/lang/AutoCloseable;
 	public final fun usbIphones ()Ljava/util/List;
 }
 
