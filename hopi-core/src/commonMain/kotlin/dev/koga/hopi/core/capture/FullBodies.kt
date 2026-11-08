@@ -1,6 +1,7 @@
 package dev.koga.hopi.core.capture
 
 import dev.koga.hopi.api.HopiInternalApi
+import dev.koga.hopi.core.perf.PerfLock
 import dev.koga.hopi.core.store.HopiStore
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
@@ -14,7 +15,9 @@ import kotlin.concurrent.atomics.AtomicReference
  */
 @HopiInternalApi
 public object FullBodies {
-    private val holders = AtomicInt(0)
+    /** Holders per store: one lock for the counts and the caps they set, so they never disagree. */
+    private val lock = PerfLock()
+    private val holders = mutableMapOf<HopiStore, Int>()
     private val current = AtomicInt(0)
     private val listeners = AtomicReference<List<(Int) -> Unit>>(emptyList())
 
@@ -45,15 +48,30 @@ public object FullBodies {
 
     /**
      * The mode for a viewer of [store]; the returned function gives it back (once). The first
-     * holder raises the caps, the last release restores them.
+     * holder raises the capture cap, and each store's first holder its byte cap; the last releases
+     * put them back.
      */
     public fun acquire(store: HopiStore): () -> Unit {
-        if (holders.fetchAndAdd(1) == 0) set(store, platformFullBodyCap())
+        lock.locked {
+            val before = holders[store] ?: 0
+            if (holders.isEmpty()) setCap(platformFullBodyCap())
+            holders[store] = before + 1
+            if (before == 0) raise(store)
+        }
         var released = false
         return {
-            if (!released) {
-                released = true
-                if (holders.fetchAndAdd(-1) == 1) set(store, 0)
+            lock.locked {
+                if (!released) {
+                    released = true
+                    val left = (holders[store] ?: 1) - 1
+                    if (left > 0) {
+                        holders[store] = left
+                    } else {
+                        holders.remove(store)
+                        store.raiseByteCap(null)
+                        if (holders.isEmpty()) setCap(0)
+                    }
+                }
             }
         }
     }
@@ -66,17 +84,22 @@ public object FullBodies {
         }
     }
 
-    private fun set(store: HopiStore, cap: Int) {
+    private fun setCap(cap: Int) {
         current.store(cap)
-        // A request and its response at the cap, plus the history the store keeps anyway.
-        store.raiseByteCap(if (cap == 0) null else store.baseMaxTotalBytes + 2L * cap * 4 / 3)
         for (listener in listeners.load()) listener(cap)
+    }
+
+    /** A request and its response at the cap, plus the history the store keeps anyway. */
+    private fun raise(store: HopiStore) {
+        store.raiseByteCap(store.baseMaxTotalBytes + 2L * current.load() * 4 / 3)
     }
 
     /** Tests: no holder, the installations' caps. */
     internal fun resetForTests(store: HopiStore?) {
-        holders.store(0)
-        current.store(0)
+        lock.locked {
+            holders.clear()
+            current.store(0)
+        }
         store?.raiseByteCap(null)
     }
 }
