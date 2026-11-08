@@ -127,6 +127,24 @@ class RuleEngineTest {
     }
 
     @Test
+    fun loweringTimesWhileOlderStateClaimsStillLeavesTheStateOnceExhausted() {
+        val id = add(mock("*/users/*", times = 5)).id
+        val older = RuleEngine.state
+        assertNotNull(older.firstMatch(RuleSource.KTOR, request()))
+        assertIs<RuleResult.Ok>(RuleEngine.update(id, RulePatch(times = 2)))
+        // Requests that read the state before the update claim against times = 5: past 2, never LAST.
+        assertNotNull(older.firstMatch(RuleSource.KTOR, request()))
+        assertNotNull(older.firstMatch(RuleSource.KTOR, request()))
+        assertEquals(3L, RuleEngine.get(id)?.hits)
+        val revision = RuleEngine.revision.value
+        assertNull(RuleEngine.state.firstMatch(RuleSource.KTOR, request()), "exhausted under the new times")
+        assertSame(RuleState.EMPTY, RuleEngine.state, "the refused claim republished without it")
+        assertEquals(revision + 1, RuleEngine.revision.value)
+        assertNull(RuleEngine.state.firstMatch(RuleSource.KTOR, request()))
+        assertEquals(revision + 1, RuleEngine.revision.value, "once")
+    }
+
+    @Test
     fun anExhaustedRuleLetsTheScanGoOnToTheNext() {
         val once = add(mock("*/users/*", times = 1, priority = 1)).id
         val always = add(mock("*/users/*")).id

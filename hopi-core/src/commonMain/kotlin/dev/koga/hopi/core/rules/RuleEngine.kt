@@ -1,7 +1,6 @@
 package dev.koga.hopi.core.rules
 
 import dev.koga.hopi.api.HopiInternalApi
-import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.incrementAndFetch
@@ -76,9 +75,9 @@ public object RuleEngine {
     private val listeners = AtomicReference<List<(RuleState) -> Unit>>(emptyList())
     private val _revision = MutableStateFlow(0L)
 
-    // Recorders that started, and how many with rules on (hello's `rules`).
-    private val recordersStarted = AtomicInt(0)
-    private val recordersWithRules = AtomicInt(0)
+    // Recorders that started (high 32 bits) and how many with rules on (low 32 bits; hello's
+    // `rules`): one atomic, so a reader never sees a start counted without its switch.
+    private val recorders = AtomicLong(0)
 
     /** The current state: one volatile read. Compare with [RuleState.EMPTY] by reference. */
     public val state: RuleState get() = published.load()
@@ -91,12 +90,11 @@ public object RuleEngine {
      * `rules` switch off. A process where no recorder started yet answers true (a rule waits for one).
      */
     public val rulesAvailable: Boolean
-        get() = recordersStarted.load() == 0 || recordersWithRules.load() > 0
+        get() = recorders.load().let { it == 0L || it and 0xFFFF_FFFFL > 0 }
 
     /** A recorder (Ktor plugin, Android runtime, URLSession capture) started with its `rules` switch at [rules]. */
     public fun recorderStarted(rules: Boolean) {
-        recordersStarted.incrementAndFetch()
-        if (rules) recordersWithRules.incrementAndFetch()
+        recorders.fetchAndAdd((1L shl 32) + if (rules) 1L else 0L)
     }
 
     public fun add(spec: RuleSpec): RuleResult {
@@ -177,11 +175,16 @@ public object RuleEngine {
         mutate { current -> Change(current.entries) }
     }
 
+    /** Republishes when the published state still offers rule [id] (an exhausted rule refused a claim). */
+    internal fun republishIfPublished(id: Long) {
+        val state = published.load()
+        if (state.bySource.any { rules -> rules.any { it.id == id } }) republishAfterExhaustion()
+    }
+
     /** Tests: drops every rule and recorder registration. Rule ids keep counting. */
     public fun resetForTests() {
         clear()
-        recordersStarted.store(0)
-        recordersWithRules.store(0)
+        recorders.store(0)
     }
 
     private class Change(val entries: List<Entry>)

@@ -1,6 +1,7 @@
 package dev.koga.hopi.core.rules
 
 import dev.koga.hopi.api.HopiInternalApi
+import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.incrementAndFetch
 
@@ -122,16 +123,25 @@ public class CompiledRule internal constructor(
 
     /**
      * Claims one application against `times`. False means the rule is exhausted and does not
-     * match; the claim that reaches `times` republishes the rule state without it, once.
+     * match; the claim that reaches `times` republishes the rule state without it, once. A refused
+     * claim republishes too while the published state still holds the rule: an update that
+     * lowered `times` races requests on the older state, whose claims (against the old `times`)
+     * can pass the new one without ever being the LAST.
      */
     public fun claim(): Boolean = when (hits.claim(spec.times)) {
         RuleHits.Claim.CLAIMED -> true
         RuleHits.Claim.LAST -> {
-            RuleEngine.republishAfterExhaustion()
+            if (republished.compareAndSet(0, 1)) RuleEngine.republishAfterExhaustion()
             true
         }
-        RuleHits.Claim.REFUSED -> false
+        RuleHits.Claim.REFUSED -> {
+            if (republished.compareAndSet(0, 1)) RuleEngine.republishIfPublished(id)
+            false
+        }
     }
+
+    /** Set by the one claim (LAST, or the first refused) that republishes the state without this rule. */
+    private val republished = AtomicInt(0)
 
     internal fun withSpec(spec: RuleSpec, hits: RuleHits = this.hits): CompiledRule = CompiledRule(id, spec, hits)
 
