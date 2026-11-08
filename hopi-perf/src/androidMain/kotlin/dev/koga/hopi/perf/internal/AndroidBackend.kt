@@ -73,6 +73,8 @@ internal class AndroidBackend private constructor() : MonitorBackend {
         return monitors().start(monitor)
     }
 
+    override fun started(monitor: PerfMonitor): Boolean = monitors?.started(monitor) ?: false
+
     override fun stop(monitor: PerfMonitor) {
         monitors?.stop(monitor)
     }

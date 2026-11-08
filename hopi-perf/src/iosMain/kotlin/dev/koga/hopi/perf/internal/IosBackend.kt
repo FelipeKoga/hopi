@@ -89,6 +89,7 @@ internal class IosBackend private constructor() : MonitorBackend {
             PerfMonitor.FRAMES -> {
                 frames = true
                 val installed = updateObservers()
+                framesObserved = installed
                 readDeadline()
                 updateCadence()
                 if (!installed) "the run-loop observers could not be created" else null
@@ -109,6 +110,15 @@ internal class IosBackend private constructor() : MonitorBackend {
                 null
             }
         }
+    }
+
+    /** Whether frames' run-loop observers were created by its last start. */
+    private var framesObserved = false
+
+    override fun started(monitor: PerfMonitor): Boolean = when (monitor) {
+        PerfMonitor.FRAMES -> framesObserved
+        PerfMonitor.HANGS -> hang != null
+        else -> true
     }
 
     override fun stop(monitor: PerfMonitor) {

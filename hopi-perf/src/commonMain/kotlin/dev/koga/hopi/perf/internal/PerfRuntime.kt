@@ -66,6 +66,14 @@ public interface MonitorBackend {
     /** Starts [monitor]; returns a notice when it runs with less than asked (frames unavailable, printer pending), else null. */
     public fun start(monitor: PerfMonitor, settings: PerfSettings): String?
 
+    /**
+     * Whether [monitor], just [start]ed, runs at all (false: its notice says why: frames without the
+     * Application, iOS run-loop observers that could not be created). The runtime then gives the
+     * start back, so status never shows a monitor nothing measures, and no lease waits on a thread
+     * that does not exist.
+     */
+    public fun started(monitor: PerfMonitor): Boolean = true
+
     public fun stop(monitor: PerfMonitor)
 
     /** The settings changed while [running] monitors run. */
@@ -142,10 +150,13 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
 
     /** A tool's start: [next] replaces the settings in force whole, `summaryLog` included. */
     internal fun configure(next: PerfSettings) {
-        val previous = settings.exchange(next)
         data.setLogSink(if (next.summaryLog) data.log ?: PerfLogSink() else null)
-        if (previous.hangThresholdMs != next.hangThresholdMs || previous.sampleIntervalMs != next.sampleIntervalMs) {
-            perfLocked(lock) { backend.apply(next, owners.heldMonitors) }
+        // Under the lock, as update and start merge theirs: neither can store a merge of the old settings over these.
+        perfLocked(lock) {
+            val previous = settings.exchange(next)
+            if (previous.hangThresholdMs != next.hangThresholdMs || previous.sampleIntervalMs != next.sampleIntervalMs) {
+                backend.apply(next, owners.heldMonitors)
+            }
         }
     }
 
@@ -186,8 +197,14 @@ public class PerfRuntimeController internal constructor(private val backend: Mon
                     // Before it starts, so its first item never reaches a viewer that thinks it is off.
                     announceRunning()
                     backend.start(monitor, settings.load())?.let { notices += "${monitor.wireName}: $it" }
+                    if (!backend.started(monitor)) {
+                        owners.clear(monitor)
+                        stopLocked(monitor)
+                        notices += "${monitor.wireName}: not started"
+                    }
                 }
             }
+            announceRunning()
             backend.leaseChanged(owners.heldMonitors)
         }
         lastNotices.store(notices)

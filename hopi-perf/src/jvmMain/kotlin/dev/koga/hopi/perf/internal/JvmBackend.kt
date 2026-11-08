@@ -1,6 +1,5 @@
 package dev.koga.hopi.perf.internal
 
-import dev.koga.hopi.core.perf.CpuSample
 import dev.koga.hopi.core.perf.MemorySample
 import dev.koga.hopi.core.perf.PerfData
 import dev.koga.hopi.core.perf.PerfMonitor
@@ -23,9 +22,10 @@ internal class JvmBackend : MonitorBackend {
     private lateinit var data: PerfData
     private lateinit var lease: PerfTimer
     private var sampler: Sampler? = null
-    private var cpu = false
-    private var memory = false
-    private var intervalMs = 1_000L
+    // Written under the runtime's lock, read by the sampler thread.
+    @Volatile private var cpu = false
+    @Volatile private var memory = false
+    @Volatile private var intervalMs = 1_000L
 
     override fun nowMs(): Long = System.nanoTime() / 1_000_000
 
@@ -84,9 +84,9 @@ internal class JvmBackend : MonitorBackend {
         val thread = Thread(::loop, "hopi-perf-samp").apply { isDaemon = true }
         private val os = ManagementFactory.getOperatingSystemMXBean() as? com.sun.management.OperatingSystemMXBean
         private val threadsBean = ManagementFactory.getThreadMXBean()
-        private var lastCpuNs = os?.processCpuTime ?: 0L
-        private var lastWallNs = System.nanoTime()
         private var ownNs = 0L
+        // No baseline yet: the first sample (at once, or when CPU starts) only sets one.
+        private val rate = CpuRate(cpuNs = -1, hopiNs = 0, wallMs = 0)
 
         fun start() = thread.start()
 
@@ -114,21 +114,13 @@ internal class JvmBackend : MonitorBackend {
             }
         }
 
-        private var lastOwnNs = 0L
-
         private fun sample(now: Long) {
             val cpuSample = if (cpu && os != null) {
-                val cpuNs = os.processCpuTime
-                val dt = (now - lastWallNs).coerceAtLeast(1)
-                val process = (cpuNs - lastCpuNs) * 100.0 / dt
-                val hopi = (ownNs - lastOwnNs) * 100.0 / dt
-                lastCpuNs = cpuNs
-                lastOwnNs = ownNs
-                CpuSample(process, hopi, Runtime.getRuntime().availableProcessors())
+                rate.sample(os.processCpuTime, ownNs, now / 1_000_000, Runtime.getRuntime().availableProcessors())
             } else {
+                rate.skip()
                 null
             }
-            lastWallNs = now
             val memorySample = if (memory) {
                 val runtime = Runtime.getRuntime()
                 val gc = ManagementFactory.getGarbageCollectorMXBeans()

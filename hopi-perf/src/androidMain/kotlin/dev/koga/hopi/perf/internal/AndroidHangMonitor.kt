@@ -113,15 +113,19 @@ internal class AndroidHangMonitor(
     fun stop() {
         active.set(false)
         watchdog.stop()
-        if (heartbeat) return
-        printer.stopping(STOP_MARKER_ID.incrementAndGet())
-        main.post(printer.stopRunnable())
+        if (!heartbeat) {
+            printer.stopping(STOP_MARKER_ID.incrementAndGet())
+            main.post(printer.stopRunnable())
+        }
+        // Heartbeat mode brackets input too: its wrappers come out the same way.
         main.post {
             // Only this monitor's: a monitor started since has re-enabled the ones it uses.
             for ((window, wrapper) in windows.entries.toList()) {
                 if (wrapper.bracket === bracket) InputBracketCallback.uninstall(window, wrapper, windows)
             }
             inputBracketed = false
+            // After start's posted message on the same queue, which may have read active before it fell.
+            printerState = "cleared"
         }
         printerState = "cleared"
     }
@@ -163,11 +167,19 @@ internal class AndroidHangMonitor(
         }
     }
 
-    private companion object {
-        const val DISPLACED_CHECK_FRAMES = 120
-        val STOP_MARKER_ID = AtomicLong(0)
-        val knownWrappers = WeakHashMap<Window, InputBracketCallback>()
-        val anrRead = AtomicBoolean(false)
+    companion object {
+        /**
+         * Main thread: [window]'s activity is destroyed. A wrapper left disabled under another
+         * SDK's holds its activity, which holds the window: without this the weak key never goes.
+         */
+        fun forget(window: Window) {
+            knownWrappers.remove(window)
+        }
+
+        private const val DISPLACED_CHECK_FRAMES = 120
+        private val STOP_MARKER_ID = AtomicLong(0)
+        private val knownWrappers = WeakHashMap<Window, InputBracketCallback>()
+        private val anrRead = AtomicBoolean(false)
     }
 }
 

@@ -27,9 +27,10 @@ import java.util.concurrent.atomic.AtomicInteger
 internal class AndroidMonitors(private val backend: AndroidBackend) {
     private val selfCpu = SelfCpu()
 
-    private var hang: AndroidHangMonitor? = null
-    private var frames: FramesMonitor? = null
-    private var sampler: AndroidSampler? = null
+    // Written under the runtime's lock on a bridge thread, read by activity callbacks on the main thread.
+    @Volatile private var hang: AndroidHangMonitor? = null
+    @Volatile private var frames: FramesMonitor? = null
+    @Volatile private var sampler: AndroidSampler? = null
     private var memoryCallbacks: ComponentCallbacks2? = null
     private var lifecycle: Application.ActivityLifecycleCallbacks? = null
     private val pss by lazy { PssProbe(backend.data) }
@@ -43,6 +44,13 @@ internal class AndroidMonitors(private val backend: AndroidBackend) {
      * started again has two in flight, and the first one's end must not clear the second's.
      */
     private val framesAttaching = AtomicInteger(0)
+
+    /** Frames need the Application; the others always run once started. */
+    fun started(monitor: PerfMonitor): Boolean = when (monitor) {
+        PerfMonitor.FRAMES -> frames != null
+        PerfMonitor.HANGS -> hang != null
+        else -> true
+    }
 
     fun start(monitor: PerfMonitor): String? {
         val app = backend.application
@@ -224,7 +232,9 @@ internal class AndroidMonitors(private val backend: AndroidBackend) {
 
                 override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
-                override fun onActivityDestroyed(activity: Activity) = Unit
+                override fun onActivityDestroyed(activity: Activity) {
+                    activity.window?.let(AndroidHangMonitor::forget)
+                }
             }
             app.registerActivityLifecycleCallbacks(callbacks)
             lifecycle = callbacks
