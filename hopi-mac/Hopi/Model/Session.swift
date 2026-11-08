@@ -27,6 +27,10 @@ final class Session {
     /// One per command sent, in order: each takes reply lines until it returns true (done).
     @ObservationIgnored private var waiting: [(Data?) -> Bool] = []
     @ObservationIgnored private var nextBlob: Int64 = 0
+    /// Set by [stop]: no command connection opens again, and every request returns nil.
+    @ObservationIgnored private var stopped = false
+    /// The last `clear`'s `through`: a tail line for a cleared id that arrives after it is dropped.
+    @ObservationIgnored private var clearedThrough: Int64 = 0
 
     init(target: Target) {
         self.target = target
@@ -39,7 +43,10 @@ final class Session {
             guard let self else { return }
             switch event {
             case .line(let data): self.streamLine(data)
-            case .closed(let reason): self.status = .closed(reason)
+            case .closed(let reason):
+                // A reason set when this side closed it (a bad hello) is kept.
+                if case .closed = self.status { return }
+                self.status = .closed(reason)
             }
         }
         // capture.set is a write and tail takes the connection over: both wait for a verified hello.
@@ -47,6 +54,7 @@ final class Session {
     }
 
     func stop() {
+        stopped = true
         stream?.close()
         commands?.close()
         failWaiting()
@@ -70,6 +78,7 @@ final class Session {
         guard let data = await request(["cmd": "clear"]),
               let reply = try? JSONDecoder().decode(ClearReply.self, from: data) else { return }
         let through = reply.through ?? Int64.max
+        clearedThrough = max(clearedThrough, through)
         transactions.removeAll { $0.id <= through }
         reindex()
     }
@@ -148,9 +157,11 @@ final class Session {
             guard let summary = try? JSONDecoder().decode(Summary.self, from: data) else { return }
             upsert(summary)
         case "hello":
+            // One hello per connection: a second would send capture.set and tail again.
+            guard status == .connecting else { return }
             guard let hello = try? JSONDecoder().decode(Hello.self, from: data), target.endpoint.accepts(hello) else {
-                stream?.close()
                 status = .closed("This is not \(target.app)'s bridge: its hello lacks the app's proof.")
+                stream?.close()
                 return
             }
             self.hello = hello
@@ -167,6 +178,7 @@ final class Session {
 
     /// The same id arrives as pending, then complete or failed.
     private func upsert(_ summary: Summary) {
+        if summary.id <= clearedThrough { return }
         if let position = index[summary.id] {
             transactions[position] = summary
         } else if let last = transactions.last, summary.id < last.id {
@@ -185,7 +197,7 @@ final class Session {
 
     /// A command whose reply is one line.
     private func request(_ command: [String: Any]) async -> Data? {
-        let connection = commandConnection()
+        guard let connection = commandConnection() else { return nil }
         return await withCheckedContinuation { continuation in
             waiting.append { line in
                 continuation.resume(returning: line)
@@ -198,7 +210,7 @@ final class Session {
     /// A command whose reply is lines up to `{"type":"end"}`, or one `{"type":"error"}` line.
     /// Nil when the connection closed first.
     private func requestLines(_ command: [String: Any]) async -> [Data]? {
-        let connection = commandConnection()
+        guard let connection = commandConnection() else { return nil }
         return await withCheckedContinuation { continuation in
             var lines: [Data] = []
             waiting.append { line in
@@ -223,8 +235,9 @@ final class Session {
     }
 
     /// The command connection: commands wait until its own hello proves it is the app's bridge,
-    /// so a squatter on the socket name never receives a write.
-    private func commandConnection() -> CommandLine {
+    /// so a squatter on the socket name never receives a write. Nil once the session stopped.
+    private func commandConnection() -> CommandLine? {
+        if stopped { return nil }
         if let commands { return commands }
         let connection = LineConnection(endpoint: target.endpoint)
         let line = CommandLine(connection: connection)

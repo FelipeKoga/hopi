@@ -15,6 +15,12 @@ final class LineConnection {
     private var buffer = Data()
     private var onEvent: (Event) -> Void = { _ in }
     private var finished = false
+    /// Set by [close]: lines still buffered are dropped, though `closed` comes when the cancel does.
+    private var closing = false
+    private var answered = false
+
+    /// How long the bridge has to send its first line (the hello reply) before the connection fails.
+    static let answerTimeout: TimeInterval = 10
 
     init(endpoint: BridgeEndpoint) {
         if let device = endpoint.usbDevice {
@@ -42,12 +48,20 @@ final class LineConnection {
             MainActor.assumeIsolated {
                 switch state {
                 case .failed(let error): self?.finish("\(error)")
+                // Network retries a refused loopback connect in .waiting forever: nobody listens.
+                case .waiting(let error): self?.finish("\(error)")
                 case .cancelled: self?.finish(nil)
                 default: break
                 }
             }
         }
         connection.start(queue: .main)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.answerTimeout) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.answered else { return }
+                self.finish("The app did not answer within \(Int(Self.answerTimeout)) s.")
+            }
+        }
         guard let usbmuxConnect else {
             sendRaw(token + "\n")
             receive()
@@ -85,6 +99,7 @@ final class LineConnection {
     }
 
     func close() {
+        closing = true
         connection.cancel()
     }
 
@@ -116,7 +131,10 @@ final class LineConnection {
         var start = buffer.startIndex
         var from = buffer.index(buffer.startIndex, offsetBy: searchFrom)
         while let newline = buffer[from...].firstIndex(of: 0x0A) {
+            // A line's handler may close the connection: the rest of the chunk is not delivered.
+            if closing || finished { return }
             let line = buffer[start..<newline]
+            answered = true
             if !line.isEmpty { onEvent(.line(Data(line))) }
             start = buffer.index(after: newline)
             from = start
