@@ -232,7 +232,11 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
      */
     public fun passThrough(key: String?): Boolean {
         if (key == null || !key.equals(PlatformCapture.PASS_THROUGH_HEADER, ignoreCase = true)) return false
-        synchronized(this) { passingThrough = true }
+        synchronized(this) {
+            // After connect the platform refuses any request property: so does the marker, then.
+            if (target != null) return false
+            passingThrough = true
+        }
         return true
     }
 
@@ -315,6 +319,9 @@ public class UrlConnectionRecorder(original: HttpURLConnection, private val prox
         if (stream == null) return null
         if (!responded || terminal.get()) return stream
         if (stream === teeSource) return tee
+        // One body per response: a second stream (getErrorStream after getInputStream, or the
+        // reverse) passes through, so it can neither replace the record's tee nor end it twice.
+        if (tee != null) return stream
         val cap = if (responseSkip == null) target?.maxBodyBytes ?: 0 else 0
         val wrapped = TeeInputStream(stream, BoundedCapture(cap, responseLength))
         teeSource = stream
