@@ -91,6 +91,7 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
             "okhttpCancelMidBody" -> okhttpCancelMidBody(base, "/hold", 1, out)
             "urlDisconnectMidBody" -> urlDisconnectMidBody(base, out)
             "interceptorViews" -> interceptorViews(out)
+            "authenticatorVariant" -> authenticatorVariant(out)
             "okhttpUnread" -> client().newCall(Request.Builder().url("$base/json").build()).execute().use { out["code"] = it.code }
             "okhttpEnqueue" -> okhttpEnqueue(base, out)
             "okhttpParallel" -> okhttpParallel(base, out)
@@ -179,6 +180,19 @@ class Scenarios : Function<Map<String, Any?>, Map<String, Any?>> {
         // The four newest are images and the three others: images' view is kept, api's was dropped.
         out["imagesKept"] = interceptors(images) === imagesView
         out["oldestRebuilt"] = interceptors(api).let { it !== apiView && it == apiView }
+    }
+
+    /**
+     * Two clients without interceptors may share one empty list (OkHttp 5 does): the one with an
+     * authenticator still gets the interceptor that refuses an edit to another origin.
+     */
+    private fun authenticatorVariant(out: MutableMap<String, Any?>) {
+        val plain = OkHttpClient()
+        val authenticated = OkHttpClient.Builder().authenticator { _, _ -> null }.build()
+        out["sharedList"] = plain.interceptors === authenticated.interceptors
+        out["plain"] = interceptors(plain).last() === HopiOkHttpInterceptor
+        out["authenticated"] = interceptors(authenticated).last() === HopiOkHttpInterceptor.WithAuthenticator
+        out["plainAgain"] = interceptors(plain).last() === HopiOkHttpInterceptor
     }
 
     private fun okhttpPost(base: String, out: MutableMap<String, Any?>) {

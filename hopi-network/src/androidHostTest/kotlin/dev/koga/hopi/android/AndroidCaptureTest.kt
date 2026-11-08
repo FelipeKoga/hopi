@@ -93,6 +93,18 @@ class AndroidCaptureTest {
     }
 
     @Test
+    fun aClientWithAnAuthenticatorGetsItsInterceptorEvenWhenItsListIsShared() {
+        // OkHttp 4 gives each client its own empty list, OkHttp 5 (Ktor's engine) one shared one.
+        for ((version, jars) in listOf("4" to emptyList(), "5" to testJars("ktorOkhttp"))) {
+            val observed = runScenario("authenticatorVariant", store, server.base, jars = jars)
+            assertEquals(version == "5", observed["sharedList"], "OkHttp $version: $observed")
+            assertEquals(true, observed["plain"], "OkHttp $version: $observed")
+            assertEquals(true, observed["authenticated"], "OkHttp $version: $observed")
+            assertEquals(true, observed["plainAgain"], "OkHttp $version: $observed")
+        }
+    }
+
+    @Test
     fun clientsWhoseCallsInterleaveEachKeepTheirOwnInterceptorView() {
         val observed = runScenario("interceptorViews", store, server.base)
         assertEquals(true, observed["interleavedSame"], observed.toString())

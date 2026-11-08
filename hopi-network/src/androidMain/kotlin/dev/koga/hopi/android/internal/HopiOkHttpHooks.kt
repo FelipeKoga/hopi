@@ -25,41 +25,48 @@ public fun interceptors(client: OkHttpClient): List<Interceptor> {
     // An app sends its calls through a few clients (an API client, an image or CDN one built with
     // `newBuilder()`): each one's list (an immutable field, the same object on every call) gets the
     // same view back, with no scan and no allocation, also while their calls interleave.
+    // A client whose authenticator answers a 401 adds a credential below Hopi, to whatever host the
+    // request went: its rules refuse an edit to another origin (OkHttpRules). Part of the key: two
+    // clients can share one list object (OkHttp 5 gives every client without interceptors the same
+    // empty list) and differ in their authenticator.
+    val hopi = if (client.authenticator === Authenticator.NONE) HopiOkHttpInterceptor else HopiOkHttpInterceptor.WithAuthenticator
     val seen = lastSeen
     if (seen != null) {
-        if (seen.own0 === own) return seen.list0
-        if (seen.own1 === own) return seen.list1!!
-        if (seen.own2 === own) return seen.list2!!
-        if (seen.own3 === own) return seen.list3!!
+        if (seen.own0 === own && seen.hopi0 === hopi) return seen.list0
+        if (seen.own1 === own && seen.hopi1 === hopi) return seen.list1!!
+        if (seen.own2 === own && seen.hopi2 === hopi) return seen.list2!!
+        if (seen.own3 === own && seen.hopi3 === hopi) return seen.list3!!
     }
     var hasHopi = false
     for (i in own.indices) if (own[i] === HopiOkHttpInterceptor || own[i] === HopiOkHttpInterceptor.WithAuthenticator) hasHopi = true
-    // A client whose authenticator answers a 401 adds a credential below Hopi, to whatever host the
-    // request went: its rules refuse an edit to another origin (OkHttpRules).
-    val hopi = if (client.authenticator === Authenticator.NONE) HopiOkHttpInterceptor else HopiOkHttpInterceptor.WithAuthenticator
     val list = if (hasHopi) own else WithHopi(own, hopi)
     // Newest first; the oldest of four is dropped. A lost race between two misses drops a slot, never a pair.
     lastSeen = if (seen == null) {
-        LastSeen(own, list, null, null, null, null, null, null)
+        LastSeen(own, hopi, list, null, null, null, null, null, null, null, null, null)
     } else {
-        LastSeen(own, list, seen.own0, seen.list0, seen.own1, seen.list1, seen.own2, seen.list2)
+        LastSeen(own, hopi, list, seen.own0, seen.hopi0, seen.list0, seen.own1, seen.hopi1, seen.list1, seen.own2, seen.hopi2, seen.list2)
     }
     return list
 }
 
 /**
- * The last [CACHED_CLIENTS] client lists [interceptors] saw and what it returned for each, newest
- * first: one immutable object, so a reader sees matching pairs. Fields, not arrays, so a hit on the
- * newest costs what a single cached pair did (one volatile read, one reference compare).
+ * The last [CACHED_CLIENTS] client lists [interceptors] saw, each with the Hopi interceptor its
+ * client needs, and what it returned for each, newest first: one immutable object, so a reader sees
+ * matching triples. Fields, not arrays, so a hit on the newest costs one volatile read and two
+ * reference compares.
  */
 private class LastSeen(
     val own0: List<Interceptor>,
+    val hopi0: Interceptor,
     val list0: List<Interceptor>,
     val own1: List<Interceptor>?,
+    val hopi1: Interceptor?,
     val list1: List<Interceptor>?,
     val own2: List<Interceptor>?,
+    val hopi2: Interceptor?,
     val list2: List<Interceptor>?,
     val own3: List<Interceptor>?,
+    val hopi3: Interceptor?,
     val list3: List<Interceptor>?,
 )
 
