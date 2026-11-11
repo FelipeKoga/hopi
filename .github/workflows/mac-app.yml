@@ -1,11 +1,14 @@
 name: macOS app
 
 # The native viewer (hopi-mac) as a .dmg (scripts/mac-dmg.sh, docs/RELEASING.md "The macOS viewer").
-# By hand only, since it needs a macOS runner: on a branch, an unsigned build, kept as a workflow
-# artifact; on a v* tag, the release's .dmg, attached to its GitHub release (a draft is created when
-# the tag has none), signed and notarized when the release environment holds the Apple secrets,
-# unsigned until then. scripts/mac-dmg.sh builds the same .dmg on the owner's Mac.
+# On main and by hand: an unsigned build, kept as a workflow artifact. On a v* tag: the release's
+# .dmg, attached to its GitHub release (a draft is created when the tag has none), signed and
+# notarized when the release environment holds the Apple secrets, unsigned until then.
 on:
+  push:
+    branches: [main]
+    paths: ['hopi-mac/**', 'scripts/mac-dmg.sh', '.github/workflows/mac-app.yml']
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:

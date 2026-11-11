@@ -141,7 +141,7 @@ run_jvm() {
 # run_kmp <floor|current> <kgp> <ktor> <Debug|Release> <gradle>: the iOS simulator framework links.
 run_kmp() {
     local stack=$1 kgp=$2 ktor=$3 build=$4 name="$1-kmp-$4" start=$SECONDS problems="" enabled=""
-    # Kotlin/Native links iOS frameworks on a Mac only; CI's Linux runner skips these runs.
+    # Kotlin/Native links iOS frameworks on a Mac only; another host skips these runs.
     if [ "$(uname -s)" != Darwin ]; then
         echo "SKIP $name: links an iOS framework, which needs a Mac"
         return

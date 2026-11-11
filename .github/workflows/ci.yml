@@ -13,17 +13,21 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Xcode 27.1, the one this repository is built and verified with (README). The repository variables
+  # HOPI_XCODE (an Xcode .app path) and HOPI_RUNNER (a runner label) replace it and the runner without
+  # an edit, for instance /Applications/Xcode_26.6.app on macos-26.
+  DEVELOPER_DIR: ${{ vars.HOPI_XCODE || '/Applications/Xcode_27.1.app' }}/Contents/Developer
+
 defaults:
   run:
     shell: bash
 
 jobs:
   check:
-    # Linux: the JVM, Android and Gradle plugin checks. Kotlin/Native compiles the iOS targets (their
-    # Objective-C cinterop needs Xcode) on a Mac only, so the iOS checks, the iOS half of the
-    # publication and the release itself run on the owner's Mac (docs/RELEASING.md). The repository
-    # variable HOPI_RUNNER names another runner label without an edit.
-    runs-on: ${{ vars.HOPI_RUNNER || 'ubuntu-latest' }}
+    # xcode-27: macOS 27 with Xcode 27.1 and the iOS 27 simulators, the development Mac's toolchain
+    # (3 M1 cores, 7 GB). A preview image whose label actionlint does not know yet, hence the expression.
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,20 +49,30 @@ jobs:
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ runner.arch }}-${{ steps.kotlin.outputs.version }}
-      # platforms;android-37.0 (compileSdk 37), platforms;android-36 (the plugin's TestKit fixtures) and
-      # build-tools;36.0.0 (AGP 9.4.0's), whichever the image lacks.
-      - name: Install the Android SDK packages
+      # The Kotlin Gradle plugin 2.2.21 runs the iOS simulator tests on the first device of the newest
+      # iOS runtime that `xcrun simctl list devices available` prints (XcodeDefaultTestDevicesValueSource):
+      # on xcode-27 the iPhone Duo (iOS 27.1), as on the development Mac. This prints it, and fails here
+      # rather than in the tests when there is none.
+      - name: Show the Xcode and the iOS simulator the tests use
         run: |
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          (yes || true) | "$sdkmanager" --licenses > /dev/null
-          "$sdkmanager" --install "platforms;android-37.0" "platforms;android-36" "build-tools;36.0.0"
+          xcodebuild -version
+          xcrun simctl list devices available | awk '
+            /-- .* --/ { ios = ($2 == "iOS"); runtime = $2 " " $3; next }
+            ios && / \([0-9A-F]+-[0-9A-F-]+\)/ { device = $0; picked = runtime; ios = 0 }
+            END {
+              if (device == "") { print "::error::no available iOS simulator"; exit 1 }
+              sub(/^ +/, "", device); sub(/ \([0-9A-F]+-[0-9A-F-]+\).*/, "", device)
+              print "iOS simulator tests: " device " (" picked ")"
+            }'
+      # The image has every Android SDK package this needs: platforms;android-37.0 (compileSdk 37),
+      # platforms;android-36 (the plugin's TestKit fixtures) and build-tools;36.0.0 (AGP 9.4.0's).
       - name: Base check
         run: |
           ./gradlew --continue :hopi-api:jvmTest :hopi-core:jvmTest :hopi-ktor:jvmTest :hopi-network:jvmTest \
             :hopi-cli:test :hopi-connect:test \
             :hopi-perf:jvmTest :hopi-perf:testAndroidHostTest check \
             :sample:androidApp:assembleDebug :sample:androidApp:verifyReleaseHasNoRuntime :hopi-network:testAndroidHostTest \
-            :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
+            :sample:shared:verifyIosReleaseExcludesCapture :gradle-plugin:hopi-gradle-plugin:functionalTest :checkPublication
       - name: Upload the build reports
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -83,8 +97,7 @@ jobs:
 
   compat:
     needs: check
-    # As check: on Linux, compat/run.sh skips the iOS framework links (the Mac runs them).
-    runs-on: ${{ vars.HOPI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

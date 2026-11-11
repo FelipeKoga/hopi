@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Releases Hopi to Maven Central from the owner's Mac (docs/RELEASING.md). The iOS klibs build on
-# macOS alone (their Objective-C cinterop needs Xcode) and the repository's CI runs on Linux, so the
-# iOS checks and the release itself run here. On the commit tagged v<hopi.version>, with a clean
+# Releases Hopi to Maven Central from the owner's Mac (docs/RELEASING.md), the fallback to the
+# release workflow when no macOS runner is available: the iOS klibs build on macOS alone (their
+# Objective-C cinterop needs Xcode). On the commit tagged v<hopi.version>, with a clean
 # tree, it runs:
 #
 #   1. the iOS simulator tests and the release guards (verifyReleaseHasNoRuntime,

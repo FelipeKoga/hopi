@@ -328,7 +328,7 @@ abstract class PublicationCheck : DefaultTask() {
 // hopi-perf; hopi-network's JVM target holds the Ktor plugin's recorder.
 val allTargets = listOf("android", "jvm", "iosArm64", "iosSimulatorArm64")
 // Kotlin/Native builds the iOS targets on a Mac only (their Objective-C cinterop needs Xcode): on
-// another host, CI's Linux runner, :checkPublication expects the JVM and Android files alone, and a
+// another host, Linux say, :checkPublication expects the JVM and Android files alone, and a
 // release build (-Phopi.release=true) refuses to start, since its bundle would have no iOS artifacts.
 val appleHost = System.getProperty("os.name").startsWith("Mac")
 fun buildableTargets(targets: List<String>) = if (appleHost) targets else targets.filter { it == "android" || it == "jvm" }
