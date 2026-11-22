@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     application
@@ -8,7 +10,14 @@ kotlin {
 
     compilerOptions {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
+        // The released archive runs on any JDK 17+, whatever JDK builds it.
+        jvmTarget.set(JvmTarget.JVM_17)
     }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 application {
@@ -21,6 +30,18 @@ distributions {
     main {
         distributionBaseName.set("hopi-cli")
     }
+}
+
+// The release asset (.github/workflows/cli.yml): build/distributions/hopi-cli.tar.gz, with
+// hopi-cli/bin/hopi inside. No version in either name, so
+// releases/latest/download/hopi-cli.tar.gz always resolves and the unpacked path never changes.
+tasks.named<Tar>("distTar") {
+    compression = Compression.GZIP
+    archiveVersion.set("")
+    archiveExtension.set("tar.gz")
+}
+tasks.named<Zip>("distZip") {
+    archiveVersion.set("")
 }
 
 sourceSets.test {

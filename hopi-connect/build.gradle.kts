@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 
 plugins {
@@ -15,7 +16,14 @@ kotlin {
 
     compilerOptions {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
+        // The CLI's host side: runs on any JDK 17+ (hopi-cli's released archive).
+        jvmTarget.set(JvmTarget.JVM_17)
     }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 // KGP 2.2's ABI check (the dumps in api/, `./gradlew :hopi-connect:updateLegacyAbi`) is not part of `check` by itself.

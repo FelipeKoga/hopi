@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
@@ -24,7 +25,8 @@ kotlin {
         optIn.add("dev.koga.hopi.api.HopiInternalApi")
     }
 
-    jvm()
+    // JDK 17 bytecode whatever JDK builds it (the floor, README "Requirements").
+    jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     iosArm64()
     iosSimulatorArm64()
 

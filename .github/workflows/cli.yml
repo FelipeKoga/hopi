@@ -1,0 +1,82 @@
+name: CLI
+
+# The hopi CLI as an archive (docs/RELEASING.md, "The CLI"): build/distributions/hopi-cli.tar.gz,
+# JDK 17 bytecode, hopi-cli/bin/hopi inside. On main and by hand: a workflow artifact. On a v* tag:
+# attached to the tag's GitHub release (a draft is created when the tag has none), so
+# https://github.com/FelipeKoga/hopi/releases/latest/download/hopi-cli.tar.gz serves the newest
+# published one. No secrets: nothing is signed.
+on:
+  push:
+    branches: [main]
+    paths: ['hopi-cli/**', 'hopi-connect/**', 'hopi-core/**', 'hopi-api/**', '.github/workflows/cli.yml']
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+permissions:
+  contents: read
+
+env:
+  # As in ci.yml: Xcode 27.1 unless the repository variable HOPI_XCODE names another Xcode .app.
+  DEVELOPER_DIR: ${{ vars.HOPI_XCODE || '/Applications/Xcode_27.1.app' }}/Contents/Developer
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  archive:
+    # As in ci.yml: xcode-27 unless the repository variable HOPI_RUNNER names another runner
+    # (hopi-core is a KMP module whose iOS targets configure only on macOS).
+    runs-on: ${{ vars.HOPI_RUNNER || 'xcode-27' }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check that the tag is v + hopi.version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(sed -n 's/^hopi\.version=//p' gradle.properties | tr -d '[:space:]')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME is not v$version (hopi.version in gradle.properties)"
+            exit 1
+          fi
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-disabled: ${{ github.ref_type == 'tag' }}
+      - name: Build and test the archive
+        run: |
+          ./gradlew :hopi-cli:test :hopi-cli:distTar
+          # The archive unpacked runs on its own.
+          tmp=$(mktemp -d)
+          tar -xzf hopi-cli/build/distributions/hopi-cli.tar.gz -C "$tmp"
+          "$tmp/hopi-cli/bin/hopi" --help > /dev/null
+      - if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hopi-cli
+          path: hopi-cli/build/distributions/hopi-cli.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+      - name: Attach it to the GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$GITHUB_REF_NAME
+          # The macOS app workflow may create the draft at the same moment: then use its draft.
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Hopi ${tag#v}" --generate-notes ||
+              gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
+          fi
+          gh release upload "$tag" hopi-cli/build/distributions/hopi-cli.tar.gz --repo "$GITHUB_REPOSITORY" --clobber

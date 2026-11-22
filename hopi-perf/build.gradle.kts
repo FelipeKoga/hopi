@@ -58,7 +58,8 @@ kotlin {
             isReturnDefaultValues = true
         }
     }
-    jvm()
+    // JDK 17 bytecode whatever JDK builds it (the floor, README "Requirements").
+    jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         // The iOS monitors' native part (run-loop observers, stack capture, task_info), compiled
         // per target and embedded in the cinterop klib, so consumers need no extra linker setup.

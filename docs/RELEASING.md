@@ -85,6 +85,18 @@ scripts/central-release.sh --dry-run   # builds and lists the bundle; no network
   `CENTRAL_TIMEOUT_SECONDS` (default 1800). `--status <deployment id>` waits for a deployment's
   verdict again, after a timeout for example.
 
+## The CLI
+
+The `hopi` CLI ships as `hopi-cli.tar.gz` (JDK 17 bytecode; `hopi-cli/bin/hopi` inside), built by
+`./gradlew :hopi-cli:distTar` into `hopi-cli/build/distributions/` and by the `CLI` workflow
+(`.github/workflows/cli.yml`): on `main` and by hand, a workflow artifact for 14 days; on a `v*`
+tag, attached to the tag's GitHub release (created as a draft when there is none). The name has no
+version, so `https://github.com/FelipeKoga/hopi/releases/latest/download/hopi-cli.tar.gz` serves
+the newest published release; a draft is not served until it is published. Nothing is signed. The
+agent skill (`skills/hopi/SKILL.md`) and the README install it from that URL. By hand, on the
+tagged commit: `./gradlew :hopi-cli:distTar` and
+`gh release upload v<version> hopi-cli/build/distributions/hopi-cli.tar.gz --clobber`.
+
 ## The macOS viewer
 
 The native viewer (`hopi-mac`) ships as a `.dmg`, built by `scripts/mac-dmg.sh` and by the

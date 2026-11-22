@@ -61,8 +61,15 @@ for now: right-click, Open) or build it: `scripts/mac-dmg.sh` (Xcode 26+).
 
 ## CLI
 
-Every command has `--json` (one object per line, a stable contract) and clear exit codes. Build
-with `./gradlew :hopi-cli:installDist` (`hopi-cli/build/install/hopi-cli/bin/hopi`).
+Every command has `--json` (one object per line, a stable contract) and clear exit codes. Needs
+JDK 17 or newer, plus adb (Android) or Xcode (iOS):
+
+```bash
+mkdir -p ~/.hopi && curl -fsSL https://github.com/FelipeKoga/hopi/releases/latest/download/hopi-cli.tar.gz | tar -xz -C ~/.hopi
+export PATH="$HOME/.hopi/hopi-cli/bin:$PATH"   # add to your shell profile
+```
+
+Or build it: `./gradlew :hopi-cli:installDist` (`hopi-cli/build/install/hopi-cli/bin/hopi`).
 
 ```bash
 hopi apps                                         # apps with Hopi; with one, --app is optional
@@ -76,6 +83,17 @@ hopi perf start --frames --hangs && hopi hangs    # monitors
 ```
 
 All commands: [Log stream and CLI](docs/GUIDE.md#log-stream-and-cli-for-ai-agents).
+
+## Agent skill
+
+A skill teaches your coding agent (Claude Code, Cursor, Codex and others) to add Hopi to an app and
+to drive the CLI: prove what a tap sent, mock or fail a request, measure hangs.
+
+```bash
+npx skills add FelipeKoga/hopi
+```
+
+Source: [`skills/hopi/SKILL.md`](skills/hopi/SKILL.md).
 
 ## Docs
 

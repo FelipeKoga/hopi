@@ -90,7 +90,8 @@ kotlin {
         }
         tasks.named(fixturesInterop.interopProcessingTaskName) { dependsOn(fixtures) }
     }
-    jvm()
+    // JDK 17 bytecode whatever JDK builds it (the floor, README "Requirements").
+    jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     // androidAndJvmMain: the Ktor plugin's recorder, compiled for both JVM platforms. AGP's KMP
     // library target is no KotlinAndroidTarget, so withAndroidTarget() would not select it.
     @OptIn(ExperimentalKotlinGradlePluginApi::class)

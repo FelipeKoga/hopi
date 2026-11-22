@@ -33,7 +33,8 @@ kotlin {
         }
     }
     // Host target so pure-logic tests run in seconds.
-    jvm()
+    // JDK 17 bytecode whatever JDK builds it (the floor, README "Requirements").
+    jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         val main = target.compilations.getByName("main")
         main.cinterops.create("oslog") {

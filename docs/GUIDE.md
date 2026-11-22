@@ -210,7 +210,8 @@ metadata (`hopi-start` has the JVM and the two iOS ones), so `io.github.felipeko
 `commonMain` resolves the right one per target.
 
 The `hopi` CLI, which reads a running app's records (headers, bodies) and drives its rules, is
-built from this repository, not published: `./gradlew :hopi-cli:installDist` (see
+not a Maven artifact: download `hopi-cli.tar.gz` from the GitHub releases, or build it with
+`./gradlew :hopi-cli:installDist` (see
 [Log stream and CLI](#log-stream-and-cli-for-ai-agents)).
 
 ## Android: every OkHttp and HttpURLConnection request, automatically
@@ -601,7 +602,14 @@ xcrun simctl spawn booted log stream --style ndjson --predicate 'subsystem == "d
 
 The CLI reads the full detail (headers, bodies) from the app's device-local bridge
 (`agentBridge`, on by default in debug builds; Android devices and emulators over adb, iOS
-simulators, iPhones over USB). Build it with `./gradlew :hopi-cli:installDist`; the binary is
+simulators, iPhones over USB). It needs JDK 17 or newer. Download it from the releases:
+
+```bash
+mkdir -p ~/.hopi && curl -fsSL https://github.com/FelipeKoga/hopi/releases/latest/download/hopi-cli.tar.gz | tar -xz -C ~/.hopi
+export PATH="$HOME/.hopi/hopi-cli/bin:$PATH"
+```
+
+or build it with `./gradlew :hopi-cli:installDist`; the binary is then
 `hopi-cli/build/install/hopi-cli/bin/hopi`.
 
 ```bash

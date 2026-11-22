@@ -41,7 +41,8 @@ kotlin {
         // the AAR's minCompileSdk, and an older AGP refuses an AAR that asks for more than it supports.
         aarMetadata { minCompileSdk = libs.versions.android.minCompileSdk.get().toInt() }
     }
-    jvm()
+    // JDK 17 bytecode whatever JDK builds it (the floor, README "Requirements").
+    jvm { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
     iosArm64()
     iosSimulatorArm64()
 
