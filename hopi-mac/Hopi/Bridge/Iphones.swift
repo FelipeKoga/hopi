@@ -69,8 +69,17 @@ nonisolated enum Iphones {
             FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDirectory)
             // A destination taken as a directory holds the file under its own name.
             let file = isDirectory.boolValue ? destination.appendingPathComponent("bridge.json") : destination
-            return try? Data(contentsOf: file)
+            return readSmall(file)
         }
+    }
+
+    /// A regular file's bytes, up to 4 MB, never through a link (as the CLI's Devicectl.readSmall):
+    /// what devicectl copied off the phone is the phone's to decide.
+    private static func readSmall(_ file: URL) -> Data? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber, size.int64Value <= 4 * 1024 * 1024 else { return nil }
+        return try? Data(contentsOf: file)
     }
 
     /// devicectl's JSON output for [arguments].
@@ -78,7 +87,7 @@ nonisolated enum Iphones {
         withTemporaryDirectory { directory in
             let output = directory.appendingPathComponent("out.json")
             _ = Shell.data("/usr/bin/xcrun", ["devicectl"] + arguments + ["--json-output", output.path, "--quiet"])
-            guard let data = try? Data(contentsOf: output) else { return nil }
+            guard let data = readSmall(output) else { return nil }
             return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         }
     }

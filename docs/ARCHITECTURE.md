@@ -2163,6 +2163,9 @@ leaves the machine with its context, which is why redaction is on by default; an
 URLs, headers and bodies come from servers, so they are data an agent never takes as
 instructions. `edit add --host/--port` refuses to run without `--allow-other-origin`: an agent
 moved by text in a captured body cannot redirect the app's requests without a person agreeing.
+The app enforces it too: a rule that changes host or port without `"allowOtherOrigin":true` is
+refused, and a redirected request leaves its credential headers and redacted query parameters
+behind.
 
 - `list`, `tail`, `get`: the bridge's own lines, verbatim (wire protocol above): `list` prints one
   `{"type":"transaction",…summary…}` per transaction and no `end` line, preceded by

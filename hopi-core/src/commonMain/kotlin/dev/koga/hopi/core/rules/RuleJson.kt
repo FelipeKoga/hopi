@@ -152,6 +152,12 @@ public object RuleJson {
 
     private fun Parsing.requestEdit(edit: Map<String, Any?>, field: String, context: RuleJsonContext): RequestEdit {
         if (edit.containsKey("scheme")) fail("$field.scheme: the scheme cannot change")
+        // Another origin receives the request's path, query and body: the client must say a person
+        // agreed (the CLI's --allow-other-origin, the viewer's toggle). Checked here, in the app, so
+        // a client that skips its own gate (a raw bridge client, an agent) is refused all the same.
+        if ((edit["host"] != null || edit["port"] != null) && bool(edit, "allowOtherOrigin", "$field.allowOtherOrigin") != true) {
+            fail("$field.allowOtherOrigin: host and port send the matched requests to another origin; set allowOtherOrigin to true once a person agreed (update the CLI or viewer if it predates this)")
+        }
         return RequestEdit(
             method = str(edit, "method", "$field.method"),
             host = str(edit, "host", "$field.host"),

@@ -279,4 +279,29 @@ class RuleSpecTest {
         assertEquals(listOf(""), request.queryValues("y"))
         assertEquals(listOf("1", "2"), request.headerValues("A"))
     }
+
+    @Test
+    fun anotherOriginNeedsTheClientsOptInInTheApp() {
+        val refused = assertIs<RuleParse.Failed>(parse("""{"match":{"path":"/*"},"edit":{"request":{"host":"evil.example"}}}"""))
+        assertTrue(refused.error.message.contains("allowOtherOrigin"), refused.error.message)
+        assertIs<RuleParse.Failed>(parse("""{"match":{"path":"/*"},"edit":{"request":{"port":8443,"allowOtherOrigin":false}}}"""))
+        assertIs<RuleParse.Ok<RuleSpec>>(parse("""{"match":{"path":"/*"},"edit":{"request":{"host":"staging.example.com","allowOtherOrigin":true}}}"""))
+        assertIs<RuleParse.Ok<RuleSpec>>(parse("""{"match":{"path":"/*"},"edit":{"request":{"path":"/v2"}}}"""))
+    }
+
+    @Test
+    fun redactedQueryParametersStayBehindAcrossOrigins() {
+        val url = "https://api.example.com/v1?access_token=t1&page=2&X-Amz-Signature=s&access_token=t2"
+        val redactor = Redactor.Default
+        val moved = assertNotNull(RequestEdits.apply("GET", url, emptyList(), RequestEdit(host = "other.example"), redactor))
+        assertEquals("https://other.example/v1?page=2", moved.url.replace("&X-Amz-Signature=s", ""))
+        assertFalse(moved.url.contains("access_token"), moved.url)
+        val mine = assertNotNull(RequestEdits.apply("GET", url, emptyList(), RequestEdit(host = "other.example", setQuery = listOf("access_token" to "mine")), redactor))
+        assertTrue(mine.url.endsWith("access_token=mine"), mine.url)
+        assertEquals(1, Regex("access_token").findAll(mine.url).count(), mine.url)
+        val same = assertNotNull(RequestEdits.apply("GET", url, emptyList(), RequestEdit(path = "/v2"), redactor))
+        assertEquals("https://api.example.com/v2?access_token=t1&page=2&X-Amz-Signature=s&access_token=t2", same.url)
+        val disabled = assertNotNull(RequestEdits.apply("GET", url, emptyList(), RequestEdit(host = "other.example"), Redactor.Disabled))
+        assertTrue(disabled.url.contains("access_token=t1"), disabled.url)
+    }
 }

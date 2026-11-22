@@ -793,13 +793,18 @@ A rule object on the wire:
          "body":{"text":"{\"error\":\"x\"}"} | {"base64":"…"} | {"blob":1,"size":N},
          "fromTransaction":42},
  "fail":"timeout|reset|unknown-host|cancel",
- "edit":{"request":{"method":"POST","host":"staging.example.com","port":8443,"path":"/v2/users",
+ "edit":{"request":{"method":"POST","host":"staging.example.com","port":8443,"allowOtherOrigin":true,"path":"/v2/users",
                     "setQuery":[["k","v"]],"removeQuery":["k"],"setHeaders":[["K","V"]],
                     "addHeaders":[],"removeHeaders":["K"],"body":{...}},
          "response":{"status":503,"setHeaders":[],"addHeaders":[],"removeHeaders":[],"body":{...}}}}
 ```
 
-At most one of `mock`, `fail`, `edit`; a rule with none needs a non-zero delay. A reply's rule
+At most one of `mock`, `fail`, `edit`; a rule with none needs a non-zero delay. A request edit
+with `host` or `port` needs `"allowOtherOrigin":true`, checked by the app (2026-11-21): the CLI
+sends it only with `--allow-other-origin` and the macOS viewer only with its "Send to another
+origin" switch, so a client that skips its own gate (a raw bridge client, an agent) is refused. On
+the way to another origin, the credential headers and every query parameter the redactor hides
+are left behind. A reply's rule
 object adds `id`, `hits`, `exhausted`, and `unsupported` (a list of `{"source","reason","applies"}`
 for every source in the rule's `sources` that cannot apply all or part of its action, from the
 capability table, so the CLI warns at once instead of the rule silently never matching there).

@@ -336,7 +336,10 @@ public class Targets(private val environment: HostEnvironment) {
             }
         }
         if ((platform == null || platform == Platform.Jvm) && device == null) {
-            childDirectories(environment.jvmBridgeRoot).forEach { dir ->
+            // Under a shared /tmp (Linux), only the current user's own directories (OwnFiles).
+            val root = environment.jvmBridgeRoot
+            val roots = if (Files.isDirectory(root) && OwnFiles.problem(root) == null) childDirectories(root) else emptyList()
+            roots.filter { OwnFiles.problem(it) == null }.forEach { dir ->
                 val file = dir.resolve("bridge.json")
                 probe(file, Platform.Jvm)?.let { app -> found += FoundApp(Platform.Jvm, null, "JVM ${dir.fileName}", app, file) }
             }
@@ -446,11 +449,14 @@ public object TargetIds {
 
 private val TOKEN = Regex("[0-9a-f]{64}")
 
+/** A `bridge.json` is about 100 bytes: anything much larger is not one. */
+private const val MAX_BRIDGE_FILE_BYTES = 64L * 1024
+
 /** `{"port":N,"token":"…"}` as the iOS and JVM bridges write it. Errors name the file, never its content. */
 @HopiInternalApi
 public fun readBridgeFile(file: Path, missing: String): Pair<Int, String> {
     val text = try {
-        Files.readString(file)
+        OwnFiles.readSmall(file, MAX_BRIDGE_FILE_BYTES)
     } catch (_: NoSuchFileException) {
         throw notReachable(missing)
     } catch (e: IOException) {

@@ -8,11 +8,15 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.FileSystems
+import java.nio.file.LinkOption
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFileAttributes
+import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.SecureRandom
 import kotlin.concurrent.thread
@@ -54,6 +58,12 @@ public class JvmAgentBridge internal constructor(
         ): JvmAgentBridge {
             val socket = ServerSocket(0, BACKLOG, LOOPBACK)
             try {
+                // The default root is shared on Linux (/tmp/hopi): if another user made it, they could
+                // move this process's directory aside and plant a bridge.json of their own.
+                // A directory the caller or hopi.bridgeDir names is theirs to choose.
+                if (System.getProperty(BRIDGE_DIR_PROPERTY).isNullOrEmpty() && directory == defaultDirectory()) {
+                    directory.parent?.let { requireOwnRoot(it) }
+                }
                 val token = BridgeToken.generate()
                 val file = writeBridgeFile(directory, bridgeFileJson(socket.localPort, token))
                 val server = AgentBridgeServer(JvmListener(socket), store, BridgeInfo(app, "jvm"), token, onStop = { deleteBridgeFile(file) })
@@ -68,6 +78,24 @@ public class JvmAgentBridge internal constructor(
         /** Never `0.0.0.0`, and not `getLoopbackAddress()`, which is `::1` under `preferIPv6Addresses`. */
         internal val LOOPBACK: InetAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
         private const val BACKLOG = 8
+
+        /** Creates [root] owner-only when missing; refuses one that is a link, another user's, or writable by others. */
+        private fun requireOwnRoot(root: Path) {
+            if ("posix" !in FileSystems.getDefault().supportedFileAttributeViews()) return
+            if (Files.notExists(root, LinkOption.NOFOLLOW_LINKS)) {
+                try {
+                    Files.createDirectory(root, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")))
+                } catch (_: FileAlreadyExistsException) {
+                    // Made meanwhile: checked below like any other.
+                }
+            }
+            val attributes = Files.readAttributes(root, PosixFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+            val user = System.getProperty("user.name")
+            val writableByOthers = attributes.permissions().any { it == PosixFilePermission.GROUP_WRITE || it == PosixFilePermission.OTHERS_WRITE }
+            if (attributes.isSymbolicLink || (user != null && attributes.owner().name != user) || writableByOthers) {
+                throw IOException("$root is a link, another user's or writable by others; set -D$BRIDGE_DIR_PROPERTY to a directory of yours")
+            }
+        }
 
         private fun writeBridgeFile(directory: Path, json: String): Path {
             val posix = "posix" in FileSystems.getDefault().supportedFileAttributeViews()

@@ -19,8 +19,9 @@ public class EditedRequest(
  * Applies a [RequestEdit] the same way on every source (docs/design/rules.md, "Edit"): the scheme
  * never changes; an edit that changes the origin removes every original value of `Authorization`,
  * `Proxy-Authorization`, `Cookie` and every header [redactor] redacts, as OkHttp and browsers do on
- * a cross-host redirect, so only the values the edit supplies itself (set or added) reach the other
- * host; header edits run remove, then set (replacing every value of the name), then add.
+ * a cross-host redirect, and every query parameter [redactor] redacts, so only the values the edit
+ * supplies itself (set or added) reach the other host; header edits run remove, then set (replacing
+ * every value of the name), then add.
  */
 @HopiInternalApi
 public object RequestEdits {
@@ -35,14 +36,15 @@ public object RequestEdits {
         redactor: Redactor,
     ): EditedRequest? {
         val parts = UrlParts.parse(url) ?: return null
+        val originChanged = changesOrigin(parts, edit)
         val editedUrl = if (edit.host == null && edit.port == null && edit.path == null && edit.setQuery.isEmpty() && edit.removeQuery.isEmpty()) {
             url
         } else {
             val host = edit.host?.removePrefix("[")?.removeSuffix("]") ?: parts.host
             val port = edit.port?.let { if (it == parts.defaultPort && parts.port == null) null else it } ?: parts.port
-            parts.copy(host = host, port = port, path = edit.path ?: parts.path, query = editQuery(parts.query, edit)).toString()
+            val query = editQuery(parts.query, edit, if (originChanged) redactor else null)
+            parts.copy(host = host, port = port, path = edit.path ?: parts.path, query = query).toString()
         }
-        val originChanged = changesOrigin(parts, edit)
         return EditedRequest(
             method = edit.method ?: method,
             url = editedUrl,
@@ -97,12 +99,19 @@ public object RequestEdits {
         return result
     }
 
-    /** The raw query after `removeQuery` and `setQuery` (each set name replaces every value of it). */
-    private fun editQuery(query: String?, edit: RequestEdit): String? {
-        if (edit.setQuery.isEmpty() && edit.removeQuery.isEmpty()) return query
+    /**
+     * The raw query after `removeQuery` and `setQuery` (each set name replaces every value of it).
+     * With [crossOrigin] (the request leaves for another host or port), every original parameter
+     * [crossOrigin] redacts is dropped too, as the credential headers are: a token Hopi never shows
+     * (`access_token`, a presigned signature) never reaches the other origin. A value the edit sets
+     * itself is kept.
+     */
+    private fun editQuery(query: String?, edit: RequestEdit, crossOrigin: Redactor?): String? {
+        if (edit.setQuery.isEmpty() && edit.removeQuery.isEmpty() && crossOrigin == null) return query
         val drop = (edit.removeQuery + edit.setQuery.map { it.first }).toSet()
         val kept = query?.split('&')?.filter { part ->
-            part.isNotEmpty() && UrlParts.percentDecode(part.substringBefore('=')) !in drop
+            val name = UrlParts.percentDecode(part.substringBefore('='))
+            part.isNotEmpty() && name !in drop && crossOrigin?.isRedactedQueryParameter(name) != true
         }.orEmpty()
         val added = edit.setQuery.map { (name, value) -> UrlParts.percentEncode(name) + "=" + UrlParts.percentEncode(value) }
         val all = kept + added

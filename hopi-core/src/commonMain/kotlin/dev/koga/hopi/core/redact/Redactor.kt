@@ -30,6 +30,10 @@ public class Redactor private constructor(
         else -> value
     }
 
+    /** True when the (decoded) query parameter [name] is redacted (`ids[]` counts as `ids`). */
+    public fun isRedactedQueryParameter(name: String): Boolean =
+        enabled && name.lowercase().removeSuffix("[]") in queryParameterNames
+
     /** The value of the (decoded) query parameter [name], or [REDACTED] when the parameter is redacted. */
     public fun queryValue(name: String, value: String): String =
         if (enabled && name.lowercase() in queryParameterNames) REDACTED else value

@@ -62,7 +62,7 @@ public fun toCurl(transaction: HttpTransaction, redaction: Redactor = Redactor.D
                 multipartWarning(comments)
             } else {
                 comments.append("# warning: request body was not captured (")
-                    .append(body.skippedReason)
+                    .append(commentSafe(body.skippedReason))
                     .append("); this command sends no body\n")
             }
         }
@@ -120,7 +120,7 @@ public fun toCurl(transaction: HttpTransaction, redaction: Redactor = Redactor.D
         }
     }
     if (declaredLength != null && declaredLength != sentBytes.toString()) {
-        comments.append("# note: Content-Length header (").append(declaredLength)
+        comments.append("# note: Content-Length header (").append(commentSafe(declaredLength))
             .append(") omitted; curl sends the length of the body in this command (").append(sentBytes).append(")\n")
     }
     if (transferEncoding) {
@@ -142,6 +142,26 @@ public fun toCurl(transaction: HttpTransaction, redaction: Redactor = Redactor.D
     command.append(headers).append(data)
     return command.toString()
 }
+
+/**
+ * A value from the record, made safe inside a `# …` comment line: the command is meant to be pasted
+ * whole, so a line break (or any control character) in a device-supplied value would end the
+ * comment and start a command of the app's choosing. Each one becomes `?`; at most 200 chars.
+ */
+internal fun commentSafe(value: String?): String {
+    val text = value.orEmpty()
+    val out = StringBuilder(minOf(text.length, COMMENT_VALUE_MAX + 1))
+    for (c in text) {
+        if (out.length == COMMENT_VALUE_MAX) {
+            out.append('…')
+            break
+        }
+        out.append(if (c < ' ' || c in '\u007f'..'\u009f' || c == '\u2028' || c == '\u2029') '?' else c)
+    }
+    return out.toString()
+}
+
+private const val COMMENT_VALUE_MAX = 200
 
 private fun multipartWarning(comments: StringBuilder) {
     comments.append("# warning: multipart request body is not reproduced; this command sends no body\n")

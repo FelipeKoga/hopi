@@ -185,6 +185,8 @@ internal class RuleDraft private constructor(
                 method?.let { w.field("method", it) }
                 host?.let { w.field("host", it) }
                 port?.let { w.field("port", it) }
+                // Checked above: --allow-other-origin was given. The app refuses the edit without it.
+                if (host != null || port != null) w.field("allowOtherOrigin", true)
                 path?.let { w.field("path", it) }
                 setQuery?.let { writePairs(w, "setQuery", it) }
                 removeQuery?.let { writeStrings(w, "removeQuery", it) }

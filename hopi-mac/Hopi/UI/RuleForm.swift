@@ -36,6 +36,8 @@ struct RuleDraft: Identifiable {
     var requestMethod = ""
     var requestHost = ""
     var requestPort = ""
+    /// The person's confirmation that matched requests may go to another origin (host or port).
+    var allowOtherOrigin = false
     var requestPath = ""
     var requestHeaders = ""
     var requestBody = ""
@@ -81,6 +83,13 @@ struct RuleDraft: Identifiable {
             if let method = trimmed(requestMethod) { request["method"] = method }
             if let host = trimmed(requestHost) { request["host"] = host }
             if let port = trimmed(requestPort) { request["port"] = try int(port, "Port", 1...65535) }
+            if request["host"] != nil || request["port"] != nil {
+                // The app refuses a host or port change without it (RuleJson, allowOtherOrigin).
+                guard allowOtherOrigin else {
+                    throw Problem("A host or port sends the matched requests, with their path, query and body, to another origin. Turn on \"Send to another origin\" to confirm.")
+                }
+                request["allowOtherOrigin"] = true
+            }
             if let path = trimmed(requestPath) { request["path"] = path }
             let setRequest = try headerPairs(requestHeaders)
             if !setRequest.isEmpty { request["setHeaders"] = setRequest }
@@ -219,6 +228,8 @@ struct RuleFormView: View {
                 TextField("Method", text: $draft.requestMethod, prompt: Text("Unchanged"))
                 TextField("Host", text: $draft.requestHost, prompt: Text("Unchanged"))
                 TextField("Port", text: $draft.requestPort, prompt: Text("Unchanged"))
+                Toggle("Send to another origin", isOn: $draft.allowOtherOrigin)
+                    .help("Needed for a host or port change: the request's path, query and body go to that origin; credentials and redacted query parameters stay behind.")
                 TextField("Path", text: $draft.requestPath, prompt: Text("Unchanged"))
                 editor("Set headers", $draft.requestHeaders, prompt: "Authorization: Bearer test")
                 TextField("Remove headers", text: $draft.removeRequestHeaders, prompt: Text("Cookie, X-Trace"))

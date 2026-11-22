@@ -315,7 +315,9 @@ private struct BodyTextView: NSViewRepresentable {
 nonisolated enum Curl {
     static func command(_ detail: Detail) -> String {
         func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-        var parts = ["curl", "-X", detail.method, quote(detail.url)]
+        // The method comes from the app: a token as is, anything else quoted (as core's toCurl).
+        let isToken = !detail.method.isEmpty && detail.method.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+        var parts = ["curl", "-X", isToken ? detail.method : quote(detail.method), quote(detail.url)]
         for header in detail.request.headers where header.count == 2 {
             parts += ["-H", quote("\(header[0]): \(header[1])")]
         }
